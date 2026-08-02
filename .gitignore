@@ -1,0 +1,87 @@
+# Maven
+target/
+pom.xml.tag
+pom.xml.releaseBackup
+pom.xml.versionsBackup
+pom.xml.next
+release.properties
+dependency-reduced-pom.xml
+.flattened-pom.xml
+.flattened-pom.xml.releaseBackup
+buildNumber.properties
+.mvn/timing.properties
+.mvn/wrapper/maven-wrapper.jar
+
+# Gradle
+build/
+.gradle/
+gradle/wrapper/gradle-wrapper.jar
+
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+vendor/
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.project
+.classpath
+.settings/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+*.tmp
+*.bak
+*.cache
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Container
+.dockerignore
+
+# Test output
+test-output/
+surefire-reports/
+failsafe-reports/
+jacoco/
+
+# Coverage
+coverage/
+*.cobertura.xml
+
+# Checkstyle
+target/checkstyle-result.xml
+checkstyle-result.xml
+
+# Spotless
+.diff/
+.cache/
+
+# Staging
+staging/
+
+# MinIO data
+minio-data/
+
+# Kubernetes
+kubeconfig
+*.kubeconfig

@@ -1,0 +1,19 @@
+{
+  "headerPattern": "^(revert: )?(build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test)(\\([a-z0-9._/-]+\\))?!?: .+$",
+  "headerPatternCorrespondence": ["revert", "type", "scope", "breaking", "subject"],
+  "headerMaxLength": 100,
+  "subjectPattern": "^(?![A-Z]).+$",
+  "types": [
+    "build",
+    "chore",
+    "ci",
+    "docs",
+    "feat",
+    "fix",
+    "perf",
+    "refactor",
+    "revert",
+    "style",
+    "test"
+  ]
+}

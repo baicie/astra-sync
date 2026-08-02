@@ -1,0 +1,23 @@
+# API Server Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "astrasync.fullname" . }}-api-server
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "astrasync.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api-server
+spec:
+  type: {{ .Values.apiServer.service.type }}
+  ports:
+    - port: {{ .Values.apiServer.service.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+    - port: {{ .Values.apiServer.service.grpcPort }}
+      targetPort: grpc
+      protocol: TCP
+      name: grpc
+  selector:
+    {{- include "astrasync.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: api-server

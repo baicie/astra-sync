@@ -1,0 +1,19 @@
+apiVersion: v2
+name: astrasync
+description: A Helm chart for AstraSync - Distributed Big Data Synchronization Engine
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - data-sync
+  - cdc
+  - etl
+  - flink
+  - seatunnel
+home: https://github.com/astrasync/astra-sync
+sources:
+  - https://github.com/astrasync/astra-sync
+
+maintainers:
+  - name: AstraSync Team
+    url: https://github.com/astrasync

@@ -1,0 +1,57 @@
+# AstraSync Worker
+FROM eclipse-temurin:21-jdk-alpine AS builder
+
+WORKDIR /app
+
+# Copy Maven wrapper and pom.xml
+COPY mvnw .
+COPY .mvn .mvn
+COPY pom.xml .
+
+# Copy source code
+COPY connector-api ./connector-api
+COPY engine ./engine
+COPY formats ./formats
+COPY protocol ./protocol
+
+# Build the application
+RUN ./mvnw -DskipTests package -pl engine -am
+
+# Runtime image
+FROM eclipse-temurin:21-jre-alpine
+
+WORKDIR /app
+
+# Install required packages
+RUN apk add --no-cache \
+    bash \
+    curl \
+    ca-certificates \
+    tzdata
+
+# Create non-root user
+RUN addgroup -g 1000 astra && \
+    adduser -u 1000 -G astra -D astra
+
+# Copy the jar
+COPY --from=builder /app/engine/target/*.jar app.jar
+
+# Copy configuration
+COPY config ./config
+
+# Set ownership
+RUN chown -R astra:astra /app
+
+USER astra
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:8080/health || exit 1
+
+# Expose ports
+EXPOSE 8080 50051
+
+# JVM options
+ENV JAVA_OPTS="-Xmx4g -Xms2g -XX:+UseG1GC -XX:MaxGCPauseMillis=200"
+
+ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -jar app.jar"]

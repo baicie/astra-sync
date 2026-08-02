@@ -1,0 +1,8 @@
+# <type>(<scope>): <subject>
+#
+# Explain why this change is needed. Wrap body lines at 100 characters.
+#
+# Types: build, chore, ci, docs, feat, fix, perf, refactor, revert, style, test
+# Use an imperative, lowercase subject without a trailing period.
+#
+# Breaking changes must use ! after the type/scope or a BREAKING CHANGE footer.

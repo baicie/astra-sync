@@ -1,0 +1,67 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: connections.sync.astrasync.io
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.14.0
+spec:
+  group: sync.astrasync.io
+  names:
+    kind: Connection
+    listKind: ConnectionList
+    plural: connections
+    singular: connection
+    shortNames:
+      - conn
+  scope: Namespaced
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                type:
+                  type: string
+                  enum:
+                    - mysql
+                    - postgresql
+                    - oracle
+                    - sqlserver
+                    - mongodb
+                    - kafka
+                    - pulsar
+                    - s3
+                    - gcs
+                    - hdfs
+                    - jdbc
+                    - iceberg
+                    - clickhouse
+                host:
+                  type: string
+                port:
+                  type: integer
+                database:
+                  type: string
+                username:
+                  type: string
+                secretRef:
+                  type: string
+                properties:
+                  type: object
+                  additionalProperties:
+                    type: string
+            status:
+              type: object
+              properties:
+                available:
+                  type: boolean
+                lastTested:
+                  type: string
+                  format: date-time
+                lastError:
+                  type: string

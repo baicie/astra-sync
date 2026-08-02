@@ -1,0 +1,16 @@
+#!/bin/sh
+set -eu
+
+commit_message_file="$1"
+commit_subject=$(sed -n '1p' "$commit_message_file" | tr -d '\r')
+
+case "$commit_subject" in
+  Merge\ *|Revert\ *|revert:\ *) exit 0 ;;
+esac
+
+if ! printf '%s\n' "$commit_subject" | grep -Eq '^(build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test)(\([a-z0-9._/-]+\))?!?: [^A-Z].{0,98}$'; then
+  printf '%s\n' 'Invalid commit message.' >&2
+  printf '%s\n' 'Expected: <type>(<scope>): <lowercase subject>' >&2
+  printf '%s\n' 'Allowed types: build, chore, ci, docs, feat, fix, perf, refactor, revert, style, test' >&2
+  exit 1
+fi

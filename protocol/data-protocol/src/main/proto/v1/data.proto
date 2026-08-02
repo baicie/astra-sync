@@ -1,0 +1,222 @@
+syntax = "proto3";
+
+package astra.protocol.data;
+
+import "google/protobuf/any.proto";
+
+option java_multiple_files = true;
+option java_package = "io.astrasync.protocol.data";
+option java_outer_classname = "DataProto";
+
+// Data Event Frame
+message DataFrame {
+  FrameHeader header = 1;
+  bytes payload = 2;
+  optional FrameChecksum checksum = 3;
+}
+
+message FrameHeader {
+  string stream_id = 1;
+  int64 sequence = 2;
+  string schema_id = 3;
+  CompressionCodec codec = 4;
+  ContentType content_type = 5;
+  int32 record_count = 6;
+  int64 byte_count = 7;
+  int64 timestamp = 8;
+}
+
+enum CompressionCodec {
+  CODEC_NONE = 0;
+  CODEC_LZ4 = 1;
+  CODEC_ZSTD = 2;
+  CODEC_SNAPPY = 3;
+}
+
+enum ContentType {
+  CONTENT_UNSPECIFIED = 0;
+  ARROW = 1;
+  ROW_BINARY = 2;
+  JSON = 3;
+}
+
+// Control Event Frame
+message ControlFrame {
+  FrameHeader header = 1;
+  ControlPayload payload = 2;
+}
+
+message ControlPayload {
+  oneof event {
+    CheckpointBarrier checkpoint_barrier = 1;
+    EndOfSplit end_of_split = 2;
+    EndOfSnapshot end_of_snapshot = 3;
+    WatermarkEvent watermark = 4;
+    SchemaChangeEvent schema_change = 5;
+    ThrottleSignal throttle_signal = 6;
+    HeartbeatEvent heartbeat = 7;
+  }
+}
+
+message CheckpointBarrier {
+  int64 checkpoint_id = 1;
+  int64 timestamp = 2;
+  bool is_aligned = 3;
+}
+
+message EndOfSplit {
+  string split_id = 1;
+  int64 last_position = 2;
+}
+
+message EndOfSnapshot {
+  string split_id = 1;
+  int64 low_watermark = 2;
+  int64 high_watermark = 3;
+}
+
+message WatermarkEvent {
+  int64 timestamp = 1;
+  string strategy = 2;
+  string source_table = 3;
+}
+
+message SchemaChangeEvent {
+  string schema_id = 1;
+  int32 version = 2;
+  repeated SchemaChange changes = 3;
+}
+
+message SchemaChange {
+  ChangeType type = 1;
+  int32 field_id = 2;
+  string field_name = 3;
+  FieldType field_type = 4;
+  bool nullable = 5;
+}
+
+enum ChangeType {
+  CHANGE_UNSPECIFIED = 0;
+  ADD = 1;
+  REMOVE = 2;
+  RENAME = 3;
+  MODIFY = 4;
+  REORDER = 5;
+}
+
+enum FieldType {
+  FIELD_UNSPECIFIED = 0;
+  BOOLEAN = 1;
+  TINYINT = 2;
+  SMALLINT = 3;
+  INTEGER = 4;
+  BIGINT = 5;
+  FLOAT = 6;
+  DOUBLE = 7;
+  DECIMAL = 8;
+  STRING = 9;
+  BINARY = 10;
+  DATE = 11;
+  TIME = 12;
+  TIMESTAMP = 13;
+  ARRAY = 14;
+  MAP = 15;
+  ROW = 16;
+}
+
+message ThrottleSignal {
+  ThrottleType type = 1;
+  int32 credit = 2;
+  int64 available_memory = 3;
+}
+
+enum ThrottleType {
+  THROTTLE_UNSPECIFIED = 0;
+  FULL_CREDIT = 1;
+  REDUCED_CREDIT = 2;
+  NO_CREDIT = 3;
+}
+
+message HeartbeatEvent {
+  string source_id = 1;
+  int64 timestamp = 2;
+  HealthStatus status = 3;
+}
+
+enum HealthStatus {
+  HEALTH_UNSPECIFIED = 0;
+  HEALTHY = 1;
+  DEGRADED = 2;
+  UNHEALTHY = 3;
+}
+
+message FrameChecksum {
+  string algorithm = 1;
+  bytes crc32c = 2;
+  bytes xxhash64 = 3;
+}
+
+// Data Event (single record)
+message DataEvent {
+  string event_id = 1;
+  SourcePosition source_position = 2;
+  OperationType operation = 3;
+  int64 event_time = 4;
+  int64 ingest_time = 5;
+  string schema_id = 6;
+  string table_id = 7;
+  optional RecordKey key = 8;
+  optional RecordData before = 9;
+  optional RecordData after = 10;
+  map<string, string> headers = 11;
+  optional TraceContext trace = 12;
+}
+
+enum OperationType {
+  OP_UNSPECIFIED = 0;
+  INSERT = 1;
+  UPDATE = 2;
+  DELETE = 3;
+  SNAPSHOT = 4;
+  TRUNCATE = 5;
+  SCHEMA_CHANGE = 6;
+}
+
+message SourcePosition {
+  string position_id = 1;
+  string source_instance = 2;
+  string database = 3;
+  string table = 4;
+  map<string, string> offset = 5;
+  int64 timestamp = 6;
+  optional string transaction_id = 7;
+  int64 event_index = 8;
+}
+
+message RecordKey {
+  repeated KeyColumn columns = 1;
+}
+
+message KeyColumn {
+  string name = 1;
+  FieldType type = 2;
+  bytes value = 3;
+}
+
+message RecordData {
+  repeated DataColumn columns = 1;
+}
+
+message DataColumn {
+  int32 field_id = 1;
+  string name = 2;
+  FieldType type = 3;
+  bytes value = 4;
+  bool is_null = 5;
+}
+
+message TraceContext {
+  string trace_id = 1;
+  string span_id = 2;
+  map<string, string> baggage = 3;
+}

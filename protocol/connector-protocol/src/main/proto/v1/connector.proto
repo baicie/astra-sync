@@ -1,0 +1,237 @@
+syntax = "proto3";
+
+package astra.protocol.connector;
+
+import "google/protobuf/any.proto";
+
+option java_multiple_files = true;
+option java_package = "io.astrasync.protocol.connector";
+option java_outer_classname = "ConnectorProto";
+
+// Connector Registration
+message ConnectorRegistration {
+  string name = 1;
+  string version = 2;
+  ConnectorType type = 3;
+  ConnectorCapabilities capabilities = 4;
+  ConnectorMetadata metadata = 5;
+}
+
+enum ConnectorType {
+  TYPE_UNSPECIFIED = 0;
+  SOURCE = 1;
+  SINK = 2;
+  DUAL = 3;
+}
+
+message ConnectorCapabilities {
+  // Source capabilities
+  bool batch_read = 1;
+  bool stream_read = 2;
+  bool parallel_snapshot = 3;
+  bool replayable_offset = 4;
+  bool schema_evolution = 5;
+  bool exactly_once_source = 6;
+  bool column_projection = 7;
+  bool predicate_pushdown = 8;
+  bool split_multiplexing = 9;
+  bool change_data_capture = 10;
+
+  // Sink capabilities
+  bool append = 11;
+  bool upsert = 12;
+  bool delete = 13;
+  bool transactional_commit = 14;
+  bool idempotent_write = 15;
+  bool bulk_write = 16;
+  bool partition_write = 17;
+  bool sorted_write = 18;
+
+  // General capabilities
+  bool schema_registration = 19;
+  bool transform_support = 20;
+  bool transaction_recovery = 21;
+  bool fault_tolerance = 22;
+}
+
+message ConnectorMetadata {
+  string description = 1;
+  string author = 2;
+  string license = 3;
+  repeated string tags = 4;
+  map<string, string> properties = 5;
+  repeated ConfigSpec config_specs = 6;
+}
+
+// Configuration Specification
+message ConfigSpec {
+  string name = 1;
+  ConfigType type = 2;
+  bool required = 3;
+  string default_value = 4;
+  string description = 5;
+  repeated string options = 6;
+  ValidationRule validation = 7;
+}
+
+enum ConfigType {
+  CONFIG_UNSPECIFIED = 0;
+  STRING = 1;
+  INT = 2;
+  LONG = 3;
+  DOUBLE = 4;
+  BOOLEAN = 5;
+  PASSWORD = 6;
+  LIST = 7;
+  MAP = 8;
+  SECRET = 9;
+}
+
+message ValidationRule {
+  string type = 1;
+  string value = 2;
+  string message = 3;
+}
+
+// Source Split
+message SourceSplit {
+  string split_id = 1;
+  string table_id = 2;
+  SourcePosition position = 3;
+  SourcePosition end_position = 4;
+  bool is_snapshot_split = 5;
+  int32 parallelism = 6;
+  map<string, string> properties = 7;
+}
+
+message SourcePosition {
+  string position_id = 1;
+  string source_instance = 2;
+  string database = 3;
+  string table = 4;
+  map<string, string> offset = 5;
+  int64 timestamp = 6;
+  optional string transaction_id = 7;
+  int64 event_index = 8;
+}
+
+// Split Assignment
+message SplitAssignment {
+  int32 reader_id = 1;
+  repeated SourceSplit splits = 2;
+}
+
+// Reader State
+message ReaderStateSnapshot {
+  int32 reader_id = 1;
+  SourcePosition position = 2;
+  repeated SourceSplit assigned_splits = 3;
+  int64 checkpoint_id = 4;
+}
+
+// Enumerator State
+message EnumeratorStateSnapshot {
+  int64 checkpoint_id = 1;
+  map<int32, SourcePosition> reader_positions = 2;
+  map<int32, SourceSplit> assigned_splits = 3;
+  repeated SourceSplit pending_splits = 4;
+}
+
+// Sink Commit
+message SinkCommitRequest {
+  string task_id = 1;
+  int64 checkpoint_id = 2;
+  int64 epoch = 3;
+  repeated CommitData commits = 4;
+}
+
+message CommitData {
+  string committer_id = 1;
+  bytes commit_data = 2;
+  string target_path = 3;
+}
+
+message SinkCommitResponse {
+  bool success = 1;
+  optional string error = 2;
+  repeated CommittedData committed = 3;
+}
+
+message CommittedData {
+  string committer_id = 1;
+  string commit_id = 2;
+  int64 committed_at = 3;
+}
+
+// Writer State
+message WriterStateSnapshot {
+  string task_id = 1;
+  int64 checkpoint_id = 2;
+  int64 epoch = 3;
+  string target_table = 4;
+  int32 written_records = 5;
+  int64 written_bytes = 6;
+}
+
+// Committer State
+message CommitterStateSnapshot {
+  int64 checkpoint_id = 2;
+  int64 epoch = 3;
+  repeated PendingCommit pending_commits = 4;
+}
+
+message PendingCommit {
+  string task_id = 1;
+  string commit_id = 2;
+  bytes commit_data = 3;
+  int64 created_at = 4;
+}
+
+// Table Schema
+message TableSchema {
+  string schema_id = 1;
+  int32 version = 2;
+  repeated SchemaField fields = 3;
+  PrimaryKey primary_key = 4;
+  repeated string partition_keys = 5;
+}
+
+message SchemaField {
+  int32 id = 1;
+  string name = 2;
+  FieldType type = 3;
+  bool nullable = 4;
+  optional string comment = 5;
+  optional string default_value = 6;
+}
+
+enum FieldType {
+  FT_UNSPECIFIED = 0;
+  BOOLEAN = 1;
+  TINYINT = 2;
+  SMALLINT = 3;
+  INTEGER = 4;
+  BIGINT = 5;
+  FLOAT = 6;
+  DOUBLE = 7;
+  DECIMAL = 8;
+  STRING = 9;
+  VARCHAR = 10;
+  CHAR = 11;
+  BINARY = 12;
+  VARBINARY = 13;
+  DATE = 14;
+  TIME = 15;
+  TIMESTAMP = 16;
+  ARRAY = 17;
+  MAP = 18;
+  ROW = 19;
+  JSON = 20;
+  XML = 21;
+  UUID = 22;
+}
+
+message PrimaryKey {
+  repeated string columns = 1;
+  optional string constraint_name = 2;
+}

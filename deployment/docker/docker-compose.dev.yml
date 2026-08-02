@@ -1,0 +1,156 @@
+version: "3.8"
+
+services:
+  # PostgreSQL for metadata
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: astrasync
+      POSTGRES_USER: astra
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-astra}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U astra"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # etcd for coordination
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.15
+    environment:
+      ETCD_NAME: etcd
+      ETCD_INITIAL_ADVERTISE_PEER_URLS: http://etcd:2380
+      ETCD_LISTEN_PEER_URLS: http://0.0.0.0:2380
+      ETCD_LISTEN_CLIENT_URLS: http://0.0.0.0:2379
+      ETCD_ADVERTISE_CLIENT_URLS: http://etcd:2379
+      ETCD_INITIAL_CLUSTER_STATE: new
+      ETCD_INITIAL_CLUSTER_TOKEN: astra-etcd
+    ports:
+      - "2379:2379"
+    volumes:
+      - etcd_data:/etcd
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # MinIO for object storage (dev mode)
+  minio:
+    image: minio/minio:latest
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  # API Server
+  api-server:
+    build:
+      context: ..
+      dockerfile: deployment/docker/Dockerfile.api
+    ports:
+      - "8080:8080"
+      - "50051:50051"
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: astrasync
+      POSTGRES_USER: astra
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-astra}
+      ETCD_ENDPOINTS: etcd:2379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      etcd:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Controller
+  controller:
+    build:
+      context: ..
+      dockerfile: deployment/docker/Dockerfile.controller
+    ports:
+      - "8081:8081"
+    environment:
+      ETCD_ENDPOINTS: etcd:2379
+      KUBERNETES_ENABLED: "false"
+    depends_on:
+      etcd:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8081/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Worker (multiple instances)
+  worker-1:
+    build:
+      context: ..
+      dockerfile: deployment/docker/Dockerfile.worker
+    ports:
+      - "8082:8080"
+    environment:
+      WORKER_ID: worker-1
+      COORDINATOR_ADDRESS: coordinator:50051
+      ETCD_ENDPOINTS: etcd:2379
+      OBJECT_STORAGE_ENDPOINT: minio:9000
+      OBJECT_STORAGE_ACCESS_KEY: minioadmin
+      OBJECT_STORAGE_SECRET_KEY: minioadmin
+      OBJECT_STORAGE_BUCKET: astra-checkpoints
+    depends_on:
+      - coordinator
+      - minio
+
+  worker-2:
+    build:
+      context: ..
+      dockerfile: deployment/docker/Dockerfile.worker
+    environment:
+      WORKER_ID: worker-2
+      COORDINATOR_ADDRESS: coordinator:50051
+      ETCD_ENDPOINTS: etcd:2379
+      OBJECT_STORAGE_ENDPOINT: minio:9000
+      OBJECT_STORAGE_ACCESS_KEY: minioadmin
+      OBJECT_STORAGE_SECRET_KEY: minioadmin
+      OBJECT_STORAGE_BUCKET: astra-checkpoints
+    depends_on:
+      - coordinator
+      - minio
+
+  # Coordinator (standalone for dev mode)
+  coordinator:
+    image: astrasync/worker:latest
+    command: ["java", "-jar", "app.jar", "--role=coordinator"]
+    ports:
+      - "8083:8080"
+    environment:
+      ROLE: coordinator
+      ETCD_ENDPOINTS: etcd:2379
+    depends_on:
+      etcd:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  etcd_data:
+  minio_data:

@@ -1,0 +1,280 @@
+# Default values for AstraSync.
+# This is a YAML-formatted file.
+
+replicaCount: 1
+
+image:
+  repository: astrasync/astrasync
+  pullPolicy: IfNotPresent
+  tag: "latest"
+
+  apiServer:
+    repository: astrasync/api-server
+    tag: "latest"
+
+  controller:
+    repository: astrasync/controller
+    tag: "latest"
+
+  worker:
+    repository: astrasync/worker
+    tag: "latest"
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+rbac:
+  create: true
+
+# PostgreSQL configuration
+postgresql:
+  enabled: true
+  auth:
+    database: astrasync
+    username: astra
+    password: ""
+  primary:
+    persistence:
+      enabled: true
+      size: 10Gi
+    resources:
+      limits:
+        cpu: 1000m
+        memory: 1Gi
+      requests:
+        cpu: 100m
+        memory: 256Mi
+
+# etcd configuration
+etcd:
+  enabled: true
+  replicaCount: 3
+  persistence:
+    enabled: true
+    size: 1Gi
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+
+# API Server configuration
+apiServer:
+  enabled: true
+  replicaCount: 3
+  service:
+    type: ClusterIP
+    port: 8080
+    grpcPort: 50051
+  ingress:
+    enabled: false
+    className: ""
+    annotations: {}
+    hosts:
+      - host: astrasync.local
+        paths:
+          - path: /
+            pathType: Prefix
+    tls: []
+  resources:
+    limits:
+      cpu: 2000m
+      memory: 2Gi
+    requests:
+      cpu: 500m
+      memory: 512Mi
+  autoscaling:
+    enabled: false
+    minReplicas: 3
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+  config:
+    databaseUrl: ""
+    etcdEndpoints: ""
+
+# Controller configuration
+controller:
+  enabled: true
+  replicaCount: 3
+  leaderElection:
+    enabled: true
+    leaseDuration: 15s
+    renewDeadline: 10s
+    retryPeriod: 5s
+  resources:
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+    requests:
+      cpu: 250m
+      memory: 256Mi
+  config:
+    etcdEndpoints: ""
+    workerNamespace: ""
+
+# Scheduler configuration
+scheduler:
+  enabled: true
+  replicaCount: 3
+  resources:
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+    requests:
+      cpu: 250m
+      memory: 256Mi
+
+# Worker configuration
+worker:
+  enabled: true
+  replicaCount: 5
+  slotsPerWorker: 4
+  resources:
+    limits:
+      cpu: 4000m
+      memory: 8Gi
+      ephemeral-storage: 50Gi
+    requests:
+      cpu: 1000m
+      memory: 4Gi
+      ephemeral-storage: 10Gi
+  jvm:
+    heapSize: 4g
+    directMemory: 2g
+    gc: "G1GC"
+  config:
+    coordinatorAddress: ""
+    etcdEndpoints: ""
+    objectStorage:
+      endpoint: ""
+      bucket: astrasync-checkpoints
+      accessKey: ""
+      secretKey: ""
+
+# Object Storage configuration
+objectStorage:
+  enabled: false
+  type: minio  # minio, s3, oss, hdfs
+  endpoint: ""
+  region: ""
+  bucket: astrasync-checkpoints
+  accessKey: ""
+  secretKey: ""
+  persistence:
+    enabled: true
+    size: 100Gi
+
+# Network policy
+networkPolicy:
+  enabled: false
+  apiServer:
+    enabled: true
+    allowedSources: []
+  controller:
+    enabled: true
+    allowedSources: []
+  worker:
+    enabled: true
+    allowedSources: []
+
+# Pod Disruption Budget
+podDisruptionBudget:
+  enabled: true
+  apiServer:
+    minAvailable: 2
+  controller:
+    minAvailable: 2
+  scheduler:
+    minAvailable: 2
+
+# Pod anti-affinity
+podAntiAffinity:
+  enabled: true
+  topologyKey: kubernetes.io/hostname
+
+# Node selector
+nodeSelector: {}
+
+# Tolerations
+tolerations: []
+
+# Affinity
+affinity: {}
+
+# Security context
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+
+# Container security context
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+# Persistence
+persistence:
+  enabled: true
+  storageClass: ""
+  accessMode: ReadWriteOnce
+  size: 10Gi
+
+# Monitoring
+monitoring:
+  enabled: false
+  prometheus:
+    enabled: true
+    port: 9090
+  grafana:
+    enabled: false
+    adminUser: admin
+    adminPassword: ""
+
+# Logging
+logging:
+  level: INFO
+  pattern: "%d{yyyy-MM-dd HH:mm:ss} %-5p [%c{1}] %m%n"
+  output: stdout
+
+# TLS configuration
+tls:
+  enabled: false
+  secretName: ""
+  certManager:
+    enabled: false
+    issuerRef:
+      name: ""
+      kind: ""
+
+# Secrets
+secrets:
+  enabled: true
+  vault:
+    enabled: false
+    address: ""
+    authMethod: kubernetes  # kubernetes, token, approle
+    role: ""
+    kubernetes:
+      serviceAccount: ""
+
+# Service monitor for Prometheus
+serviceMonitor:
+  enabled: false
+  interval: 30s
+  scrapeTimeout: 10s
+  namespace: ""
+
+# Priority class
+priorityClassName: ""
