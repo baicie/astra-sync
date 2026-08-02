@@ -1,6 +1,8 @@
 package io.astrasync.engine.kernel;
 
+import io.astrasync.connector.api.data.Row;
+
 @FunctionalInterface
 public interface RecordTransform {
-    SyncRecord apply(SyncRecord record);
+    Row apply(Row record);
 }

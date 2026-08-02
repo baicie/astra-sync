@@ -23,9 +23,9 @@ public interface DataEvent {
 
     RecordKey getKey();
 
-    Record getBefore();
+    Row getBefore();
 
-    Record getAfter();
+    Row getAfter();
 
     Map<String, String> getHeaders();
 

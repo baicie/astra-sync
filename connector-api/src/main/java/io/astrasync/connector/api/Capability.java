@@ -2,6 +2,7 @@ package io.astrasync.connector.api;
 
 public enum Capability {
     BATCH_READ,
+    BATCH_WRITE,
     STREAM_READ,
     PARALLEL_SNAPSHOT,
     REPLAYABLE_OFFSET,
@@ -21,9 +22,6 @@ public enum Capability {
     SORTED_WRITE,
     SCHEMA_REGISTRATION,
     TRANSFORM_SUPPORT,
-    EXACTLY_ONCE,
-    AT_LEAST_ONCE,
-    AT_MOST_ONCE,
     TRANSACTION_RECOVERY,
     FAULT_TOLERANCE
 }

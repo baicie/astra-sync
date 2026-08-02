@@ -1,5 +1,9 @@
 package io.astrasync.engine.kernel;
 
+import io.astrasync.connector.api.data.Row;
+import io.astrasync.connector.api.data.RowBatch;
+import io.astrasync.connector.api.sink.BatchSink;
+import io.astrasync.connector.api.source.BatchSource;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -7,9 +11,9 @@ import java.util.Objects;
 public final class SingleNodeSyncJob {
     private static final int DEFAULT_MAX_BATCH_RECORDS = 1_024;
 
-    private final RecordSource source;
+    private final BatchSource source;
     private final List<RecordTransform> transforms;
-    private final RecordSink sink;
+    private final BatchSink sink;
     private final int maxBatchRecords;
 
     private SingleNodeSyncJob(Builder builder) {
@@ -47,7 +51,7 @@ public final class SingleNodeSyncJob {
 
             boolean endOfInput = false;
             while (!endOfInput) {
-                SyncBatch batch;
+                RowBatch batch;
                 try {
                     batch = Objects.requireNonNull(source.readBatch(maxBatchRecords), "source returned null batch");
                     if (batch.size() > maxBatchRecords) {
@@ -59,9 +63,10 @@ public final class SingleNodeSyncJob {
                     throw metrics.failure(SyncStage.SOURCE_READ, "failed to read source batch", exception);
                 }
 
-                for (SyncRecord record : batch.records()) {
+                List<Row> transformedRows = new ArrayList<>(batch.size());
+                for (Row record : batch.rows()) {
                     metrics.recordRead();
-                    SyncRecord transformed = record;
+                    Row transformed = record;
                     try {
                         for (RecordTransform transform : transforms) {
                             transformed =
@@ -70,12 +75,17 @@ public final class SingleNodeSyncJob {
                     } catch (RuntimeException exception) {
                         throw metrics.failure(SyncStage.TRANSFORM, "failed to transform record", exception);
                     }
+                    transformedRows.add(transformed);
+                }
 
+                if (!transformedRows.isEmpty()) {
+                    RowBatch transformedBatch =
+                            batch.endOfInput() ? RowBatch.last(transformedRows) : RowBatch.data(transformedRows);
                     try {
-                        sink.write(transformed);
-                        metrics.recordWritten();
+                        sink.writeBatch(transformedBatch);
+                        metrics.recordsWritten(transformedBatch.size());
                     } catch (RuntimeException exception) {
-                        throw metrics.failure(SyncStage.SINK_WRITE, "failed to write record", exception);
+                        throw metrics.failure(SyncStage.SINK_WRITE, "failed to write batch", exception);
                     }
                 }
 
@@ -118,12 +128,12 @@ public final class SingleNodeSyncJob {
     }
 
     public static final class Builder {
-        private RecordSource source;
+        private BatchSource source;
         private final List<RecordTransform> transforms = new ArrayList<>();
-        private RecordSink sink;
+        private BatchSink sink;
         private int maxBatchRecords = DEFAULT_MAX_BATCH_RECORDS;
 
-        public Builder source(RecordSource source) {
+        public Builder source(BatchSource source) {
             this.source = Objects.requireNonNull(source, "source must not be null");
             return this;
         }
@@ -133,7 +143,7 @@ public final class SingleNodeSyncJob {
             return this;
         }
 
-        public Builder sink(RecordSink sink) {
+        public Builder sink(BatchSink sink) {
             this.sink = Objects.requireNonNull(sink, "sink must not be null");
             return this;
         }
@@ -173,8 +183,8 @@ public final class SingleNodeSyncJob {
             readCount++;
         }
 
-        private void recordWritten() {
-            writtenCount++;
+        private void recordsWritten(int count) {
+            writtenCount += count;
         }
 
         private void batchCompleted() {

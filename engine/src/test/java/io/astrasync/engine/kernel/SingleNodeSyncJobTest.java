@@ -3,37 +3,51 @@ package io.astrasync.engine.kernel;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import io.astrasync.connector.api.data.Row;
+import io.astrasync.connector.api.data.RowBatch;
+import io.astrasync.connector.api.sink.BatchSink;
+import io.astrasync.connector.api.source.BatchSource;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
+import java.util.function.IntFunction;
 import org.junit.jupiter.api.Test;
 
 class SingleNodeSyncJobTest {
     @Test
     void runsMultipleBoundedBatchesThroughTransformsInOrder() {
-        List<SyncRecord> written = new ArrayList<>();
+        List<Row> written = new ArrayList<>();
+        List<Integer> writtenBatchSizes = new ArrayList<>();
+        List<Boolean> writtenEndFlags = new ArrayList<>();
         List<Integer> requestedLimits = new ArrayList<>();
         AtomicInteger poll = new AtomicInteger();
-        RecordSource source = maxRecords -> {
+        BatchSource source = batchSource(maxRecords -> {
             requestedLimits.add(maxRecords);
             return switch (poll.getAndIncrement()) {
-                case 0 -> SyncBatch.data(List.of(SyncRecord.of("name", "ada"), SyncRecord.of("name", "grace")));
-                case 1 -> SyncBatch.last(List.of(SyncRecord.of("name", "linus")));
+                case 0 -> RowBatch.data(List.of(Row.of("name", "ada"), Row.of("name", "grace")));
+                case 1 -> RowBatch.last(List.of(Row.of("name", "linus")));
                 default -> throw new AssertionError("source polled after end of input");
             };
-        };
+        });
 
         SyncResult result = SingleNodeSyncJob.builder()
                 .source(source)
                 .transform(record ->
                         record.with("name", record.get("name").toString().toUpperCase()))
                 .transform(record -> record.with("name", "[" + record.get("name") + "]"))
-                .sink(written::add)
+                .sink(batchSink(batch -> {
+                    writtenBatchSizes.add(batch.size());
+                    writtenEndFlags.add(batch.endOfInput());
+                    written.addAll(batch.rows());
+                }))
                 .maxBatchRecords(2)
                 .build()
                 .run();
 
         assertThat(requestedLimits).containsExactly(2, 2);
+        assertThat(writtenBatchSizes).containsExactly(2, 1);
+        assertThat(writtenEndFlags).containsExactly(false, true);
         assertThat(written).extracting(record -> record.get("name")).containsExactly("[ADA]", "[GRACE]", "[LINUS]");
         assertThat(result.readCount()).isEqualTo(3);
         assertThat(result.writtenCount()).isEqualTo(3);
@@ -44,23 +58,23 @@ class SingleNodeSyncJobTest {
 
     @Test
     void doesNotPollNextBatchUntilCurrentBatchIsWritten() {
-        List<SyncRecord> written = new ArrayList<>();
+        List<Row> written = new ArrayList<>();
         AtomicInteger poll = new AtomicInteger();
-        RecordSource source = maxRecords -> switch (poll.getAndIncrement()) {
+        BatchSource source = batchSource(maxRecords -> switch (poll.getAndIncrement()) {
             case 0 -> {
                 assertThat(written).isEmpty();
-                yield SyncBatch.data(List.of(SyncRecord.of("id", 1), SyncRecord.of("id", 2)));
+                yield RowBatch.data(List.of(Row.of("id", 1), Row.of("id", 2)));
             }
             case 1 -> {
                 assertThat(written).hasSize(2);
-                yield SyncBatch.last(List.of(SyncRecord.of("id", 3)));
+                yield RowBatch.last(List.of(Row.of("id", 3)));
             }
             default -> throw new AssertionError("source polled after end of input");
-        };
+        });
 
         SingleNodeSyncJob.builder()
                 .source(source)
-                .sink(written::add)
+                .sink(batchSink(batch -> written.addAll(batch.rows())))
                 .maxBatchRecords(2)
                 .build()
                 .run();
@@ -70,10 +84,10 @@ class SingleNodeSyncJobTest {
 
     @Test
     void rejectsABatchThatExceedsTheRequestedLimit() {
-        List<SyncRecord> written = new ArrayList<>();
+        List<Row> written = new ArrayList<>();
         SingleNodeSyncJob job = SingleNodeSyncJob.builder()
-                .source(limit -> SyncBatch.last(List.of(SyncRecord.of("id", 1), SyncRecord.of("id", 2))))
-                .sink(written::add)
+                .source(batchSource(limit -> RowBatch.last(List.of(Row.of("id", 1), Row.of("id", 2)))))
+                .sink(batchSink(batch -> written.addAll(batch.rows())))
                 .maxBatchRecords(1)
                 .build();
 
@@ -88,7 +102,7 @@ class SingleNodeSyncJobTest {
 
     @Test
     void reportsPartialMetricsAndClosesResourcesAfterTransformFailure() {
-        LifecycleSource source = new LifecycleSource(SyncBatch.last(List.of(SyncRecord.of("id", 1))));
+        LifecycleSource source = new LifecycleSource(RowBatch.last(List.of(Row.of("id", 1))));
         LifecycleSink sink = new LifecycleSink();
         SingleNodeSyncJob job = SingleNodeSyncJob.builder()
                 .source(source)
@@ -112,18 +126,18 @@ class SingleNodeSyncJobTest {
 
     @Test
     void reportsSourceReadFailureAfterCompletedWork() {
-        List<SyncRecord> written = new ArrayList<>();
+        List<Row> written = new ArrayList<>();
         AtomicInteger poll = new AtomicInteger();
-        RecordSource source = maxRecords -> {
+        BatchSource source = batchSource(maxRecords -> {
             if (poll.getAndIncrement() == 0) {
-                return SyncBatch.data(List.of(SyncRecord.of("id", 1)));
+                return RowBatch.data(List.of(Row.of("id", 1)));
             }
             throw new IllegalStateException("source read");
-        };
+        });
 
         assertThatThrownBy(() -> SingleNodeSyncJob.builder()
                         .source(source)
-                        .sink(written::add)
+                        .sink(batchSink(batch -> written.addAll(batch.rows())))
                         .build()
                         .run())
                 .isInstanceOfSatisfying(SyncJobException.class, exception -> {
@@ -138,7 +152,7 @@ class SingleNodeSyncJobTest {
 
     @Test
     void closesTheSourceWhenSinkOpenFails() {
-        LifecycleSource source = new LifecycleSource(SyncBatch.end());
+        LifecycleSource source = new LifecycleSource(RowBatch.end());
         LifecycleSink sink = new LifecycleSink();
         sink.openFailure = new IllegalStateException("sink open");
 
@@ -160,10 +174,13 @@ class SingleNodeSyncJobTest {
 
     @Test
     void preservesPrimaryFailureAndSuppressesAllCloseFailures() {
-        RecordSource source = new RecordSource() {
+        BatchSource source = new BatchSource() {
             @Override
-            public SyncBatch readBatch(int maxRecords) {
-                return SyncBatch.last(List.of(SyncRecord.of("id", 1)));
+            public void open() {}
+
+            @Override
+            public RowBatch readBatch(int maxRecords) {
+                return RowBatch.last(List.of(Row.of("id", 1)));
             }
 
             @Override
@@ -171,9 +188,12 @@ class SingleNodeSyncJobTest {
                 throw new IllegalStateException("source close");
             }
         };
-        RecordSink sink = new RecordSink() {
+        BatchSink sink = new BatchSink() {
             @Override
-            public void write(SyncRecord record) {
+            public void open() {}
+
+            @Override
+            public void writeBatch(RowBatch batch) {
                 throw new IllegalArgumentException("sink write");
             }
 
@@ -199,10 +219,13 @@ class SingleNodeSyncJobTest {
 
     @Test
     void reportsTheFirstCloseFailureAndSuppressesTheSecond() {
-        RecordSource source = new RecordSource() {
+        BatchSource source = new BatchSource() {
             @Override
-            public SyncBatch readBatch(int maxRecords) {
-                return SyncBatch.last(List.of(SyncRecord.of("id", 1)));
+            public void open() {}
+
+            @Override
+            public RowBatch readBatch(int maxRecords) {
+                return RowBatch.last(List.of(Row.of("id", 1)));
             }
 
             @Override
@@ -210,9 +233,12 @@ class SingleNodeSyncJobTest {
                 throw new IllegalStateException("source close");
             }
         };
-        RecordSink sink = new RecordSink() {
+        BatchSink sink = new BatchSink() {
             @Override
-            public void write(SyncRecord record) {}
+            public void open() {}
+
+            @Override
+            public void writeBatch(RowBatch batch) {}
 
             @Override
             public void close() {
@@ -237,7 +263,7 @@ class SingleNodeSyncJobTest {
 
     @Test
     void doesNotCloseASourceWhoseOpenFailed() {
-        LifecycleSource source = new LifecycleSource(SyncBatch.end());
+        LifecycleSource source = new LifecycleSource(RowBatch.end());
         source.openFailure = new IllegalStateException("source open");
         LifecycleSink sink = new LifecycleSink();
 
@@ -259,19 +285,49 @@ class SingleNodeSyncJobTest {
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("maxBatchRecords must be positive");
         assertThatThrownBy(() -> SingleNodeSyncJob.builder()
-                        .source(limit -> SyncBatch.end())
+                        .source(batchSource(limit -> RowBatch.end()))
                         .build())
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessage("source and sink are required");
     }
 
-    private static final class LifecycleSource implements RecordSource {
-        private final SyncBatch batch;
+    private static BatchSource batchSource(IntFunction<RowBatch> reader) {
+        return new BatchSource() {
+            @Override
+            public void open() {}
+
+            @Override
+            public RowBatch readBatch(int maxRows) {
+                return reader.apply(maxRows);
+            }
+
+            @Override
+            public void close() {}
+        };
+    }
+
+    private static BatchSink batchSink(Consumer<RowBatch> writer) {
+        return new BatchSink() {
+            @Override
+            public void open() {}
+
+            @Override
+            public void writeBatch(RowBatch batch) {
+                writer.accept(batch);
+            }
+
+            @Override
+            public void close() {}
+        };
+    }
+
+    private static final class LifecycleSource implements BatchSource {
+        private final RowBatch batch;
         private int openCount;
         private int closeCount;
         private RuntimeException openFailure;
 
-        private LifecycleSource(SyncBatch batch) {
+        private LifecycleSource(RowBatch batch) {
             this.batch = batch;
         }
 
@@ -284,7 +340,7 @@ class SingleNodeSyncJobTest {
         }
 
         @Override
-        public SyncBatch readBatch(int maxRecords) {
+        public RowBatch readBatch(int maxRecords) {
             return batch;
         }
 
@@ -294,7 +350,7 @@ class SingleNodeSyncJobTest {
         }
     }
 
-    private static final class LifecycleSink implements RecordSink {
+    private static final class LifecycleSink implements BatchSink {
         private int openCount;
         private int closeCount;
         private RuntimeException openFailure;
@@ -308,7 +364,7 @@ class SingleNodeSyncJobTest {
         }
 
         @Override
-        public void write(SyncRecord record) {}
+        public void writeBatch(RowBatch batch) {}
 
         @Override
         public void close() {
