@@ -56,8 +56,8 @@
         <commons-compress.version>1.26.2</commons-compress.version>
         <snappy.version>1.1.10.6</snappy.version>
         <lz4.version>1.8.0</lz4.version>
-        <zstd.version>1.5.6</zstd.version>
-        <debezium.version>2.5.4</debezium.version>
+        <zstd.version>1.5.6-3</zstd.version>
+        <debezium.version>2.5.4.Final</debezium.version>
         <mysql.version>8.0.33</mysql.version>
         <postgresql.version>42.7.3</postgresql.version>
         <clickhouse.version>0.6.2</clickhouse.version>
@@ -77,9 +77,10 @@
         <maven-failsafe-plugin.version>3.2.5</maven-failsafe-plugin.version>
         <maven-shade-plugin.version>3.5.3</maven-shade-plugin.version>
         <protoc-maven-plugin.version>0.6.1</protoc-maven-plugin.version>
+        <os-maven-plugin.version>1.7.1</os-maven-plugin.version>
         <flatten-maven-plugin.version>1.6.0</flatten-maven-plugin.version>
         <jacoco-maven-plugin.version>0.8.12</jacoco-maven-plugin.version>
-        <spotless-maven-plugin.version>6.25.0</spotless-maven-plugin.version>
+        <spotless-maven-plugin.version>2.43.0</spotless-maven-plugin.version>
     </properties>
 
     <dependencyManagement>
@@ -311,6 +312,14 @@
     </dependencyManagement>
 
     <build>
+        <extensions>
+            <extension>
+                <groupId>kr.motd.maven</groupId>
+                <artifactId>os-maven-plugin</artifactId>
+                <version>${os-maven-plugin.version}</version>
+            </extension>
+        </extensions>
+
         <pluginManagement>
             <plugins>
                 <plugin>
@@ -338,7 +347,7 @@
                     <configuration>
                         <forkCount>1</forkCount>
                         <reuseForks>true</reuseForks>
-                        <argLine>-Xmx2g -XX:+UseG1GC -XX:MaxGCPauseMillis=200</argLine>
+                        <argLine>@{argLine} -Xmx2g -XX:+UseG1GC -XX:MaxGCPauseMillis=200</argLine>
                     </configuration>
                 </plugin>
 

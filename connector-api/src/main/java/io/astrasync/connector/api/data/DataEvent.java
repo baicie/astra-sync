@@ -1,5 +1,10 @@
 package io.astrasync.connector.api.data;
 
+import io.astrasync.connector.api.RecordKey;
+import io.astrasync.connector.api.SourcePosition;
+import io.astrasync.connector.api.TraceContext;
+import java.util.Map;
+
 public interface DataEvent {
 
     String getEventId();

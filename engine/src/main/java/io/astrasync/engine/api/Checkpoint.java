@@ -21,20 +21,20 @@ public interface Checkpoint {
     String getExternalPath();
 }
 
-public enum CheckpointType {
+enum CheckpointType {
     FULL,
     INCREMENTAL,
     UNALIGNED
 }
 
-public enum CheckpointStatus {
+enum CheckpointStatus {
     COMPLETED,
     FAILED,
     EXPIRED,
     IN_PROGRESS
 }
 
-public interface CheckpointStatistics {
+interface CheckpointStatistics {
 
     long getStateSize();
 
@@ -47,7 +47,7 @@ public interface CheckpointStatistics {
     int getTotalSubtasks();
 }
 
-public interface Savepoint {
+interface Savepoint {
 
     String getPath();
 
@@ -62,7 +62,7 @@ public interface Savepoint {
     SavepointFormat getFormat();
 }
 
-public enum SavepointFormat {
+enum SavepointFormat {
     CANONICAL,
     NATIVE
 }

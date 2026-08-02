@@ -1,5 +1,7 @@
 package io.astrasync.connector.api;
 
+import java.util.Map;
+
 public interface TraceContext {
 
     String getTraceId();

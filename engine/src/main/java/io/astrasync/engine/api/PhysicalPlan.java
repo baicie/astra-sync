@@ -13,7 +13,7 @@ public interface PhysicalPlan {
     ResourceProfile getResourceProfile();
 }
 
-public interface ExecutionGraph {
+interface ExecutionGraph {
 
     String getJobId();
 
@@ -22,7 +22,7 @@ public interface ExecutionGraph {
     ExecutionEdge[] getEdges();
 }
 
-public interface ExecutionVertex {
+interface ExecutionVertex {
 
     String getVertexId();
 
@@ -37,7 +37,7 @@ public interface ExecutionVertex {
     String getSlotId();
 }
 
-public interface ExecutionEdge {
+interface ExecutionEdge {
 
     String getEdgeId();
 
@@ -52,7 +52,7 @@ public interface ExecutionEdge {
     ExchangeMode getExchangeMode();
 }
 
-public enum ExchangeMode {
+enum ExchangeMode {
     PIPELINE,
     BLOCKING,
     BROADCAST,
@@ -60,7 +60,7 @@ public enum ExchangeMode {
     RANGE
 }
 
-public interface ResourceProfile {
+interface ResourceProfile {
 
     double getCpuCores();
 

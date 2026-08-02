@@ -1,11 +1,5 @@
 package io.astrasync.connector.api;
 
-public interface SourceConfig extends ConnectorConfig {
-}
-
-public interface SinkConfig extends ConnectorConfig {
-}
-
 public interface ConnectorConfig {
 
     String getString(String key);

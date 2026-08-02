@@ -1,0 +1,31 @@
+package io.astrasync.connector.api.metadata;
+
+public enum LogicalType {
+    BOOLEAN,
+    TINYINT,
+    SMALLINT,
+    INTEGER,
+    BIGINT,
+    FLOAT,
+    DOUBLE,
+    DECIMAL,
+    STRING,
+    VARCHAR,
+    CHAR,
+    BINARY,
+    VARBINARY,
+    DATE,
+    TIME,
+    TIME_WITH_TZ,
+    TIMESTAMP,
+    TIMESTAMP_WITH_TZ,
+    ARRAY,
+    MAP,
+    ROW,
+    JSON,
+    XML,
+    UUID,
+    STRUCT,
+    UNION,
+    RAW
+}

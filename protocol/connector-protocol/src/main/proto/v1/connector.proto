@@ -2,8 +2,6 @@ syntax = "proto3";
 
 package astra.protocol.connector;
 
-import "google/protobuf/any.proto";
-
 option java_multiple_files = true;
 option java_package = "io.astrasync.protocol.connector";
 option java_outer_classname = "ConnectorProto";
@@ -75,16 +73,16 @@ message ConfigSpec {
 }
 
 enum ConfigType {
-  CONFIG_UNSPECIFIED = 0;
-  STRING = 1;
-  INT = 2;
-  LONG = 3;
-  DOUBLE = 4;
-  BOOLEAN = 5;
-  PASSWORD = 6;
-  LIST = 7;
-  MAP = 8;
-  SECRET = 9;
+  CONFIG_TYPE_UNSPECIFIED = 0;
+  CONFIG_TYPE_STRING = 1;
+  CONFIG_TYPE_INT = 2;
+  CONFIG_TYPE_LONG = 3;
+  CONFIG_TYPE_DOUBLE = 4;
+  CONFIG_TYPE_BOOLEAN = 5;
+  CONFIG_TYPE_PASSWORD = 6;
+  CONFIG_TYPE_LIST = 7;
+  CONFIG_TYPE_MAP = 8;
+  CONFIG_TYPE_SECRET = 9;
 }
 
 message ValidationRule {
@@ -206,29 +204,29 @@ message SchemaField {
 }
 
 enum FieldType {
-  FT_UNSPECIFIED = 0;
-  BOOLEAN = 1;
-  TINYINT = 2;
-  SMALLINT = 3;
-  INTEGER = 4;
-  BIGINT = 5;
-  FLOAT = 6;
-  DOUBLE = 7;
-  DECIMAL = 8;
-  STRING = 9;
-  VARCHAR = 10;
-  CHAR = 11;
-  BINARY = 12;
-  VARBINARY = 13;
-  DATE = 14;
-  TIME = 15;
-  TIMESTAMP = 16;
-  ARRAY = 17;
-  MAP = 18;
-  ROW = 19;
-  JSON = 20;
-  XML = 21;
-  UUID = 22;
+  FIELD_TYPE_UNSPECIFIED = 0;
+  FIELD_TYPE_BOOLEAN = 1;
+  FIELD_TYPE_TINYINT = 2;
+  FIELD_TYPE_SMALLINT = 3;
+  FIELD_TYPE_INTEGER = 4;
+  FIELD_TYPE_BIGINT = 5;
+  FIELD_TYPE_FLOAT = 6;
+  FIELD_TYPE_DOUBLE = 7;
+  FIELD_TYPE_DECIMAL = 8;
+  FIELD_TYPE_STRING = 9;
+  FIELD_TYPE_VARCHAR = 10;
+  FIELD_TYPE_CHAR = 11;
+  FIELD_TYPE_BINARY = 12;
+  FIELD_TYPE_VARBINARY = 13;
+  FIELD_TYPE_DATE = 14;
+  FIELD_TYPE_TIME = 15;
+  FIELD_TYPE_TIMESTAMP = 16;
+  FIELD_TYPE_ARRAY = 17;
+  FIELD_TYPE_MAP = 18;
+  FIELD_TYPE_ROW = 19;
+  FIELD_TYPE_JSON = 20;
+  FIELD_TYPE_XML = 21;
+  FIELD_TYPE_UUID = 22;
 }
 
 message PrimaryKey {

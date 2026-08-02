@@ -1,5 +1,7 @@
 package io.astrasync.engine.api;
 
+import java.util.Map;
+
 public interface JobSpec {
 
     String getApiVersion();
@@ -11,7 +13,7 @@ public interface JobSpec {
     JobConfiguration getSpec();
 }
 
-public interface JobMetadata {
+interface JobMetadata {
 
     String getName();
 
@@ -24,7 +26,7 @@ public interface JobMetadata {
     long getCreationTimestamp();
 }
 
-public interface JobConfiguration {
+interface JobConfiguration {
 
     SourceConfig getSource();
 
@@ -41,7 +43,7 @@ public interface JobConfiguration {
     RetryConfig getRetry();
 }
 
-public interface SourceConfig {
+interface SourceConfig {
 
     String getConnector();
 
@@ -50,7 +52,13 @@ public interface SourceConfig {
     TableSelector getTables();
 }
 
-public interface SinkConfig {
+interface TableSelector {
+    String[] getInclude();
+
+    String[] getExclude();
+}
+
+interface SinkConfig {
 
     String getConnector();
 
@@ -59,25 +67,25 @@ public interface SinkConfig {
     String getTargetTable();
 }
 
-public interface TransformConfig {
+interface TransformConfig {
 
     String getType();
 
     Map<String, String> getOptions();
 }
 
-public interface DeliveryConfig {
+interface DeliveryConfig {
 
     DeliveryGuarantee getGuarantee();
 }
 
-public enum DeliveryGuarantee {
+enum DeliveryGuarantee {
     EXACTLY_ONCE,
     AT_LEAST_ONCE,
     AT_MOST_ONCE
 }
 
-public interface ParallelismConfig {
+interface ParallelismConfig {
 
     int getInitial();
 
@@ -86,7 +94,7 @@ public interface ParallelismConfig {
     int getMax();
 }
 
-public interface CheckpointConfig {
+interface CheckpointConfig {
 
     long getIntervalMillis();
 
@@ -95,7 +103,7 @@ public interface CheckpointConfig {
     int getMaxRetained();
 }
 
-public interface RetryConfig {
+interface RetryConfig {
 
     int getMaxAttempts();
 
