@@ -24,7 +24,8 @@ Phase 0 separates three responsibilities:
 1. The Engine remains a connector-agnostic library and owns `LocalJobRunner`, which accepts an
    explicit `ConnectorRegistry`, compiles the entire JobSpec, pins descriptor versions, creates
    resource-free connector instances, and invokes the bounded kernel.
-2. Concrete connector modules depend only on `connector-api`, never on the Engine.
+2. Concrete connector modules depend on `connector-api` and connector-owned client or format
+   libraries, never on the Engine.
 3. A new CLI application module depends on the Engine and selected built-in connectors. It owns
    JobSpec file reading, explicit registry composition, command parsing, terminal rendering, exit
    codes, and runnable shaded-JAR packaging.
