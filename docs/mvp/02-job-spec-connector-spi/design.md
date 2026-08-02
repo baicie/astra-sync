@@ -71,10 +71,10 @@ so the local runtime bound is the Source batch plus one transformed batch, never
 - capabilities such as `BATCH_READ`, `BATCH_WRITE`, `REPLAYABLE_OFFSET`, and
   `TRANSACTIONAL_COMMIT`.
 
-Names use lowercase letters, digits, dots, underscores, and hyphens. `BATCH_READ` requires the
-Source role and `BATCH_WRITE` requires the Sink role. A role may expose a different mode (for
-example, stream-only); the Phase 0 compiler separately requires the matching batch capability.
-Descriptor lookup never creates a connector.
+Names contain 1 to 128 lowercase letters, digits, dots, underscores, or hyphens and start and end
+with a letter or digit. `BATCH_READ` requires the Source role and `BATCH_WRITE` requires the Sink
+role. A role may expose a different mode (for example, stream-only); the Phase 0 compiler
+separately requires the matching batch capability. Descriptor lookup never creates a connector.
 
 ### Factory and Runtime Interfaces
 
