@@ -16,6 +16,7 @@ This directory contains the Architecture Decision Records (ADRs) for AstraSync.
 | [ADR-008](adr-008-row-and-arrow-formats.md) | Dual Format Support (Row and Arrow) | Accepted | 2026-08-02 |
 | [ADR-009](adr-009-capability-negotiation.md) | Exactly-Once via Capability Negotiation | Accepted | 2026-08-02 |
 | [ADR-010](adr-010-single-active-region.md) | Single Active Region per Job | Accepted | 2026-08-02 |
+| [ADR-011](adr-011-bounded-pull-single-node-runtime.md) | Bounded Pull-based Single-node Runtime | Accepted | 2026-08-02 |
 
 ## Template
 
