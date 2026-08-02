@@ -2,7 +2,7 @@
 
 ## Status
 
-Design complete; implementation in progress.
+Verified and complete on implementation commit `e4ed490`.
 
 ## Objective
 

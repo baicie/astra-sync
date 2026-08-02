@@ -2,7 +2,7 @@
 
 ## Status
 
-In progress on `mvp/01-single-node-kernel`.
+Slice 01 is verified and complete; slice 02 starts from its accepted head.
 
 ## Goal
 
@@ -57,7 +57,7 @@ rebased onto the updated `main` without changing its scope.
 
 | Order | Branch | Parent | Deliverable | Status |
 |---:|---|---|---|---|
-| 01 | `mvp/01-single-node-kernel` | `main@8b237b7` | Reproducible build, bounded pull runtime, lifecycle, failure stage, metrics, unit tests | In progress |
+| 01 | `mvp/01-single-node-kernel` | `main@8b237b7` | Reproducible build, bounded pull runtime, lifecycle, failure stage, metrics, unit tests | Complete |
 | 02 | `mvp/02-job-spec-connector-spi` | accepted 01 | Row/batch contract, Source/Sink SPI, JobSpec v1, registry, capability compiler | Planned |
 | 03 | `mvp/03-file-vertical-slice` | accepted 02 | CSV source/sink, file-to-file CLI job, malformed-row policy | Planned |
 | 04 | `mvp/04-jdbc-vertical-slice` | accepted 03 | Generic JDBC source/sink, type mapping, transaction boundaries, integration tests | Planned |
