@@ -36,7 +36,8 @@ external resource can be created.
    connector options fail with a precise document path.
 3. Rows preserve null values and defensively copy containers; batches reject null rows and empty
    non-terminal batches.
-4. Connector registration rejects duplicate names and inconsistent role/capability descriptors.
+4. Descriptor construction rejects inconsistent role/capability metadata, and registration rejects
+   duplicate connector names.
 5. Missing connectors, unsupported roles, missing batch capabilities, transforms, and unsupported
    guarantees fail during compilation.
 6. Even connectors advertising replay and transactional commit cannot enable exactly-once while

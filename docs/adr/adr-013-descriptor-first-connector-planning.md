@@ -25,8 +25,8 @@ Connector planning is descriptor first:
 1. Every registered factory exposes an immutable `ConnectorDescriptor` containing name, version,
    roles, and static capabilities.
 2. Registry lookup and compilation inspect descriptors only.
-3. Duplicate connector names and descriptor role/capability inconsistencies are registration
-   errors.
+3. Descriptor construction rejects role/capability inconsistencies, and registration rejects
+   duplicate connector names.
 4. Compilation validates connector existence, role, bounded batch capability, transform support,
    and delivery guarantee in a fixed order.
 5. Compilation returns an immutable value-only plan containing selected descriptor versions and
