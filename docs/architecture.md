@@ -112,4 +112,5 @@ The executable Phase 0 plan is archived in [MVP Delivery Plan](mvp/README.md).
 
 The durable architecture decisions are indexed in [Architecture Decision Records](adr/README.md).
 ADR-001 through ADR-010 cover the long-term architecture. ADR-011 defines the bounded
-single-node execution model used to enter Phase 0.
+single-node execution model used to enter Phase 0. ADR-012 fixes the strict JobSpec v1 boundary,
+and ADR-013 keeps planning descriptor-only until every validation and capability gate passes.

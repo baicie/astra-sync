@@ -17,6 +17,8 @@ This directory contains the Architecture Decision Records (ADRs) for AstraSync.
 | [ADR-009](adr-009-capability-negotiation.md) | Exactly-Once via Capability Negotiation | Accepted | 2026-08-02 |
 | [ADR-010](adr-010-single-active-region.md) | Single Active Region per Job | Accepted | 2026-08-02 |
 | [ADR-011](adr-011-bounded-pull-single-node-runtime.md) | Bounded Pull-based Single-node Runtime | Accepted | 2026-08-02 |
+| [ADR-012](adr-012-strict-versioned-job-spec.md) | Strict Versioned JobSpec Boundary | Accepted | 2026-08-02 |
+| [ADR-013](adr-013-descriptor-first-connector-planning.md) | Descriptor-first Connector Planning | Accepted | 2026-08-02 |
 
 ## Template
 
