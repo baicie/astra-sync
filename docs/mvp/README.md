@@ -2,7 +2,7 @@
 
 ## Status
 
-In progress on `mvp/02-job-spec-connector-spi`; slice 01 is verified and complete.
+In progress; slices 01 and 02 are verified and complete. Slice 03 is next.
 
 ## Goal
 
@@ -58,7 +58,7 @@ rebased onto the updated `main` without changing its scope.
 | Order | Branch | Parent | Deliverable | Status |
 |---:|---|---|---|---|
 | 01 | `mvp/01-single-node-kernel` | `main@8b237b7` | Reproducible build, bounded pull runtime, lifecycle, failure stage, metrics, unit tests | Complete |
-| 02 | `mvp/02-job-spec-connector-spi` | accepted 01 | Row/batch contract, Source/Sink SPI, JobSpec v1, registry, capability compiler | In progress |
+| 02 | `mvp/02-job-spec-connector-spi` | accepted 01 | Row/batch contract, Source/Sink SPI, JobSpec v1, registry, capability compiler | Complete |
 | 03 | `mvp/03-file-vertical-slice` | accepted 02 | CSV source/sink, file-to-file CLI job, malformed-row policy | Planned |
 | 04 | `mvp/04-jdbc-vertical-slice` | accepted 03 | Generic JDBC source/sink, type mapping, transaction boundaries, integration tests | Planned |
 | 05 | `mvp/05-phase0-hardening` | accepted 04 | Metrics output, cancellation/resource tests, examples, acceptance and release evidence | Planned |

@@ -12,38 +12,38 @@
 
 ### 1. Establish the Public Data and Connector Contract
 
-- Add immutable `Row`, `RowBatch`, connector configuration, roles, descriptors, and factory SPI.
-- Add batch Source/Sink lifecycle interfaces with resource-free construction.
-- Replace superseded Arrow/mutable-record and uncompiled connector sketches.
-- Gate: connector-api contract tests pass without Arrow or runtime dependencies.
+- [x] Add immutable `Row`, `RowBatch`, connector configuration, roles, descriptors, and factory SPI.
+- [x] Add batch Source/Sink lifecycle interfaces with resource-free construction.
+- [x] Replace superseded Arrow/mutable-record and uncompiled connector sketches.
+- [x] Gate: connector-api contract tests pass without Arrow or runtime dependencies.
 
 ### 2. Implement Strict JobSpec v1
 
-- Add immutable JobSpec values and strict YAML/JSON tree parsing.
-- Reject duplicate/unknown fields, scalar coercion, unsupported versions, and invalid names.
-- Normalize defaults and option ordering deterministically.
-- Gate: valid parity and negative path-aware parser tests pass.
+- [x] Add immutable JobSpec values and strict YAML/JSON tree parsing.
+- [x] Reject duplicate/unknown fields, scalar coercion, unsupported versions, and invalid names.
+- [x] Normalize defaults and option ordering deterministically.
+- [x] Gate: valid parity and negative path-aware parser tests pass.
 
 ### 3. Add Registry and Descriptor-only Compilation
 
-- Add deterministic registry registration, snapshots, and role lookup.
-- Add compilation error codes and value-only compiled plans.
-- Check role, batch capability, transforms, and delivery in fixed order.
-- Gate: rejected plans call no factory creation or connector open method.
+- [x] Add deterministic registry registration, snapshots, and role lookup.
+- [x] Add compilation error codes and value-only compiled plans.
+- [x] Check descriptor existence, role, batch capability, transforms, and delivery in fixed order.
+- [x] Gate: rejected plans call no factory creation or connector open method.
 
 ### 4. Migrate the Single-node Kernel
 
-- Replace internal record/batch and Source/Sink contracts with the public SPI.
-- Write one bounded transformed batch before the next Source poll.
-- Retain lifecycle, failure stages, metrics, and suppressed close behavior.
-- Gate: slice-01 behavioral tests pass against the public contract.
+- [x] Replace internal record/batch and Source/Sink contracts with the public SPI.
+- [x] Write one bounded transformed batch before the next Source poll.
+- [x] Retain lifecycle, failure stages, metrics, and suppressed close behavior.
+- [x] Gate: slice-01 behavioral tests pass against the public contract.
 
 ### 5. Verify and Archive
 
-- Run focused connector-api and Engine verification, full Reactor tests, and formatting checks.
-- Inspect public API references, final diff, and worktree status.
-- Record commands, counts, coverage, limitations, and implementation commit.
-- Update slice and Phase 0 status before creating slice 03.
+- [x] Run focused connector-api and Engine verification, full Reactor tests, and formatting checks.
+- [x] Inspect public API references, final diff, and worktree status.
+- [x] Record commands, counts, coverage, limitations, and implementation commit.
+- [x] Update slice and Phase 0 status before creating slice 03.
 
 ## Change Control
 
