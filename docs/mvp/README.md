@@ -2,8 +2,8 @@
 
 ## Status
 
-Slice 04 is verified on `mvp/04-jdbc-vertical-slice`; slices 01 through 04 are complete and
-Phase 0 remains in progress for the final hardening slice.
+Slice 04 is verified on `mvp/04-jdbc-vertical-slice`; Slice 05 design is in progress on
+`mvp/05-phase0-hardening` and Phase 0 remains in progress.
 
 ## Goal
 
@@ -62,7 +62,7 @@ rebased onto the updated `main` without changing its scope.
 | 02 | `mvp/02-job-spec-connector-spi` | accepted 01 | Row/batch contract, Source/Sink SPI, JobSpec v1, registry, capability compiler | Complete |
 | 03 | `mvp/03-file-vertical-slice` | accepted 02 | CSV source/sink, file-to-file CLI job, malformed-row policy | Complete |
 | 04 | `mvp/04-jdbc-vertical-slice` | accepted 03 | Generic JDBC source/sink, type mapping, transaction boundaries, integration tests | Complete |
-| 05 | `mvp/05-phase0-hardening` | accepted 04 | Metrics output, cancellation/resource tests, examples, acceptance and release evidence | Planned |
+| 05 | `mvp/05-phase0-hardening` | accepted 04 | Metrics output, cancellation/resource tests, examples, acceptance and release evidence | Design complete; implementation pending |
 
 Branch names intentionally use the user-requested `mvp/*` namespace. The repository's generic
 `feature/*` guidance predates this delivery plan and refers to a nonexistent `develop` branch.
@@ -125,3 +125,5 @@ Branch names intentionally use the user-requested `mvp/*` namespace. The reposit
 - [Slice 01](01-single-node-kernel/README.md)
 - [Slice 02](02-job-spec-connector-spi/README.md)
 - [Slice 03](03-file-vertical-slice/README.md)
+- [Slice 04](04-jdbc-vertical-slice/README.md)
+- [Slice 05](05-phase0-hardening/README.md)
