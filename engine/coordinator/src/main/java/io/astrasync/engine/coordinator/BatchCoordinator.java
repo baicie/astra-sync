@@ -1,8 +1,10 @@
 package io.astrasync.engine.coordinator;
 
+import io.astrasync.connector.api.source.SourceSplit;
+import io.astrasync.connector.api.source.SplitEnumerator;
 import io.astrasync.engine.kernel.SyncResult;
-import io.astrasync.engine.runtime.BatchSplitEnumerator;
 import io.astrasync.engine.runtime.BatchTask;
+import io.astrasync.engine.runtime.BatchTaskFactory;
 import io.astrasync.engine.runtime.BatchWorker;
 import io.astrasync.engine.runtime.WorkerResult;
 import java.util.ArrayList;
@@ -39,9 +41,24 @@ public final class BatchCoordinator {
         this.workers = List.copyOf(copy);
     }
 
-    public DistributedRunResult run(BatchSplitEnumerator enumerator) {
+    public DistributedRunResult run(SplitEnumerator enumerator, BatchTaskFactory taskFactory) {
         Objects.requireNonNull(enumerator, "enumerator must not be null");
-        return run(Objects.requireNonNull(enumerator.enumerate(), "enumerator returned null"));
+        Objects.requireNonNull(taskFactory, "taskFactory must not be null");
+        List<SourceSplit> splits = Objects.requireNonNull(enumerator.enumerate(), "enumerator returned null");
+        Set<String> splitIds = new HashSet<>();
+        List<BatchTask> tasks = new ArrayList<>(splits.size());
+        for (SourceSplit split : splits) {
+            Objects.requireNonNull(split, "enumerator returned a null split");
+            if (!splitIds.add(split.splitId())) {
+                throw new IllegalArgumentException("split id is duplicated: " + split.splitId());
+            }
+            BatchTask task = Objects.requireNonNull(taskFactory.create(split), "task factory returned null");
+            if (!split.equals(task.split())) {
+                throw new IllegalArgumentException("task factory changed split " + split.splitId());
+            }
+            tasks.add(task);
+        }
+        return run(tasks);
     }
 
     public DistributedRunResult run(List<? extends BatchTask> tasks) {

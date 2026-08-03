@@ -7,11 +7,14 @@ import io.astrasync.connector.api.data.Row;
 import io.astrasync.connector.api.data.RowBatch;
 import io.astrasync.connector.api.sink.BatchSink;
 import io.astrasync.connector.api.source.BatchSource;
+import io.astrasync.connector.api.source.SourceSplit;
+import io.astrasync.connector.api.source.SplitPosition;
 import io.astrasync.engine.kernel.SyncStage;
 import io.astrasync.engine.runtime.BatchTask;
 import io.astrasync.engine.runtime.BatchTaskException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 class InProcessBatchWorkerTest {
@@ -22,7 +25,7 @@ class InProcessBatchWorkerTest {
                 new LifecycleSource(RowBatch.data(List.of(Row.of("id", 1))), RowBatch.last(List.of(Row.of("id", 2))));
         LifecycleSink sink = new LifecycleSink(written);
 
-        var result = new InProcessBatchWorker("worker-a").execute(new BatchTask("split-1", source, sink, 2, 1));
+        var result = new InProcessBatchWorker("worker-a").execute(new BatchTask(split("split-1"), source, sink, 2, 1));
 
         assertThat(written).extracting(row -> row.get("id")).containsExactly(1, 2);
         assertThat(result.metrics().readCount()).isEqualTo(2);
@@ -42,8 +45,8 @@ class InProcessBatchWorkerTest {
         LifecycleSink sink = new LifecycleSink(new ArrayList<>());
         sink.writeFailure = new IllegalStateException("sink failed");
 
-        assertThatThrownBy(() ->
-                        new InProcessBatchWorker("worker-a").execute(new BatchTask("split-1", source, sink, 1, 1)))
+        assertThatThrownBy(() -> new InProcessBatchWorker("worker-a")
+                        .execute(new BatchTask(split("split-1"), source, sink, 1, 1)))
                 .isInstanceOfSatisfying(BatchTaskException.class, exception -> {
                     assertThat(exception.taskId()).isEqualTo("split-1");
                     assertThat(exception.workerId()).isEqualTo("worker-a");
@@ -55,6 +58,10 @@ class InProcessBatchWorkerTest {
                 });
         assertThat(source.closeCount).isEqualTo(1);
         assertThat(sink.closeCount).isEqualTo(1);
+    }
+
+    private static SourceSplit split(String splitId) {
+        return new SourceSplit(splitId, "test-source", new SplitPosition(Map.of("id", "1")), SplitPosition.unbounded());
     }
 
     private static final class LifecycleSource implements BatchSource {
