@@ -8,6 +8,7 @@ Verified on `mvp/05-phase0-hardening`.
 
 - Design and ADR baseline: `12a5350` (`docs(mvp): design phase zero hardening`)
 - Implementation baseline: `641ac69` (`feat(mvp): harden phase zero runtime`)
+- Review-fix implementation: `b7e8fad` (`fix(mvp): close phase zero review findings`)
 - This verification record is committed after the checks below.
 
 ## Environment
@@ -21,15 +22,23 @@ Verified on `mvp/05-phase0-hardening`.
 
 | Command | Result |
 |---|---|
-| `mvn.cmd -pl cli -am clean verify -DskipITs` | PASS; clean six-module MVP path, coverage checks and shaded CLI completed |
-| `mvn.cmd -pl cli -am verify -DskipITs` | PASS; repeat non-clean verification |
-| `mvn.cmd test -DskipITs` | PASS; 23 reactor modules, 18 test suites, 108 tests, 0 failures, 0 errors |
-| `mvn.cmd spotless:check` | PASS; all reactor Java sources clean |
+| `mvn.cmd -B -ntp -pl cli -am clean verify -DskipITs` | PASS; clean six-module MVP path, coverage checks and shaded CLI completed |
+| `mvn.cmd -B -ntp -pl cli -am verify -DskipITs` | PASS; repeat non-clean verification |
+| `mvn.cmd -B -ntp verify -DskipITs` | PASS; 23 reactor modules, 19 test suites, 117 tests, 0 failures, 0 errors, 0 skipped |
+| `mvn.cmd -B -ntp spotless:check` | PASS; all reactor Java sources clean |
+| `helm lint --strict deployment/helm/astrasync` | PASS; chart rendered without lint errors |
+| `helm template` plus parsed YAML assertions | PASS; release/name/fullname and PostgreSQL port overrides render; all 63-character override resource names remain valid and preserve component suffixes |
+| PyYAML parse of `.github/workflows/ci.yml` | PASS; five jobs and their expressions load as valid YAML |
 | `git diff --check` | PASS |
 
-The focused suites include 36 Engine tests and 12 CLI tests. New coverage proves cancellation
-before materialization/open, cancellation before write with partial counters, reverse resource
-closure and suppressed close failures, JSON validity/redaction, and exit code 5.
+`actionlint` and `gitleaks` were not available locally. GitHub evaluates the workflow and runs the
+full-history Gitleaks repository gate after the commits are pushed to PR #13.
+
+The focused suites include 39 Engine tests and 16 CLI tests. Review regression coverage proves
+structured cancellation-callback failures and serialization, real CSV/H2 cancellation boundaries,
+parse-time JSON selection/redaction, complete unknown-runtime metrics, and populated/empty
+`TIME_WITH_TIMEZONE` rejection. Existing coverage continues to prove reverse resource closure,
+suppressed close failures, bounded batches, partial counters, and exit code 5.
 
 ## Packaging and Dependency Checks
 
@@ -61,8 +70,13 @@ java -jar cli/target/astrasync-cli-0.1.0-SNAPSHOT-all.jar run --metrics json exa
 
 returned one JSON object on stdout with `status=SUCCEEDED`, `job=csv-file-copy`,
 `deliveryGuarantee=at-most-once`, and `recordsRead=recordsWritten=2`; it created the documented
-create-new CSV output. The generated output was removed after the check so the example remains
-repeatable.
+create-new CSV output. The output is ignored by Git and must be absent before that example is run
+again.
+
+Packaged review regressions also passed: a missing JobSpec with `--metrics json` returned exit 2
+and exactly one sanitized JSON object; an unknown option containing `super-secret-value` returned
+exit 2 without emitting that value; and `run --version` returned exit 0 with
+`AstraSync 0.1.0-SNAPSHOT`.
 
 ## Acceptance Summary
 
@@ -73,6 +87,12 @@ repeatable.
   does not interrupt a driver call already in progress.
 - Source and sink ownership remains single-threaded and reverse-ordered at close. A later failure
   or cancellation can leave already committed batches in the output; Phase 0 remains at-most-once.
+- Cancellation callback defects retain partial metrics and close-failure evidence without being
+  misreported as successful cancellation.
+- JDBC zoned time is rejected before the first row request, including for an empty result set, so
+  no offset is silently discarded.
+- Helm resource names are release-scoped and honor name/fullname overrides while retaining valid
+  component suffixes at the DNS label limit.
 - H2 is test-only. Production JDBC jobs still require a matching driver and pre-existing schema.
 
 ## Known Limits
