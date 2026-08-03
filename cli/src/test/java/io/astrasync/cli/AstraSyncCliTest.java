@@ -2,7 +2,12 @@ package io.astrasync.cli;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.astrasync.connector.file.CsvConnectorFactory;
+import io.astrasync.engine.kernel.SyncJobException;
+import io.astrasync.engine.kernel.SyncResult;
+import io.astrasync.engine.kernel.SyncStage;
 import io.astrasync.engine.local.LocalJobRunner;
 import io.astrasync.engine.plan.ConnectorRegistry;
 import java.io.IOException;
@@ -105,6 +110,71 @@ class AstraSyncCliTest {
     }
 
     @Test
+    void emitsOneMachineReadableSuccessObjectWithoutConnectorValues() throws IOException {
+        Path input = write("json-input.csv", "id\r\n1\r\n");
+        Path output = tempDirectory.resolve("json-output.csv");
+        Path job = writeJob("json-job.yaml", input, output, "at-most-once", "");
+
+        Invocation invocation = invoke("run", "--metrics", "json", job.toString());
+        JsonNode report = new ObjectMapper().readTree(invocation.stdout());
+
+        assertThat(invocation.exitCode()).isZero();
+        assertThat(invocation.stderr()).isEmpty();
+        assertThat(report.isObject()).isTrue();
+        assertThat(report.get("status").asText()).isEqualTo("SUCCEEDED");
+        assertThat(report.get("job").asText()).isEqualTo("cli-test");
+        assertThat(report.get("deliveryGuarantee").asText()).isEqualTo("at-most-once");
+        assertThat(report.get("recordsRead").asInt()).isEqualTo(1);
+        assertThat(report.get("recordsWritten").asInt()).isEqualTo(1);
+        assertThat(invocation.stdout()).doesNotContain(input.toString(), output.toString(), "password", "secret");
+    }
+
+    @Test
+    void emitsRedactedJsonRuntimeFailureWithPartialCounters() throws IOException {
+        Path input = write("json-malformed.csv", "id,name\r\n1,Ada\r\n2\r\n");
+        Path output = tempDirectory.resolve("json-partial.csv");
+        Path job = writeJob("json-malformed-job.yaml", input, output, "at-most-once", "");
+
+        Invocation invocation = invoke("run", "--metrics", "json", job.toString());
+        JsonNode report = new ObjectMapper().readTree(invocation.stderr());
+
+        assertThat(invocation.exitCode()).isEqualTo(AstraSyncCli.EXIT_RUNTIME);
+        assertThat(invocation.stdout()).isEmpty();
+        assertThat(report.get("status").asText()).isEqualTo("FAILED");
+        assertThat(report.get("category").asText()).isEqualTo("runtime");
+        assertThat(report.get("stage").asText()).isEqualTo("SOURCE_READ");
+        assertThat(report.get("recordsRead").asInt()).isEqualTo(1);
+        assertThat(report.get("recordsWritten").asInt()).isEqualTo(1);
+        assertThat(invocation.stderr()).doesNotContain(input.toString(), output.toString(), "password", "secret");
+    }
+
+    @Test
+    void mapsCancellationToJsonAndExitCodeFive() throws IOException {
+        Path input = write("json-cancel-input.csv", "id\r\n1\r\n");
+        Path output = tempDirectory.resolve("json-cancel-output.csv");
+        Path job = writeJob("json-cancel-job.yaml", input, output, "at-most-once", "");
+        SyncJobException cancellation =
+                new SyncJobException(SyncStage.CANCELLED, "job cancelled", null, new SyncResult(1, 0, 1, 1, 1));
+
+        Invocation invocation = invokeWithRunner(
+                () -> {
+                    throw cancellation;
+                },
+                "run",
+                "--metrics",
+                "json",
+                job.toString());
+        JsonNode report = new ObjectMapper().readTree(invocation.stderr());
+
+        assertThat(invocation.exitCode()).isEqualTo(AstraSyncCli.EXIT_CANCELLED);
+        assertThat(report.get("status").asText()).isEqualTo("FAILED");
+        assertThat(report.get("category").asText()).isEqualTo("cancelled");
+        assertThat(report.get("stage").asText()).isEqualTo("CANCELLED");
+        assertThat(report.get("recordsRead").asInt()).isEqualTo(1);
+        assertThat(invocation.stderr()).doesNotContain(input.toString(), output.toString(), "password", "secret");
+    }
+
+    @Test
     void preservesExistingOutputAndReportsRuntimeStage() throws IOException {
         Path input = write("existing-input.csv", "id\r\n1\r\n");
         Path output = write("existing-output.csv", "original");
@@ -147,12 +217,14 @@ class AstraSyncCliTest {
     }
 
     private Invocation invoke(String... args) {
+        return invokeWithRunner(() -> new LocalJobRunner(ConnectorRegistry.of(new CsvConnectorFactory())), args);
+    }
+
+    private Invocation invokeWithRunner(java.util.function.Supplier<LocalJobRunner> runner, String... args) {
         StringWriter stdout = new StringWriter();
         StringWriter stderr = new StringWriter();
-        CommandLine commandLine = AstraSyncCli.newCommandLine(
-                () -> new LocalJobRunner(ConnectorRegistry.of(new CsvConnectorFactory())),
-                new PrintWriter(stdout, true),
-                new PrintWriter(stderr, true));
+        CommandLine commandLine =
+                AstraSyncCli.newCommandLine(runner, new PrintWriter(stdout, true), new PrintWriter(stderr, true));
         int exitCode = commandLine.execute(args);
         return new Invocation(exitCode, stdout.toString(), stderr.toString());
     }

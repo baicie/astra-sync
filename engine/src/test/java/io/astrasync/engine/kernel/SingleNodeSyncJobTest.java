@@ -16,6 +16,69 @@ import org.junit.jupiter.api.Test;
 
 class SingleNodeSyncJobTest {
     @Test
+    void cancellationBeforeOpenLeavesBothResourcesUntouched() {
+        LifecycleSource source = new LifecycleSource(RowBatch.end());
+        LifecycleSink sink = new LifecycleSink();
+
+        assertThatThrownBy(() -> SingleNodeSyncJob.builder()
+                        .source(source)
+                        .sink(sink)
+                        .cancellationToken(() -> true)
+                        .build()
+                        .run())
+                .isInstanceOfSatisfying(SyncJobException.class, exception -> {
+                    assertThat(exception.stage()).isEqualTo(SyncStage.CANCELLED);
+                    assertThat(exception.partialResult().readCount()).isZero();
+                    assertThat(exception.partialResult().writtenCount()).isZero();
+                });
+        assertThat(source.openCount).isZero();
+        assertThat(source.closeCount).isZero();
+        assertThat(sink.openCount).isZero();
+        assertThat(sink.closeCount).isZero();
+    }
+
+    @Test
+    void cancellationAfterSourceOpenClosesOnlyTheOpenedSource() {
+        LifecycleSource source = new LifecycleSource(RowBatch.end());
+        LifecycleSink sink = new LifecycleSink();
+        AtomicInteger checks = new AtomicInteger();
+
+        assertThatThrownBy(() -> SingleNodeSyncJob.builder()
+                        .source(source)
+                        .sink(sink)
+                        .cancellationToken(() -> checks.incrementAndGet() >= 2)
+                        .build()
+                        .run())
+                .isInstanceOfSatisfying(SyncJobException.class, exception -> assertThat(exception.stage())
+                        .isEqualTo(SyncStage.CANCELLED));
+        assertThat(source.openCount).isEqualTo(1);
+        assertThat(source.closeCount).isEqualTo(1);
+        assertThat(sink.openCount).isZero();
+        assertThat(sink.closeCount).isZero();
+    }
+
+    @Test
+    void cancellationBeforeWriteReportsPartialReadAndClosesInReverseOrder() {
+        LifecycleSource source = new LifecycleSource(RowBatch.last(List.of(Row.of("id", 1), Row.of("id", 2))));
+        LifecycleSink sink = new LifecycleSink();
+        AtomicInteger checks = new AtomicInteger();
+
+        assertThatThrownBy(() -> SingleNodeSyncJob.builder()
+                        .source(source)
+                        .sink(sink)
+                        .cancellationToken(() -> checks.incrementAndGet() >= 4)
+                        .build()
+                        .run())
+                .isInstanceOfSatisfying(SyncJobException.class, exception -> {
+                    assertThat(exception.stage()).isEqualTo(SyncStage.CANCELLED);
+                    assertThat(exception.partialResult().readCount()).isEqualTo(2);
+                    assertThat(exception.partialResult().writtenCount()).isZero();
+                });
+        assertThat(source.closeCount).isEqualTo(1);
+        assertThat(sink.closeCount).isEqualTo(1);
+    }
+
+    @Test
     void runsMultipleBoundedBatchesThroughTransformsInOrder() {
         List<Row> written = new ArrayList<>();
         List<Integer> writtenBatchSizes = new ArrayList<>();

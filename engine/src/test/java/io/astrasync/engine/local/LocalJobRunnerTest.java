@@ -32,6 +32,21 @@ import org.junit.jupiter.api.Test;
 
 class LocalJobRunnerTest {
     @Test
+    void cancellationBeforeMaterializationDoesNotCreateEitherConnector() {
+        List<String> events = new ArrayList<>();
+        ProbeFactory source = new ProbeFactory("source", SOURCE, events, RowBatch.end());
+        ProbeFactory sink = new ProbeFactory("sink", SINK, events, null);
+
+        assertThatThrownBy(() -> new LocalJobRunner(ConnectorRegistry.of(source, sink))
+                        .run(jobSpec("source", "sink"), () -> true))
+                .isInstanceOfSatisfying(io.astrasync.engine.kernel.SyncJobException.class, exception -> {
+                    assertThat(exception.stage()).isEqualTo(io.astrasync.engine.kernel.SyncStage.CANCELLED);
+                    assertThat(exception.partialResult().readCount()).isZero();
+                });
+        assertThat(events).isEmpty();
+    }
+
+    @Test
     void compilesBeforeCreatingAndCreatesBeforeOpening() {
         List<String> events = new ArrayList<>();
         ProbeFactory source = new ProbeFactory("source", SOURCE, events, RowBatch.last(List.of(Row.of("id", "1"))));

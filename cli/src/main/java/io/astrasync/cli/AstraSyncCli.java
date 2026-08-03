@@ -1,10 +1,14 @@
 package io.astrasync.cli;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.astrasync.connector.file.CsvConnectorFactory;
 import io.astrasync.connector.jdbc.JdbcConnectorFactory;
 import io.astrasync.engine.jobspec.JobSpec;
 import io.astrasync.engine.jobspec.JobSpecParser;
 import io.astrasync.engine.kernel.SyncJobException;
+import io.astrasync.engine.kernel.SyncResult;
+import io.astrasync.engine.kernel.SyncStage;
 import io.astrasync.engine.local.LocalJobRunner;
 import io.astrasync.engine.local.LocalRunResult;
 import io.astrasync.engine.plan.ConnectorRegistry;
@@ -13,12 +17,14 @@ import java.io.PrintWriter;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.LinkedHashMap;
 import java.util.Objects;
 import java.util.concurrent.Callable;
 import java.util.function.Supplier;
 import picocli.CommandLine;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Model.CommandSpec;
+import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
 import picocli.CommandLine.Spec;
 
@@ -32,6 +38,7 @@ public final class AstraSyncCli implements Callable<Integer> {
     public static final int EXIT_INPUT = 2;
     public static final int EXIT_VALIDATION = 3;
     public static final int EXIT_RUNTIME = 4;
+    public static final int EXIT_CANCELLED = 5;
 
     @Spec
     private CommandSpec commandSpec;
@@ -74,42 +81,66 @@ public final class AstraSyncCli implements Callable<Integer> {
         @Parameters(index = "0", paramLabel = "<job-spec>", description = "Path to a JobSpec YAML or JSON file.")
         private Path jobSpecPath;
 
+        @Option(
+                names = "--metrics",
+                defaultValue = "text",
+                description = "Metrics output format: text or json (default: ${DEFAULT-VALUE}).")
+        private String reportFormat;
+
         private RunCommand(Supplier<LocalJobRunner> runner) {
             this.runner = runner;
         }
 
         @Override
         public Integer call() {
+            if (!isSupportedReportFormat()) {
+                reportFailure("input", "invalid metrics format", null, null);
+                return EXIT_INPUT;
+            }
             String document;
             try {
                 document = Files.readString(jobSpecPath, StandardCharsets.UTF_8);
             } catch (IOException | RuntimeException exception) {
-                failure("input", "cannot read JobSpec: " + exception.getMessage());
+                reportFailure("input", "cannot read JobSpec: " + exception.getMessage(), null, null);
                 return EXIT_INPUT;
             }
 
             try {
                 JobSpec jobSpec = new JobSpecParser().parse(document);
                 LocalRunResult result = runner.get().run(jobSpec);
-                commandSpec.commandLine().getOut().println(success(result));
+                reportSuccess(result);
                 return EXIT_SUCCESS;
             } catch (SyncJobException exception) {
-                failure(
-                        "runtime",
-                        "stage=" + exception.stage() + " " + exception.getMessage() + " recordsRead="
-                                + exception.partialResult().readCount() + " recordsWritten="
-                                + exception.partialResult().writtenCount());
-                return EXIT_RUNTIME;
+                String category = exception.stage() == SyncStage.CANCELLED ? "cancelled" : "runtime";
+                String text = "stage=" + exception.stage() + " " + exception.getMessage() + " recordsRead="
+                        + exception.partialResult().readCount() + " recordsWritten="
+                        + exception.partialResult().writtenCount();
+                reportFailure(category, text, exception.stage().name(), exception.partialResult());
+                return exception.stage() == SyncStage.CANCELLED ? EXIT_CANCELLED : EXIT_RUNTIME;
             } catch (IllegalArgumentException exception) {
-                failure("validation", exception.getMessage());
+                reportFailure("validation", exception.getMessage(), null, null);
                 return EXIT_VALIDATION;
             } catch (RuntimeException exception) {
-                failure("runtime", exception.getMessage());
+                reportFailure("runtime", "runtime execution failed", null, null);
                 return EXIT_RUNTIME;
             }
         }
 
-        private String success(LocalRunResult result) {
+        private void reportSuccess(LocalRunResult result) {
+            if (isJsonReport()) {
+                LinkedHashMap<String, Object> report = new LinkedHashMap<>();
+                report.put("status", "SUCCEEDED");
+                report.put("job", result.plan().jobName());
+                report.put(
+                        "deliveryGuarantee", result.plan().deliveryGuarantee().externalName());
+                addMetrics(report, result.metrics());
+                commandSpec.commandLine().getOut().println(toJson(report));
+                return;
+            }
+            commandSpec.commandLine().getOut().println(successText(result));
+        }
+
+        private String successText(LocalRunResult result) {
             return "SUCCEEDED job=" + result.plan().jobName() + " recordsRead="
                     + result.metrics().readCount()
                     + " recordsWritten=" + result.metrics().writtenCount() + " batches="
@@ -118,11 +149,67 @@ public final class AstraSyncCli implements Callable<Integer> {
                     + result.metrics().elapsedNanos() / 1_000_000;
         }
 
-        private void failure(String category, String message) {
+        private void reportFailure(String category, String textMessage, String stage, SyncResult partialResult) {
+            if (isJsonReport()) {
+                LinkedHashMap<String, Object> report = new LinkedHashMap<>();
+                report.put("status", "FAILED");
+                report.put("category", category);
+                if (stage != null) {
+                    report.put("stage", stage);
+                }
+                report.put("message", jsonMessage(category, textMessage));
+                if (partialResult != null) {
+                    addMetrics(report, partialResult);
+                }
+                commandSpec.commandLine().getErr().println(toJson(report));
+                return;
+            }
             commandSpec
                     .commandLine()
                     .getErr()
-                    .println("FAILED category=" + category + " message=" + singleLine(message));
+                    .println("FAILED category=" + category + " message=" + singleLine(textMessage));
+        }
+
+        private static void addMetrics(LinkedHashMap<String, Object> report, SyncResult metrics) {
+            report.put("recordsRead", metrics.readCount());
+            report.put("recordsWritten", metrics.writtenCount());
+            report.put("batches", metrics.batchCount());
+            report.put("maxBatchRecords", metrics.maxObservedBatchSize());
+            report.put("elapsedMillis", metrics.elapsedNanos() / 1_000_000);
+        }
+
+        private static String jsonMessage(String category, String message) {
+            if ("input".equals(category)) {
+                return "cannot read JobSpec";
+            }
+            if ("runtime".equals(category) && message != null && message.startsWith("stage=")) {
+                int separator = message.indexOf(' ');
+                String stage = separator > 0 ? message.substring("stage=".length(), separator) : "UNKNOWN";
+                return "runtime failure at " + stage;
+            }
+            if ("cancelled".equals(category)) {
+                return "job cancelled";
+            }
+            if ("validation".equals(category)) {
+                return "job validation failed";
+            }
+            return "runtime execution failed";
+        }
+
+        private static String toJson(LinkedHashMap<String, Object> report) {
+            try {
+                return OBJECT_MAPPER.writeValueAsString(report);
+            } catch (JsonProcessingException exception) {
+                throw new IllegalStateException("failed to serialize metrics report", exception);
+            }
+        }
+
+        private boolean isSupportedReportFormat() {
+            return "text".equalsIgnoreCase(reportFormat) || "json".equalsIgnoreCase(reportFormat);
+        }
+
+        private boolean isJsonReport() {
+            return "json".equalsIgnoreCase(reportFormat);
         }
 
         private static String singleLine(String message) {
@@ -132,4 +219,6 @@ public final class AstraSyncCli implements Callable<Integer> {
             return message.replace('\r', ' ').replace('\n', ' ');
         }
     }
+
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 }

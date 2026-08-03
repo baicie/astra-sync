@@ -15,12 +15,14 @@ public final class SingleNodeSyncJob {
     private final List<RecordTransform> transforms;
     private final BatchSink sink;
     private final int maxBatchRecords;
+    private final CancellationToken cancellationToken;
 
     private SingleNodeSyncJob(Builder builder) {
         this.source = builder.source;
         this.transforms = List.copyOf(builder.transforms);
         this.sink = builder.sink;
         this.maxBatchRecords = builder.maxBatchRecords;
+        this.cancellationToken = builder.cancellationToken;
     }
 
     public static Builder builder() {
@@ -35,6 +37,7 @@ public final class SingleNodeSyncJob {
         SyncJobException failure = null;
 
         try {
+            checkCancelled(metrics);
             try {
                 source.open();
                 sourceOpened = true;
@@ -42,6 +45,7 @@ public final class SingleNodeSyncJob {
                 throw metrics.failure(SyncStage.SOURCE_OPEN, "failed to open source", exception);
             }
 
+            checkCancelled(metrics);
             try {
                 sink.open();
                 sinkOpened = true;
@@ -51,6 +55,7 @@ public final class SingleNodeSyncJob {
 
             boolean endOfInput = false;
             while (!endOfInput) {
+                checkCancelled(metrics);
                 RowBatch batch;
                 try {
                     batch = Objects.requireNonNull(source.readBatch(maxBatchRecords), "source returned null batch");
@@ -79,6 +84,7 @@ public final class SingleNodeSyncJob {
                 }
 
                 if (!transformedRows.isEmpty()) {
+                    checkCancelled(metrics);
                     RowBatch transformedBatch =
                             batch.endOfInput() ? RowBatch.last(transformedRows) : RowBatch.data(transformedRows);
                     try {
@@ -109,6 +115,12 @@ public final class SingleNodeSyncJob {
         return metrics.snapshot();
     }
 
+    private void checkCancelled(MutableMetrics metrics) {
+        if (cancellationToken.isCancelled()) {
+            throw metrics.cancelled();
+        }
+    }
+
     private static SyncJobException close(
             String resourceName, AutoCloseable resource, SyncJobException failure, MutableMetrics metrics) {
         try {
@@ -132,6 +144,7 @@ public final class SingleNodeSyncJob {
         private final List<RecordTransform> transforms = new ArrayList<>();
         private BatchSink sink;
         private int maxBatchRecords = DEFAULT_MAX_BATCH_RECORDS;
+        private CancellationToken cancellationToken = CancellationToken.neverCancelled();
 
         public Builder source(BatchSource source) {
             this.source = Objects.requireNonNull(source, "source must not be null");
@@ -153,6 +166,11 @@ public final class SingleNodeSyncJob {
                 throw new IllegalArgumentException("maxBatchRecords must be positive");
             }
             this.maxBatchRecords = maxBatchRecords;
+            return this;
+        }
+
+        public Builder cancellationToken(CancellationToken cancellationToken) {
+            this.cancellationToken = Objects.requireNonNull(cancellationToken, "cancellationToken must not be null");
             return this;
         }
 
@@ -202,6 +220,10 @@ public final class SingleNodeSyncJob {
 
         private SyncJobException failure(SyncStage stage, String message, Throwable cause) {
             return new SyncJobException(stage, message, cause, snapshot());
+        }
+
+        private SyncJobException cancelled() {
+            return new SyncJobException(SyncStage.CANCELLED, "job cancelled", null, snapshot());
         }
     }
 }

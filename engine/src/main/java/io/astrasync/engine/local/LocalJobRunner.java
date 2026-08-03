@@ -6,8 +6,11 @@ import io.astrasync.connector.api.ConnectorRole;
 import io.astrasync.connector.api.sink.BatchSink;
 import io.astrasync.connector.api.source.BatchSource;
 import io.astrasync.engine.jobspec.JobSpec;
+import io.astrasync.engine.kernel.CancellationToken;
 import io.astrasync.engine.kernel.SingleNodeSyncJob;
+import io.astrasync.engine.kernel.SyncJobException;
 import io.astrasync.engine.kernel.SyncResult;
+import io.astrasync.engine.kernel.SyncStage;
 import io.astrasync.engine.plan.CompiledJobPlan;
 import io.astrasync.engine.plan.ConnectorPlan;
 import io.astrasync.engine.plan.ConnectorRegistry;
@@ -25,17 +28,35 @@ public final class LocalJobRunner {
     }
 
     public LocalRunResult run(JobSpec jobSpec) {
+        return run(jobSpec, CancellationToken.neverCancelled());
+    }
+
+    public LocalRunResult run(JobSpec jobSpec, CancellationToken cancellationToken) {
         CompiledJobPlan plan = compiler.compile(Objects.requireNonNull(jobSpec, "jobSpec must not be null"));
+        CancellationToken token = Objects.requireNonNull(cancellationToken, "cancellationToken must not be null");
+        checkCancelled(token);
 
         BatchSource source = createSource(plan.source());
+        checkCancelled(token);
         BatchSink sink = createSink(plan.sink());
         SyncResult metrics = SingleNodeSyncJob.builder()
                 .source(source)
                 .sink(sink)
                 .maxBatchRecords(plan.maxBatchRecords())
+                .cancellationToken(token)
                 .build()
                 .run();
         return new LocalRunResult(plan, metrics);
+    }
+
+    private static void checkCancelled(CancellationToken cancellationToken) {
+        if (cancellationToken.isCancelled()) {
+            throw new SyncJobException(
+                    SyncStage.CANCELLED,
+                    "job cancelled before connector materialization",
+                    null,
+                    new SyncResult(0, 0, 0, 0, 0));
+        }
     }
 
     private BatchSource createSource(ConnectorPlan connectorPlan) {
