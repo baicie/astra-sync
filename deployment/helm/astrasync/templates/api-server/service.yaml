@@ -2,7 +2,7 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ include "astrasync.fullname" . }}-api-server
+  name: {{ include "astrasync.componentFullname" (dict "context" . "component" "api-server") }}
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "astrasync.labels" . | nindent 4 }}

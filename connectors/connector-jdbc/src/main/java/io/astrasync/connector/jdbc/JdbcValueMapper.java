@@ -48,6 +48,14 @@ final class JdbcValueMapper {
         return Row.of(values);
     }
 
+    static void validateSourceColumns(List<Column> columns) {
+        for (Column column : columns) {
+            if (!isSupportedSourceType(column.sqlType())) {
+                throw unsupported(column);
+            }
+        }
+    }
+
     static void validateSinkValue(String column, Object value) {
         if (value == null
                 || value instanceof String
@@ -90,11 +98,45 @@ final class JdbcValueMapper {
             case Types.FLOAT, Types.DOUBLE -> nullableDouble(resultSet, index);
             case Types.DECIMAL, Types.NUMERIC -> resultSet.getBigDecimal(index);
             case Types.DATE -> localDate(resultSet.getObject(index));
-            case Types.TIME, Types.TIME_WITH_TIMEZONE -> localTime(resultSet.getObject(index));
+            case Types.TIME -> localTime(resultSet.getObject(index));
             case Types.TIMESTAMP -> localDateTime(resultSet.getObject(index));
             case Types.TIMESTAMP_WITH_TIMEZONE -> offsetDateTime(resultSet.getObject(index));
             case Types.BINARY, Types.VARBINARY, Types.LONGVARBINARY, Types.BLOB -> copyBytes(resultSet.getBytes(index));
             default -> throw unsupported(column);
+        };
+    }
+
+    private static boolean isSupportedSourceType(int sqlType) {
+        return switch (sqlType) {
+            case Types.NULL,
+                    Types.CHAR,
+                    Types.VARCHAR,
+                    Types.LONGVARCHAR,
+                    Types.NCHAR,
+                    Types.NVARCHAR,
+                    Types.LONGNVARCHAR,
+                    Types.CLOB,
+                    Types.SQLXML,
+                    Types.BOOLEAN,
+                    Types.BIT,
+                    Types.TINYINT,
+                    Types.SMALLINT,
+                    Types.INTEGER,
+                    Types.BIGINT,
+                    Types.REAL,
+                    Types.FLOAT,
+                    Types.DOUBLE,
+                    Types.DECIMAL,
+                    Types.NUMERIC,
+                    Types.DATE,
+                    Types.TIME,
+                    Types.TIMESTAMP,
+                    Types.TIMESTAMP_WITH_TIMEZONE,
+                    Types.BINARY,
+                    Types.VARBINARY,
+                    Types.LONGVARBINARY,
+                    Types.BLOB -> true;
+            default -> false;
         };
     }
 

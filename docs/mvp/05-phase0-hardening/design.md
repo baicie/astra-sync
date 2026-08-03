@@ -24,13 +24,24 @@ not passed into connector APIs, so a connector call already in progress remains 
 own timeout/driver behavior. The `LocalJobRunner` overload makes cancellation available to
 embedding code while the CLI retains the never-cancelled default.
 
+If the embedding callback throws, the Engine reports `CANCELLATION_CHECK` with partial metrics
+instead of allowing an unstructured exception to escape. This keeps reverse close and suppressed
+failure behavior intact without misreporting a callback defect as user cancellation.
+
 ## Metrics Report Flow
 
-`RunCommand` selects a `ReportFormat` enum from `--metrics`. It delegates plan and terminal metrics
-to a report serializer that writes one line/object. Text mode preserves the Slice 03 line. JSON
-mode uses a Jackson `ObjectMapper` and an insertion-ordered map with only the ADR-020 fields. The
-same formatter handles success, validation/input failures, runtime stages, and cancellation; it
-never serializes the JobSpec or connector options.
+`RunCommand` validates the `--metrics` string as `text` or `json` and writes one line/object through
+shared reporting helpers. Text mode preserves the Slice 03 line. JSON mode uses a Jackson
+`ObjectMapper` and an insertion-ordered map with only the ADR-020 fields. The report paths handle
+success, validation/input failures, runtime stages, and cancellation without serializing the
+JobSpec or connector options.
+
+Picocli parameter failures use the same output contract and JSON serializer. A small bootstrap
+inspection recognizes only the `--metrics` option and does not include rejected argument text in
+diagnostics. Unexpected runtime failures with no `SyncResult` use `stage=UNKNOWN` and zero counters.
+Both the root command and `run` subcommand expose the same explicit version string. Bootstrap
+inspection stops at the `--` end-of-options marker, does not consume an option token as a missing
+metrics value, and uses the last complete selector before that boundary.
 
 ## Resource and Failure Test Matrix
 
@@ -42,6 +53,10 @@ never serializes the JobSpec or connector options.
 | Source/Sink close failure | primary stage remains; close failure is suppressed |
 | JDBC write failure | current batch rolls back; prior commits remain |
 | JSON report | parser accepts exactly one object and forbidden values are absent |
+| invalid CLI arguments | requested JSON shape is preserved and raw arguments are absent |
+| cancellation callback failure | stage/counters survive; close failures are suppressed |
+| exception serialization | stage and partial result survive a Java serialization round trip |
+| JDBC `TIME_WITH_TIMEZONE` | rejected for populated and empty results with column/type evidence; no offset is discarded |
 | boundedness | slow Sink sees no next Source pull before current write returns |
 
 ## Examples and Evidence
@@ -51,6 +66,14 @@ that H2 is test-only, output files use create-new semantics, JDBC schemas must p
 runtime is at-most-once with possible partial output. Verification records exact commands and
 commit IDs; release evidence is repository documentation, not a generated binary or persistent
 metrics store.
+
+## CI Scope
+
+The Java gate runs the full Maven `verify` lifecycle and Spotless for every change because the
+Phase 0 deliverable is Java. Go control-plane and Helm checks run when their owned paths change;
+planned, untouched subsystem skeletons do not block a Java-only MVP branch. Protocol validation
+continues to run independently of Helm. Repository policy and secret scanning always run with full
+Git history so pull-request commit ranges are resolvable.
 
 ## Change Control
 

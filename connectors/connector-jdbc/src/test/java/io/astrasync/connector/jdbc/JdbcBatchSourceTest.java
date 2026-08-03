@@ -88,6 +88,32 @@ class JdbcBatchSourceTest {
     }
 
     @Test
+    void rejectsTimeWithTimezoneWithoutDiscardingItsOffset() throws Exception {
+        String url = JdbcTestSupport.url();
+        try (BatchSource source = factory.createSource(ConnectorConfiguration.of(
+                Map.of("url", url, "query", "SELECT TIME WITH TIME ZONE '10:15:30+02:00' AS \"zoned_time\"")))) {
+            source.open();
+            assertThatThrownBy(() -> source.readBatch(1))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("zoned_time")
+                    .hasMessageContaining("TIME WITH TIME ZONE");
+        }
+    }
+
+    @Test
+    void rejectsTimeWithTimezoneForAnEmptyResultSet() throws Exception {
+        String url = JdbcTestSupport.url();
+        try (BatchSource source = factory.createSource(ConnectorConfiguration.of(Map.of(
+                "url", url, "query", "SELECT TIME WITH TIME ZONE '10:15:30+02:00' AS \"zoned_time\" WHERE FALSE")))) {
+            source.open();
+            assertThatThrownBy(() -> source.readBatch(1))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("zoned_time")
+                    .hasMessageContaining("TIME WITH TIME ZONE");
+        }
+    }
+
+    @Test
     void rejectsInvalidBatchRequestsAndCallsAfterEnd() throws Exception {
         String url = JdbcTestSupport.url();
         createSourceTable(url);

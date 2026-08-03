@@ -6,7 +6,7 @@ public final class SyncJobException extends RuntimeException {
     private static final long serialVersionUID = 1L;
 
     private final SyncStage stage;
-    private final transient SyncResult partialResult;
+    private final SyncResult partialResult;
 
     public SyncJobException(SyncStage stage, String message, Throwable cause, SyncResult partialResult) {
         super(message, cause);

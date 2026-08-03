@@ -18,8 +18,43 @@ env:
   MAVEN_OPTS: -Dmaven.repo.local=${{ github.workspace }}/.m2/repository
 
 jobs:
+  changes:
+    name: Detect changed subsystems
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      go: ${{ steps.filter.outputs.go }}
+      helm: ${{ steps.filter.outputs.helm }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect scoped changes
+        id: filter
+        shell: bash
+        env:
+          EVENT_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          set -euo pipefail
+          base_sha="${EVENT_BASE_SHA}"
+          if [[ -z "${base_sha}" || "${base_sha}" =~ ^0+$ ]]; then
+            base_sha="$(git rev-list --max-parents=0 HEAD)"
+          fi
+          if git diff --quiet "${base_sha}" HEAD -- control-plane; then
+            echo "go=false" >> "${GITHUB_OUTPUT}"
+          else
+            echo "go=true" >> "${GITHUB_OUTPUT}"
+          fi
+          if git diff --quiet "${base_sha}" HEAD -- deployment/helm; then
+            echo "helm=false" >> "${GITHUB_OUTPUT}"
+          else
+            echo "helm=true" >> "${GITHUB_OUTPUT}"
+          fi
+
   java:
-    name: Java 21 Maven model validation
+    name: Java 21 Maven verification
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -33,11 +68,16 @@ jobs:
           java-version: '21'
           cache: maven
 
-      - name: Validate Maven reactor and dependencies
-        run: mvn -B -ntp validate
+      - name: Verify Maven reactor
+        run: mvn -B -ntp verify -DskipITs
+
+      - name: Check Java formatting
+        run: mvn -B -ntp spotless:check
 
   go:
     name: Go checks
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     strategy:
@@ -86,6 +126,7 @@ jobs:
 
   protocols:
     name: Protocol and YAML validation
+    needs: changes
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -103,11 +144,13 @@ jobs:
         run: mvn -B -ntp -pl protocol -am validate
 
       - name: Set up Helm
+        if: needs.changes.outputs.helm == 'true'
         uses: azure/setup-helm@v4
         with:
           version: v3.15.4
 
       - name: Lint Helm chart
+        if: needs.changes.outputs.helm == 'true'
         run: helm lint deployment/helm/astrasync
 
   repository:
@@ -117,6 +160,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Check required files
         shell: bash

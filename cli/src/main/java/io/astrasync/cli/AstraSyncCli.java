@@ -32,8 +32,9 @@ import picocli.CommandLine.Spec;
         name = "astrasync",
         description = "Run bounded AstraSync jobs in the current process.",
         mixinStandardHelpOptions = true,
-        version = "AstraSync 0.1.0-SNAPSHOT")
+        version = AstraSyncCli.VERSION)
 public final class AstraSyncCli implements Callable<Integer> {
+    static final String VERSION = "AstraSync 0.1.0-SNAPSHOT";
     public static final int EXIT_SUCCESS = 0;
     public static final int EXIT_INPUT = 2;
     public static final int EXIT_VALIDATION = 3;
@@ -64,14 +65,52 @@ public final class AstraSyncCli implements Callable<Integer> {
         commandLine.addSubcommand("run", new RunCommand(runner));
         commandLine.setOut(Objects.requireNonNull(out, "out must not be null"));
         commandLine.setErr(Objects.requireNonNull(err, "err must not be null"));
+        commandLine.setParameterExceptionHandler(
+                (exception, arguments) -> reportParameterFailure(commandLine, arguments));
         return commandLine;
+    }
+
+    private static int reportParameterFailure(CommandLine commandLine, String[] arguments) {
+        if (requestsJsonReport(arguments)) {
+            LinkedHashMap<String, Object> report = new LinkedHashMap<>();
+            report.put("status", "FAILED");
+            report.put("category", "input");
+            report.put("message", "invalid command arguments");
+            commandLine.getErr().println(toJson(report));
+        } else {
+            commandLine.getErr().println("FAILED category=input message=invalid command arguments");
+        }
+        return EXIT_INPUT;
+    }
+
+    private static boolean requestsJsonReport(String[] arguments) {
+        String selectedFormat = null;
+        for (int index = 0; index < arguments.length; index++) {
+            String argument = arguments[index];
+            if ("--".equals(argument)) {
+                break;
+            }
+            if ("--metrics".equals(argument)
+                    && index + 1 < arguments.length
+                    && arguments[index + 1] != null
+                    && !arguments[index + 1].startsWith("-")) {
+                selectedFormat = arguments[++index];
+            } else if (argument != null && argument.startsWith("--metrics=")) {
+                selectedFormat = argument.substring("--metrics=".length());
+            }
+        }
+        return "json".equalsIgnoreCase(selectedFormat);
     }
 
     private static Supplier<LocalJobRunner> defaultRunner() {
         return () -> new LocalJobRunner(ConnectorRegistry.of(new CsvConnectorFactory(), new JdbcConnectorFactory()));
     }
 
-    @Command(name = "run", description = "Compile and run one UTF-8 JobSpec.", mixinStandardHelpOptions = true)
+    @Command(
+            name = "run",
+            description = "Compile and run one UTF-8 JobSpec.",
+            mixinStandardHelpOptions = true,
+            version = AstraSyncCli.VERSION)
     static final class RunCommand implements Callable<Integer> {
         private final Supplier<LocalJobRunner> runner;
 
@@ -121,7 +160,7 @@ public final class AstraSyncCli implements Callable<Integer> {
                 reportFailure("validation", exception.getMessage(), null, null);
                 return EXIT_VALIDATION;
             } catch (RuntimeException exception) {
-                reportFailure("runtime", "runtime execution failed", null, null);
+                reportFailure("runtime", "runtime execution failed", "UNKNOWN", SyncResult.empty());
                 return EXIT_RUNTIME;
             }
         }
@@ -196,14 +235,6 @@ public final class AstraSyncCli implements Callable<Integer> {
             return "runtime execution failed";
         }
 
-        private static String toJson(LinkedHashMap<String, Object> report) {
-            try {
-                return OBJECT_MAPPER.writeValueAsString(report);
-            } catch (JsonProcessingException exception) {
-                throw new IllegalStateException("failed to serialize metrics report", exception);
-            }
-        }
-
         private boolean isSupportedReportFormat() {
             return "text".equalsIgnoreCase(reportFormat) || "json".equalsIgnoreCase(reportFormat);
         }
@@ -217,6 +248,14 @@ public final class AstraSyncCli implements Callable<Integer> {
                 return "unspecified failure";
             }
             return message.replace('\r', ' ').replace('\n', ' ');
+        }
+    }
+
+    private static String toJson(LinkedHashMap<String, Object> report) {
+        try {
+            return OBJECT_MAPPER.writeValueAsString(report);
+        } catch (JsonProcessingException exception) {
+            throw new IllegalStateException("failed to serialize metrics report", exception);
         }
     }
 

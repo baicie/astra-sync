@@ -47,6 +47,24 @@ class LocalJobRunnerTest {
     }
 
     @Test
+    void cancellationCheckFailureBeforeMaterializationIsStructured() {
+        List<String> events = new ArrayList<>();
+        ProbeFactory source = new ProbeFactory("source", SOURCE, events, RowBatch.end());
+        ProbeFactory sink = new ProbeFactory("sink", SINK, events, null);
+
+        assertThatThrownBy(() -> new LocalJobRunner(ConnectorRegistry.of(source, sink))
+                        .run(jobSpec("source", "sink"), () -> {
+                            throw new IllegalStateException("token boom");
+                        }))
+                .isInstanceOfSatisfying(io.astrasync.engine.kernel.SyncJobException.class, exception -> {
+                    assertThat(exception.stage()).isEqualTo(io.astrasync.engine.kernel.SyncStage.CANCELLATION_CHECK);
+                    assertThat(exception.getCause()).hasMessage("token boom");
+                    assertThat(exception.partialResult()).isEqualTo(io.astrasync.engine.kernel.SyncResult.empty());
+                });
+        assertThat(events).isEmpty();
+    }
+
+    @Test
     void compilesBeforeCreatingAndCreatesBeforeOpening() {
         List<String> events = new ArrayList<>();
         ProbeFactory source = new ProbeFactory("source", SOURCE, events, RowBatch.last(List.of(Row.of("id", "1"))));

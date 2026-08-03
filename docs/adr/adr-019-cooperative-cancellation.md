@@ -32,6 +32,12 @@ order. A cancellation request cannot interrupt a connector call already in progr
 timeouts and database-specific interruption remain connector options. No background thread,
 forced interrupt, or asynchronous close is introduced.
 
+The token is embedding code and may itself fail. A `RuntimeException` raised while querying it is
+not reported as a successful cancellation: the runtime wraps it in `SyncJobException` with stage
+`CANCELLATION_CHECK`, the current partial `SyncResult`, and the original exception as cause. Opened
+resources still close in reverse order and close failures remain suppressed on that structured
+failure. The CLI categorizes this stage as `runtime`, not `cancelled`.
+
 `LocalJobRunner` accepts an overload with a token while its existing `run(JobSpec)` method uses
 the never-cancelled token. The CLI maps `CANCELLED` to exit code 5. Phase 0 does not install an OS
 signal handler; an embedding application may connect its signal/shutdown mechanism to the token.
@@ -41,6 +47,7 @@ signal handler; an embedding application may connect its signal/shutdown mechani
 ### Positive
 
 - Cancellation has deterministic stage, partial counters, and resource-close evidence.
+- A broken embedding callback cannot bypass the Engine failure and cleanup model.
 - Existing synchronous backpressure and connector ownership remain unchanged.
 - Embedders can implement timeouts or UI cancellation without a new executor abstraction.
 

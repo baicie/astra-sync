@@ -50,12 +50,20 @@ public final class LocalJobRunner {
     }
 
     private static void checkCancelled(CancellationToken cancellationToken) {
-        if (cancellationToken.isCancelled()) {
+        SyncResult emptyMetrics = SyncResult.empty();
+        boolean cancelled;
+        try {
+            cancelled = cancellationToken.isCancelled();
+        } catch (RuntimeException exception) {
             throw new SyncJobException(
-                    SyncStage.CANCELLED,
-                    "job cancelled before connector materialization",
-                    null,
-                    new SyncResult(0, 0, 0, 0, 0));
+                    SyncStage.CANCELLATION_CHECK,
+                    "failed to check cancellation before connector materialization",
+                    exception,
+                    emptyMetrics);
+        }
+        if (cancelled) {
+            throw new SyncJobException(
+                    SyncStage.CANCELLED, "job cancelled before connector materialization", null, emptyMetrics);
         }
     }
 

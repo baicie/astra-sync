@@ -19,6 +19,7 @@ final class JdbcBatchSource implements BatchSource {
     private PreparedStatement statement;
     private ResultSet resultSet;
     private List<JdbcValueMapper.Column> columns = List.of();
+    private boolean columnTypesValidated;
     private long recordNumber;
 
     JdbcBatchSource(JdbcConnectorOptions options) {
@@ -65,6 +66,7 @@ final class JdbcBatchSource implements BatchSource {
         if (maxRows <= 0) {
             throw new IllegalArgumentException("maxRows must be positive");
         }
+        validateColumnTypes();
 
         List<Row> rows = new ArrayList<>(Math.min(maxRows, 1_024));
         while (rows.size() < maxRows) {
@@ -105,6 +107,7 @@ final class JdbcBatchSource implements BatchSource {
         statement = null;
         connection = null;
         columns = List.of();
+        columnTypesValidated = false;
 
         RuntimeException failure = null;
         failure = closeResource(openedResultSet, "JDBC source result set", failure);
@@ -167,6 +170,20 @@ final class JdbcBatchSource implements BatchSource {
             resource.close();
         } catch (Exception exception) {
             failure.addSuppressed(exception);
+        }
+    }
+
+    private void validateColumnTypes() {
+        if (columnTypesValidated) {
+            return;
+        }
+        try {
+            JdbcValueMapper.validateSourceColumns(columns);
+            columnTypesValidated = true;
+        } catch (RuntimeException exception) {
+            throw new IllegalStateException(
+                    "failed to read JDBC source at record " + (recordNumber + 1) + ": " + exception.getMessage(),
+                    exception);
         }
     }
 

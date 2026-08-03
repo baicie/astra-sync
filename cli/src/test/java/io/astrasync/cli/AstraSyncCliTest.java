@@ -2,6 +2,7 @@ package io.astrasync.cli;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.astrasync.connector.file.CsvConnectorFactory;
@@ -28,6 +29,7 @@ class AstraSyncCliTest {
     void exposesHelpVersionAndUsageWithoutAStackTrace() {
         Invocation help = invoke("--help");
         Invocation version = invoke("--version");
+        Invocation runVersion = invoke("run", "--version");
         Invocation missingCommand = invoke();
         Invocation unknown = invoke("unknown");
 
@@ -35,10 +37,39 @@ class AstraSyncCliTest {
         assertThat(help.stdout()).contains("Usage: astrasync", "run");
         assertThat(version.exitCode()).isZero();
         assertThat(version.stdout()).contains("AstraSync 0.1.0-SNAPSHOT");
+        assertThat(runVersion.exitCode()).isZero();
+        assertThat(runVersion.stdout()).contains("AstraSync 0.1.0-SNAPSHOT");
         assertThat(missingCommand.exitCode()).isEqualTo(AstraSyncCli.EXIT_INPUT);
         assertThat(missingCommand.stderr()).contains("Usage: astrasync");
         assertThat(unknown.exitCode()).isEqualTo(AstraSyncCli.EXIT_INPUT);
-        assertThat(unknown.stderr()).contains("Unmatched argument").doesNotContain("Exception", "\tat ");
+        assertThat(unknown.stderr())
+                .contains("FAILED category=input message=invalid command arguments")
+                .doesNotContain("Exception", "\tat ");
+    }
+
+    @Test
+    void emitsSanitizedJsonForParameterFailures() throws IOException {
+        Invocation missingJob = invoke("run", "--metrics", "json");
+        Invocation unknownOption = invoke("run", "--metrics=json", "ignored.yaml", "--password", "super-secret-value");
+        Invocation recoveredSelector = invoke("run", "--metrics", "--metrics=json");
+        Invocation afterOptions = invoke("run", "--", "--metrics=json", "unexpected");
+
+        JsonNode missingReport = parseSingleJson(missingJob.stderr());
+        JsonNode unknownReport = parseSingleJson(unknownOption.stderr());
+        JsonNode recoveredReport = parseSingleJson(recoveredSelector.stderr());
+
+        assertThat(missingJob.exitCode()).isEqualTo(AstraSyncCli.EXIT_INPUT);
+        assertThat(missingJob.stdout()).isEmpty();
+        assertThat(missingReport.get("status").asText()).isEqualTo("FAILED");
+        assertThat(missingReport.get("category").asText()).isEqualTo("input");
+        assertThat(missingReport.get("message").asText()).isEqualTo("invalid command arguments");
+        assertThat(unknownOption.exitCode()).isEqualTo(AstraSyncCli.EXIT_INPUT);
+        assertThat(unknownReport).isEqualTo(missingReport);
+        assertThat(unknownOption.stderr()).doesNotContain("password", "super-secret-value", "ignored.yaml");
+        assertThat(recoveredSelector.exitCode()).isEqualTo(AstraSyncCli.EXIT_INPUT);
+        assertThat(recoveredReport).isEqualTo(missingReport);
+        assertThat(afterOptions.exitCode()).isEqualTo(AstraSyncCli.EXIT_INPUT);
+        assertThat(afterOptions.stderr().strip()).isEqualTo("FAILED category=input message=invalid command arguments");
     }
 
     @Test
@@ -116,7 +147,7 @@ class AstraSyncCliTest {
         Path job = writeJob("json-job.yaml", input, output, "at-most-once", "");
 
         Invocation invocation = invoke("run", "--metrics", "json", job.toString());
-        JsonNode report = new ObjectMapper().readTree(invocation.stdout());
+        JsonNode report = parseSingleJson(invocation.stdout());
 
         assertThat(invocation.exitCode()).isZero();
         assertThat(invocation.stderr()).isEmpty();
@@ -136,7 +167,7 @@ class AstraSyncCliTest {
         Path job = writeJob("json-malformed-job.yaml", input, output, "at-most-once", "");
 
         Invocation invocation = invoke("run", "--metrics", "json", job.toString());
-        JsonNode report = new ObjectMapper().readTree(invocation.stderr());
+        JsonNode report = parseSingleJson(invocation.stderr());
 
         assertThat(invocation.exitCode()).isEqualTo(AstraSyncCli.EXIT_RUNTIME);
         assertThat(invocation.stdout()).isEmpty();
@@ -164,7 +195,7 @@ class AstraSyncCliTest {
                 "--metrics",
                 "json",
                 job.toString());
-        JsonNode report = new ObjectMapper().readTree(invocation.stderr());
+        JsonNode report = parseSingleJson(invocation.stderr());
 
         assertThat(invocation.exitCode()).isEqualTo(AstraSyncCli.EXIT_CANCELLED);
         assertThat(report.get("status").asText()).isEqualTo("FAILED");
@@ -172,6 +203,29 @@ class AstraSyncCliTest {
         assertThat(report.get("stage").asText()).isEqualTo("CANCELLED");
         assertThat(report.get("recordsRead").asInt()).isEqualTo(1);
         assertThat(invocation.stderr()).doesNotContain(input.toString(), output.toString(), "password", "secret");
+    }
+
+    @Test
+    void emitsCompleteJsonSchemaForUnexpectedRuntimeFailure() throws IOException {
+        Path input = write("runtime-input.csv", "id\r\n1\r\n");
+        Path job = writeJob("runtime-job.yaml", input, tempDirectory.resolve("runtime-output.csv"), "at-most-once", "");
+
+        Invocation invocation = invokeWithRunner(
+                () -> {
+                    throw new IllegalStateException("internal detail");
+                },
+                "run",
+                "--metrics",
+                "json",
+                job.toString());
+        JsonNode report = parseSingleJson(invocation.stderr());
+
+        assertThat(invocation.exitCode()).isEqualTo(AstraSyncCli.EXIT_RUNTIME);
+        assertThat(report.get("category").asText()).isEqualTo("runtime");
+        assertThat(report.get("stage").asText()).isEqualTo("UNKNOWN");
+        assertThat(report.get("recordsRead").asLong()).isZero();
+        assertThat(report.get("recordsWritten").asLong()).isZero();
+        assertThat(invocation.stderr()).doesNotContain("internal detail", input.toString());
     }
 
     @Test
@@ -274,6 +328,16 @@ class AstraSyncCliTest {
 
     private static String yamlSingleQuoted(Path path) {
         return path.toString().replace("'", "''");
+    }
+
+    private static JsonNode parseSingleJson(String document) throws IOException {
+        ObjectMapper mapper = new ObjectMapper();
+        try (JsonParser parser = mapper.createParser(document)) {
+            JsonNode report = mapper.readTree(parser);
+            assertThat(report).isNotNull();
+            assertThat(parser.nextToken()).isNull();
+            return report;
+        }
     }
 
     private record Invocation(int exitCode, String stdout, String stderr) {}

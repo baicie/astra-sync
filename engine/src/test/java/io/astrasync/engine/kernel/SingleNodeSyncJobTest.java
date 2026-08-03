@@ -79,6 +79,60 @@ class SingleNodeSyncJobTest {
     }
 
     @Test
+    void cancellationCheckFailurePreservesPartialMetricsAndCloseFailures() {
+        BatchSource source = new BatchSource() {
+            @Override
+            public void open() {}
+
+            @Override
+            public RowBatch readBatch(int maxRows) {
+                return RowBatch.last(List.of(Row.of("id", 1), Row.of("id", 2)));
+            }
+
+            @Override
+            public void close() {
+                throw new IllegalStateException("source close");
+            }
+        };
+        BatchSink sink = new BatchSink() {
+            @Override
+            public void open() {}
+
+            @Override
+            public void writeBatch(RowBatch batch) {
+                throw new AssertionError("sink must not receive a batch after the token fails");
+            }
+
+            @Override
+            public void close() {
+                throw new IllegalStateException("sink close");
+            }
+        };
+        AtomicInteger checks = new AtomicInteger();
+
+        assertThatThrownBy(() -> SingleNodeSyncJob.builder()
+                        .source(source)
+                        .sink(sink)
+                        .cancellationToken(() -> {
+                            if (checks.incrementAndGet() == 4) {
+                                throw new IllegalStateException("token boom");
+                            }
+                            return false;
+                        })
+                        .build()
+                        .run())
+                .isInstanceOfSatisfying(SyncJobException.class, exception -> {
+                    assertThat(exception.stage()).isEqualTo(SyncStage.CANCELLATION_CHECK);
+                    assertThat(exception.getCause()).hasMessage("token boom");
+                    assertThat(exception.partialResult().readCount()).isEqualTo(2);
+                    assertThat(exception.partialResult().writtenCount()).isZero();
+                    assertThat(exception.getSuppressed())
+                            .extracting(Throwable::getMessage)
+                            .containsExactly("sink close", "source close");
+                });
+    }
+
+    @Test
     void runsMultipleBoundedBatchesThroughTransformsInOrder() {
         List<Row> written = new ArrayList<>();
         List<Integer> writtenBatchSizes = new ArrayList<>();

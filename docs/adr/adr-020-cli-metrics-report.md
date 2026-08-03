@@ -30,6 +30,16 @@ and elapsed duration. Runtime failures contain `status`, `category`, `stage`, `m
 one sanitized message. New fields are additive and their names use lower camel case. JSON strings
 are escaped by a standard Jackson serializer, not hand-built concatenation.
 
+The selected format also applies when Picocli rejects the command before invoking `RunCommand`,
+including missing parameters and unknown options. The parameter-error path emits one sanitized
+report and never echoes the rejected argument values. When an unexpected runtime failure has no
+Engine result, it uses stage `UNKNOWN` with zero read/write counters; these values mean execution
+metrics were unavailable, not that a completed job processed zero records.
+
+Bootstrap format detection follows command-line token boundaries: `--` ends option recognition,
+and a valueless `--metrics` does not consume a following option token. If more than one complete
+selector occurs before that boundary, the last selector determines the parameter-error format.
+
 Cancellation uses the same report contract with category `cancelled` and exit code 5. Exit codes
 0, 2, 3, and 4 retain their Slice 03 meanings. Reports never serialize connector option maps or
 exception causes.
@@ -41,6 +51,7 @@ exception causes.
 - Scripts can consume deterministic JSON without scraping human prose.
 - The default CLI behavior remains backwards compatible.
 - Reports expose partial counters and failure stages while avoiding secret-bearing values.
+- Automation receives the selected output format for parse-time and execution-time failures.
 
 ### Negative
 

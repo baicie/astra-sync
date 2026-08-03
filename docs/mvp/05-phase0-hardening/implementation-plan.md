@@ -39,6 +39,20 @@
   commit in `verification.md`.
 - Mark Phase 0 and Slice 05 complete only after every acceptance item passes.
 
+### 5. Close Review Findings
+
+- Amend ADR-016/019/020 before implementation to define unsupported zoned-time input,
+  cancellation callback failures, and parse-time metrics output.
+- Route Picocli parameter failures through sanitized text/JSON reports, complete the generic
+  runtime schema, and make root/subcommand version output consistent.
+- Preserve token callback failures, partial metrics, suppressed close failures, and serialized
+  `SyncJobException` state.
+- Reject `TIME_WITH_TIMEZONE` through the standard unsupported-type path and add H2 evidence.
+- Gate: focused regression suites, full Reactor tests, formatting, repository policy, packaged CLI,
+  and clean-worktree checks pass before the review-fix commit is pushed.
+- Upgrade Java CI from model validation to full verification, scope planned Go/Helm checks to their
+  owned paths, repair Helm helper syntax, and give secret scanning complete Git history.
+
 ## Change Control
 
 Do not add asynchronous execution, OS signal semantics, persistent metrics, retries, checkpoints,

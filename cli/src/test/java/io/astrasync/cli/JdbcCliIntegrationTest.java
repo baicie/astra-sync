@@ -1,9 +1,14 @@
 package io.astrasync.cli;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import io.astrasync.connector.file.CsvConnectorFactory;
 import io.astrasync.connector.jdbc.JdbcConnectorFactory;
+import io.astrasync.engine.jobspec.JobSpec;
+import io.astrasync.engine.jobspec.JobSpecParser;
+import io.astrasync.engine.kernel.SyncJobException;
+import io.astrasync.engine.kernel.SyncStage;
 import io.astrasync.engine.local.LocalJobRunner;
 import io.astrasync.engine.plan.ConnectorRegistry;
 import java.io.IOException;
@@ -80,6 +85,47 @@ class JdbcCliIntegrationTest {
         }
     }
 
+    @Test
+    void csvCancellationLeavesOnlyTheCompletedBatchAndPartialMetrics() throws Exception {
+        Path input = write("cancel-file-input.csv", "id,name\r\n1,Ada\r\n2,Lin\r\n");
+        Path output = tempDirectory.resolve("cancel-file-output.csv");
+        Path job = write(
+                "cancel-file.yaml",
+                jobYaml("csv", "      path: '" + yaml(input) + "'", "csv", "      path: '" + yaml(output) + "'"));
+        LocalJobRunner runner = localRunner();
+
+        assertThatThrownBy(() -> runner.run(parse(job), () -> fileHasContent(output)))
+                .isInstanceOfSatisfying(SyncJobException.class, exception -> {
+                    assertThat(exception.stage()).isEqualTo(SyncStage.CANCELLED);
+                    assertThat(exception.partialResult().readCount()).isEqualTo(1);
+                    assertThat(exception.partialResult().writtenCount()).isEqualTo(1);
+                });
+        assertThat(Files.readString(output, StandardCharsets.UTF_8)).isEqualTo("id,name\r\n1,Ada\r\n");
+    }
+
+    @Test
+    void jdbcCancellationKeepsThePreviouslyCommittedBatch() throws Exception {
+        String url = jdbcUrl();
+        createTable(url, "CREATE TABLE \"target\" (\"id\" INT, \"name\" VARCHAR(100))");
+        Path input = write("cancel-jdbc-input.csv", "id,name\r\n1,Ada\r\n2,Lin\r\n");
+        Path job = write(
+                "cancel-jdbc.yaml",
+                jobYaml(
+                        "csv",
+                        "      path: '" + yaml(input) + "'",
+                        "jdbc",
+                        "      url: '" + yaml(url) + "'\n      table: target"));
+        LocalJobRunner runner = localRunner();
+
+        assertThatThrownBy(() -> runner.run(parse(job), () -> tableHasRows(url)))
+                .isInstanceOfSatisfying(SyncJobException.class, exception -> {
+                    assertThat(exception.stage()).isEqualTo(SyncStage.CANCELLED);
+                    assertThat(exception.partialResult().readCount()).isEqualTo(1);
+                    assertThat(exception.partialResult().writtenCount()).isEqualTo(1);
+                });
+        assertThat(rowCount(url)).isEqualTo(1);
+    }
+
     private Invocation invoke(Path job) {
         StringWriter stdout = new StringWriter();
         StringWriter stderr = new StringWriter();
@@ -89,6 +135,38 @@ class JdbcCliIntegrationTest {
                 new PrintWriter(stderr, true));
         int exitCode = commandLine.execute("run", job.toString());
         return new Invocation(exitCode, stdout.toString(), stderr.toString());
+    }
+
+    private static LocalJobRunner localRunner() {
+        return new LocalJobRunner(ConnectorRegistry.of(new CsvConnectorFactory(), new JdbcConnectorFactory()));
+    }
+
+    private static JobSpec parse(Path job) throws IOException {
+        return new JobSpecParser().parse(Files.readString(job, StandardCharsets.UTF_8));
+    }
+
+    private static boolean fileHasContent(Path path) {
+        try {
+            return Files.exists(path) && Files.size(path) > 0;
+        } catch (IOException exception) {
+            throw new IllegalStateException("failed to inspect cancellation output", exception);
+        }
+    }
+
+    private static boolean tableHasRows(String url) {
+        try {
+            return rowCount(url) > 0;
+        } catch (SQLException exception) {
+            throw new IllegalStateException("failed to inspect cancellation target", exception);
+        }
+    }
+
+    private static int rowCount(String url) throws SQLException {
+        try (Connection connection = DriverManager.getConnection(url);
+                ResultSet result = connection.createStatement().executeQuery("SELECT COUNT(*) FROM \"target\"")) {
+            assertThat(result.next()).isTrue();
+            return result.getInt(1);
+        }
     }
 
     private Path write(String name, String content) throws IOException {

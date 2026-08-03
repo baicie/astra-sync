@@ -51,10 +51,15 @@ they enter `Row`; `byte[]` values are defensively copied. Sink values are bound 
 | `TIMESTAMP_WITH_TIMEZONE` | `OffsetDateTime` |
 | `BINARY`, `VARBINARY`, `LONGVARBINARY`, `BLOB` | copied `byte[]` |
 
-Other SQL types, vendor objects, arrays, and references fail at `SOURCE_READ` with the column
-label and JDBC type name. Sink values outside the matrix fail at `SINK_WRITE`; no locale-sensitive
-or implicit text coercion is performed. Source metadata uses `ResultSetMetaData.getColumnLabel`,
-preserves order, and rejects blank or duplicate labels before the first batch is returned.
+`TIME_WITH_TIMEZONE` is deliberately outside the Phase 0 matrix because its lossless Java value is
+`OffsetTime`, which is not yet part of the cross-connector scalar contract. It must not be coerced
+to `LocalTime`. This and all other SQL types outside the matrix, vendor objects, arrays, and
+references fail at `SOURCE_READ` with the column label and JDBC type name. Sink values outside the
+matrix fail at `SINK_WRITE`; no locale-sensitive or implicit text coercion is performed. Source
+metadata uses `ResultSetMetaData.getColumnLabel`, preserves order, and rejects blank or duplicate
+labels before the first batch is returned. Before the first row is requested, the Source validates
+the JDBC type of every metadata column. Unsupported types therefore fail at `SOURCE_READ` even
+when the result set contains no rows.
 
 The sink accepts a simple table or schema-qualified table identifier. It obtains the database
 identifier quote string, quotes table and row column identifiers, derives the insert statement

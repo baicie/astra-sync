@@ -116,7 +116,13 @@ public final class SingleNodeSyncJob {
     }
 
     private void checkCancelled(MutableMetrics metrics) {
-        if (cancellationToken.isCancelled()) {
+        boolean cancelled;
+        try {
+            cancelled = cancellationToken.isCancelled();
+        } catch (RuntimeException exception) {
+            throw metrics.failure(SyncStage.CANCELLATION_CHECK, "failed to check cancellation", exception);
+        }
+        if (cancelled) {
             throw metrics.cancelled();
         }
     }
