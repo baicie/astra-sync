@@ -2,7 +2,7 @@
 
 ## Status
 
-Design complete; implementation pending.
+Verified and complete on implementation commit `f7c6b3c`.
 
 ## Objective
 
