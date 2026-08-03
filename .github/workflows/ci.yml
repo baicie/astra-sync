@@ -14,9 +14,6 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  MAVEN_OPTS: -Dmaven.repo.local=${{ github.workspace }}/.m2/repository
-
 jobs:
   changes:
     name: Detect changed subsystems
