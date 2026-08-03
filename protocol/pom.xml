@@ -19,5 +19,6 @@
     <modules>
         <module>data-protocol</module>
         <module>connector-protocol</module>
+        <module>worker-protocol</module>
     </modules>
 </project>
