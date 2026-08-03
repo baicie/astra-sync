@@ -35,6 +35,9 @@ cli -> engine -> connector-api
 `connector-jdbc` never depends on Engine. Factory creation validates and normalizes string options
 only; connections, statements, transactions, and result sets are acquired in `open`.
 
+The CSV Sink is extended by ADR-018 to encode JDBC canonical scalar values deterministically;
+this keeps JDBC-to-file on the same runner while leaving the CSV Source text-oriented.
+
 ## Connector Descriptor and Configuration
 
 `JdbcConnectorFactory` uses name `jdbc`, version `1.0.0`, roles `SOURCE` and `SINK`, and capabilities

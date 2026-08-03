@@ -7,6 +7,8 @@
 - [x] Inventory the empty `connector-jdbc` module, JDBC driver ownership, and CLI composition.
 - [x] Define the JDBC option, identifier, type, and transaction contracts in ADR-016/017 before
   changing Java or Maven files.
+- [x] Amend the cross-connector contract in ADR-018 after the JDBC-to-file compatibility gate
+  exposed the CSV Sink's Slice 03 string-only boundary.
 
 ## Steps
 
@@ -36,7 +38,7 @@
 
 ### 4. Integrate CLI and Cross-Connector Paths
 
-- Register `JdbcConnectorFactory` in the CLI and add JDBC driver service-resource merging to the
+- Extend the CSV Sink using ADR-018 scalar encodings, then register `JdbcConnectorFactory` in the CLI and add JDBC driver service-resource merging to the
   shaded artifact.
 - Add H2-backed CLI tests for JDBC-to-file and file-to-JDBC using the same local runner and stable
   exit categories; retain CSV behavior unchanged.

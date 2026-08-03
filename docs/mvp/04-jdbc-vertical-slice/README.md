@@ -61,3 +61,4 @@ large-text values and making transaction boundaries observable.
 - [Verification](verification.md)
 - [ADR-016](../../adr/adr-016-jdbc-connector-contract-and-type-mapping.md)
 - [ADR-017](../../adr/adr-017-jdbc-transaction-boundaries.md)
+- [ADR-018](../../adr/adr-018-cross-connector-scalar-encoding.md)

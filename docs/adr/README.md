@@ -23,6 +23,7 @@ This directory contains the Architecture Decision Records (ADRs) for AstraSync.
 | [ADR-015](adr-015-strict-csv-and-create-new-output.md) | Strict CSV and Create-new Output | Accepted | 2026-08-03 |
 | [ADR-016](adr-016-jdbc-connector-contract-and-type-mapping.md) | JDBC Connector Contract and Type Mapping | Accepted | 2026-08-03 |
 | [ADR-017](adr-017-jdbc-transaction-boundaries.md) | JDBC Transaction Boundaries | Accepted | 2026-08-03 |
+| [ADR-018](adr-018-cross-connector-scalar-encoding.md) | Cross-connector Scalar Encoding | Accepted | 2026-08-03 |
 
 ## Template
 
