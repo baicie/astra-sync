@@ -171,9 +171,9 @@ The runnable artifact is the shaded JAR produced by a new `cli` module. The core
 a normal library JAR; its placeholder banner main and Engine-owned shade configuration are removed.
 
 ```text
-java -jar cli/target/astrasync-cli-0.1.0-SNAPSHOT.jar run <job-spec-path>
-java -jar cli/target/astrasync-cli-0.1.0-SNAPSHOT.jar --help
-java -jar cli/target/astrasync-cli-0.1.0-SNAPSHOT.jar --version
+java -jar cli/target/astrasync-cli-0.1.0-SNAPSHOT-all.jar run <job-spec-path>
+java -jar cli/target/astrasync-cli-0.1.0-SNAPSHOT-all.jar --help
+java -jar cli/target/astrasync-cli-0.1.0-SNAPSHOT-all.jar --version
 ```
 
 Picocli supplies deterministic argument parsing and help. The CLI reads the JobSpec itself as
