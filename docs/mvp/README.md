@@ -60,7 +60,7 @@ rebased onto the updated `main` without changing its scope.
 | 01 | `mvp/01-single-node-kernel` | `main@8b237b7` | Reproducible build, bounded pull runtime, lifecycle, failure stage, metrics, unit tests | Complete |
 | 02 | `mvp/02-job-spec-connector-spi` | accepted 01 | Row/batch contract, Source/Sink SPI, JobSpec v1, registry, capability compiler | Complete |
 | 03 | `mvp/03-file-vertical-slice` | accepted 02 | CSV source/sink, file-to-file CLI job, malformed-row policy | Complete |
-| 04 | `mvp/04-jdbc-vertical-slice` | accepted 03 | Generic JDBC source/sink, type mapping, transaction boundaries, integration tests | Planned |
+| 04 | `mvp/04-jdbc-vertical-slice` | accepted 03 | Generic JDBC source/sink, type mapping, transaction boundaries, integration tests | Design complete; implementation pending |
 | 05 | `mvp/05-phase0-hardening` | accepted 04 | Metrics output, cancellation/resource tests, examples, acceptance and release evidence | Planned |
 
 Branch names intentionally use the user-requested `mvp/*` namespace. The repository's generic

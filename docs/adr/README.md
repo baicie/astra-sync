@@ -21,6 +21,8 @@ This directory contains the Architecture Decision Records (ADRs) for AstraSync.
 | [ADR-013](adr-013-descriptor-first-connector-planning.md) | Descriptor-first Connector Planning | Accepted | 2026-08-02 |
 | [ADR-014](adr-014-local-runner-and-cli-boundary.md) | Local Runner and CLI Boundary | Accepted | 2026-08-03 |
 | [ADR-015](adr-015-strict-csv-and-create-new-output.md) | Strict CSV and Create-new Output | Accepted | 2026-08-03 |
+| [ADR-016](adr-016-jdbc-connector-contract-and-type-mapping.md) | JDBC Connector Contract and Type Mapping | Accepted | 2026-08-03 |
+| [ADR-017](adr-017-jdbc-transaction-boundaries.md) | JDBC Transaction Boundaries | Accepted | 2026-08-03 |
 
 ## Template
 
