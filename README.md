@@ -216,7 +216,7 @@ spec:
 | Phase | Focus | Status |
 |-------|-------|--------|
 | Phase 0 | Protocol & Single-node Kernel | Complete |
-| Phase 1 | Distributed Batch Sync | Planning |
+| Phase 1 | Distributed Batch Sync | In progress |
 | Phase 2 | Checkpoint & Exactly-Once | Planning |
 | Phase 3 | CDC (MySQL, PostgreSQL) | Planning |
 | Phase 4 | Control Plane HA | Planning |
