@@ -21,6 +21,9 @@
         <module>connector-api</module>
         <module>formats</module>
         <module>engine</module>
+        <module>engine/runtime</module>
+        <module>engine/coordinator</module>
+        <module>engine/worker</module>
 
         <!-- Connectors -->
         <module>connectors/connector-jdbc</module>

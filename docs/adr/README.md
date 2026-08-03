@@ -26,6 +26,7 @@ This directory contains the Architecture Decision Records (ADRs) for AstraSync.
 | [ADR-018](adr-018-cross-connector-scalar-encoding.md) | Cross-connector Scalar Encoding | Accepted | 2026-08-03 |
 | [ADR-019](adr-019-cooperative-cancellation.md) | Cooperative Cancellation Boundary | Accepted | 2026-08-03 |
 | [ADR-020](adr-020-cli-metrics-report.md) | CLI Metrics Report Contract | Accepted | 2026-08-03 |
+| [ADR-021](adr-021-distributed-batch-runtime.md) | Distributed Batch Runtime Boundary | Accepted | 2026-08-03 |
 
 ## Template
 
