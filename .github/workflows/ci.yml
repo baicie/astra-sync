@@ -145,7 +145,7 @@ jobs:
 
       - name: Set up Helm
         if: needs.changes.outputs.helm == 'true'
-        uses: azure/setup-helm@v4
+        uses: azure/setup-helm@v5
         with:
           version: v3.15.4
 
