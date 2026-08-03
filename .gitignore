@@ -78,6 +78,7 @@ checkstyle-result.xml
 
 # Staging
 staging/
+examples/phase0/csv/output.csv
 
 # MinIO data
 minio-data/

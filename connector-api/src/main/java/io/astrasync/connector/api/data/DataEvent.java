@@ -1,5 +1,10 @@
 package io.astrasync.connector.api.data;
 
+import io.astrasync.connector.api.RecordKey;
+import io.astrasync.connector.api.SourcePosition;
+import io.astrasync.connector.api.TraceContext;
+import java.util.Map;
+
 public interface DataEvent {
 
     String getEventId();
@@ -18,9 +23,9 @@ public interface DataEvent {
 
     RecordKey getKey();
 
-    Record getBefore();
+    Row getBefore();
 
-    Record getAfter();
+    Row getAfter();
 
     Map<String, String> getHeaders();
 

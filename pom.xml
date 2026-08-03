@@ -31,6 +31,9 @@
         <module>connectors/connector-iceberg</module>
         <module>connectors/connector-clickhouse</module>
 
+        <!-- Local Applications -->
+        <module>cli</module>
+
         <!-- Transforms -->
         <module>transforms</module>
     </modules>
@@ -53,11 +56,12 @@
         <logback.version>1.5.6</logback.version>
         <guava.version>33.2.0-jre</guava.version>
         <commons-lang3.version>3.14.0</commons-lang3.version>
+        <commons-csv.version>1.11.0</commons-csv.version>
         <commons-compress.version>1.26.2</commons-compress.version>
         <snappy.version>1.1.10.6</snappy.version>
         <lz4.version>1.8.0</lz4.version>
-        <zstd.version>1.5.6</zstd.version>
-        <debezium.version>2.5.4</debezium.version>
+        <zstd.version>1.5.6-3</zstd.version>
+        <debezium.version>2.5.4.Final</debezium.version>
         <mysql.version>8.0.33</mysql.version>
         <postgresql.version>42.7.3</postgresql.version>
         <clickhouse.version>0.6.2</clickhouse.version>
@@ -68,8 +72,10 @@
         <!-- Test Dependencies -->
         <junit.version>5.10.3</junit.version>
         <testcontainers.version>1.19.8</testcontainers.version>
+        <h2.version>2.2.224</h2.version>
         <mockito.version>5.12.0</mockito.version>
         <assertj.version>3.25.3</assertj.version>
+        <picocli.version>4.7.6</picocli.version>
 
         <!-- Build Plugins -->
         <maven-compiler-plugin.version>3.13.0</maven-compiler-plugin.version>
@@ -77,9 +83,10 @@
         <maven-failsafe-plugin.version>3.2.5</maven-failsafe-plugin.version>
         <maven-shade-plugin.version>3.5.3</maven-shade-plugin.version>
         <protoc-maven-plugin.version>0.6.1</protoc-maven-plugin.version>
+        <os-maven-plugin.version>1.7.1</os-maven-plugin.version>
         <flatten-maven-plugin.version>1.6.0</flatten-maven-plugin.version>
         <jacoco-maven-plugin.version>0.8.12</jacoco-maven-plugin.version>
-        <spotless-maven-plugin.version>6.25.0</spotless-maven-plugin.version>
+        <spotless-maven-plugin.version>2.43.0</spotless-maven-plugin.version>
     </properties>
 
     <dependencyManagement>
@@ -181,6 +188,18 @@
                 <groupId>org.apache.commons</groupId>
                 <artifactId>commons-compress</artifactId>
                 <version>${commons-compress.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.commons</groupId>
+                <artifactId>commons-csv</artifactId>
+                <version>${commons-csv.version}</version>
+            </dependency>
+
+            <!-- CLI -->
+            <dependency>
+                <groupId>info.picocli</groupId>
+                <artifactId>picocli</artifactId>
+                <version>${picocli.version}</version>
             </dependency>
 
             <!-- Compression -->
@@ -296,6 +315,12 @@
                 <scope>import</scope>
             </dependency>
             <dependency>
+                <groupId>com.h2database</groupId>
+                <artifactId>h2</artifactId>
+                <version>${h2.version}</version>
+                <scope>test</scope>
+            </dependency>
+            <dependency>
                 <groupId>org.mockito</groupId>
                 <artifactId>mockito-core</artifactId>
                 <version>${mockito.version}</version>
@@ -311,6 +336,14 @@
     </dependencyManagement>
 
     <build>
+        <extensions>
+            <extension>
+                <groupId>kr.motd.maven</groupId>
+                <artifactId>os-maven-plugin</artifactId>
+                <version>${os-maven-plugin.version}</version>
+            </extension>
+        </extensions>
+
         <pluginManagement>
             <plugins>
                 <plugin>
@@ -338,7 +371,7 @@
                     <configuration>
                         <forkCount>1</forkCount>
                         <reuseForks>true</reuseForks>
-                        <argLine>-Xmx2g -XX:+UseG1GC -XX:MaxGCPauseMillis=200</argLine>
+                        <argLine>@{argLine} -Xmx2g -XX:+UseG1GC -XX:MaxGCPauseMillis=200</argLine>
                     </configuration>
                 </plugin>
 

@@ -16,6 +16,16 @@ This directory contains the Architecture Decision Records (ADRs) for AstraSync.
 | [ADR-008](adr-008-row-and-arrow-formats.md) | Dual Format Support (Row and Arrow) | Accepted | 2026-08-02 |
 | [ADR-009](adr-009-capability-negotiation.md) | Exactly-Once via Capability Negotiation | Accepted | 2026-08-02 |
 | [ADR-010](adr-010-single-active-region.md) | Single Active Region per Job | Accepted | 2026-08-02 |
+| [ADR-011](adr-011-bounded-pull-single-node-runtime.md) | Bounded Pull-based Single-node Runtime | Accepted | 2026-08-02 |
+| [ADR-012](adr-012-strict-versioned-job-spec.md) | Strict Versioned JobSpec Boundary | Accepted | 2026-08-02 |
+| [ADR-013](adr-013-descriptor-first-connector-planning.md) | Descriptor-first Connector Planning | Accepted | 2026-08-02 |
+| [ADR-014](adr-014-local-runner-and-cli-boundary.md) | Local Runner and CLI Boundary | Accepted | 2026-08-03 |
+| [ADR-015](adr-015-strict-csv-and-create-new-output.md) | Strict CSV and Create-new Output | Accepted | 2026-08-03 |
+| [ADR-016](adr-016-jdbc-connector-contract-and-type-mapping.md) | JDBC Connector Contract and Type Mapping | Accepted | 2026-08-03 |
+| [ADR-017](adr-017-jdbc-transaction-boundaries.md) | JDBC Transaction Boundaries | Accepted | 2026-08-03 |
+| [ADR-018](adr-018-cross-connector-scalar-encoding.md) | Cross-connector Scalar Encoding | Accepted | 2026-08-03 |
+| [ADR-019](adr-019-cooperative-cancellation.md) | Cooperative Cancellation Boundary | Accepted | 2026-08-03 |
+| [ADR-020](adr-020-cli-metrics-report.md) | CLI Metrics Report Contract | Accepted | 2026-08-03 |
 
 ## Template
 

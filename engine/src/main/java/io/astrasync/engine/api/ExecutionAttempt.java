@@ -1,5 +1,8 @@
 package io.astrasync.engine.api;
 
+import java.util.Map;
+import java.util.Optional;
+
 public interface ExecutionAttempt {
 
     String getExecutionAttemptId();
@@ -17,7 +20,7 @@ public interface ExecutionAttempt {
     ExecutionState getState();
 }
 
-public enum ExecutionState {
+enum ExecutionState {
     CREATED,
     SCHEDULING,
     DEPLOYING,
@@ -31,7 +34,7 @@ public enum ExecutionState {
     RESTARTING
 }
 
-public interface JobExecutionResult {
+interface JobExecutionResult {
 
     String getJobId();
 
@@ -46,7 +49,7 @@ public interface JobExecutionResult {
     Map<String, Long> getAccumulators();
 }
 
-public interface JobStatus {
+interface JobStatus {
 
     JobState getState();
 
@@ -59,7 +62,7 @@ public interface JobStatus {
     Optional<JobFailureInfo> getFailureInfo();
 }
 
-public enum JobState {
+enum JobState {
     INITIALIZING,
     RUNNING,
     PAUSED,
@@ -70,7 +73,7 @@ public enum JobState {
     FINISHED
 }
 
-public interface JobFailureInfo {
+interface JobFailureInfo {
 
     String getReason();
 

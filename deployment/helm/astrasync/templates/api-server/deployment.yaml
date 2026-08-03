@@ -2,7 +2,7 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "astrasync.fullname" . }}-api-server
+  name: {{ include "astrasync.componentFullname" (dict "context" . "component" "api-server") }}
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "astrasync.labels" . | nindent 4 }}
@@ -77,7 +77,7 @@ spec:
       volumes:
         - name: config
           configMap:
-            name: {{ include "astrasync.fullname" . }}-api-config
+            name: {{ include "astrasync.componentFullname" (dict "context" . "component" "api-config") }}
       affinity:
         {{- toYaml .Values.affinity | nindent 8 }}
       {{- with .Values.nodeSelector }}

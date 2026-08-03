@@ -62,7 +62,7 @@ subjects:
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
-  name: {{ include "astrasync.fullname" . }}-api-server
+  name: {{ include "astrasync.componentFullname" (dict "context" . "component" "api-server") }}
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "astrasync.labels" . | nindent 4 }}
@@ -76,7 +76,7 @@ spec:
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
-  name: {{ include "astrasync.fullname" . }}-controller
+  name: {{ include "astrasync.componentFullname" (dict "context" . "component" "controller") }}
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "astrasync.labels" . | nindent 4 }}

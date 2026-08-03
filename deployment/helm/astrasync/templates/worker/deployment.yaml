@@ -2,7 +2,7 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "astrasync.fullname" . }}-worker
+  name: {{ include "astrasync.componentFullname" (dict "context" . "component" "worker") }}
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "astrasync.labels" . | nindent 4 }}

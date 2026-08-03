@@ -1,0 +1,19 @@
+apiVersion: sync.astrasync.io/v1
+kind: SyncJob
+metadata:
+  name: csv-file-copy
+spec:
+  source:
+    connector: csv
+    options:
+      path: examples/phase0/csv/input.csv
+      nullValue: \N
+  sink:
+    connector: csv
+    options:
+      path: examples/phase0/csv/output.csv
+      nullValue: \N
+  delivery:
+    guarantee: at-most-once
+  runtime:
+    maxBatchRecords: 2
