@@ -8,9 +8,14 @@ import io.astrasync.connector.api.data.Row;
 import io.astrasync.connector.api.data.RowBatch;
 import io.astrasync.connector.api.sink.BatchSink;
 import java.io.IOException;
+import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.OffsetDateTime;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -50,6 +55,35 @@ class CsvBatchSinkTest {
     }
 
     @Test
+    void encodesJdbcScalarsDeterministically() throws IOException {
+        Path output = tempDirectory.resolve("scalars.csv");
+        BatchSink sink = sink(output, Map.of("nullValue", "\\N"));
+        sink.open();
+        sink.writeBatch(RowBatch.last(List.of(row(
+                "boolean",
+                true,
+                "integer",
+                42,
+                "decimal",
+                new BigDecimal("12.3400"),
+                "date",
+                LocalDate.of(2026, 8, 3),
+                "time",
+                LocalTime.of(12, 34, 56),
+                "timestamp",
+                LocalDateTime.of(2026, 8, 3, 12, 34, 56),
+                "offset",
+                OffsetDateTime.parse("2026-08-03T12:34:56+08:00"),
+                "binary",
+                new byte[] {1, 2, 3}))));
+        sink.close();
+
+        assertThat(Files.readString(output, StandardCharsets.UTF_8))
+                .isEqualTo("boolean,integer,decimal,date,time,timestamp,offset,binary\r\n"
+                        + "true,42,12.3400,2026-08-03,12:34:56,2026-08-03T12:34:56,2026-08-03T12:34:56+08:00,AQID\r\n");
+    }
+
+    @Test
     void rejectsMissingParentBeforeCreatingOutput() {
         Path output = tempDirectory.resolve("missing").resolve("output.csv");
         BatchSink sink = sink(output, Map.of());
@@ -79,9 +113,9 @@ class CsvBatchSinkTest {
         Path typedOutput = tempDirectory.resolve("typed.csv");
         BatchSink typedSink = sink(typedOutput, Map.of());
         typedSink.open();
-        assertThatThrownBy(() -> typedSink.writeBatch(RowBatch.last(List.of(Row.of("id", 1)))))
+        assertThatThrownBy(() -> typedSink.writeBatch(RowBatch.last(List.of(Row.of("id", new Object())))))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("must contain a String or null");
+                .hasMessageContaining("supported scalar or null");
         typedSink.close();
 
         Path schemaOutput = tempDirectory.resolve("schema.csv");

@@ -9,7 +9,12 @@ import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.StandardOpenOption;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.OffsetDateTime;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
@@ -118,9 +123,24 @@ final class CsvBatchSink implements BatchSink {
                 values.add(null);
             } else if (value instanceof String stringValue) {
                 values.add(stringValue);
+            } else if (value instanceof Boolean
+                    || value instanceof Byte
+                    || value instanceof Short
+                    || value instanceof Integer
+                    || value instanceof Long
+                    || value instanceof Float
+                    || value instanceof Double
+                    || value instanceof java.math.BigDecimal
+                    || value instanceof LocalDate
+                    || value instanceof LocalTime
+                    || value instanceof LocalDateTime
+                    || value instanceof OffsetDateTime) {
+                values.add(value.toString());
+            } else if (value instanceof byte[] bytes) {
+                values.add(Base64.getEncoder().encodeToString(bytes));
             } else {
                 throw new IllegalArgumentException(
-                        "CSV sink column '" + header + "' must contain a String or null; received "
+                        "CSV sink column '" + header + "' must contain a supported scalar or null; received "
                                 + value.getClass().getName());
             }
         }

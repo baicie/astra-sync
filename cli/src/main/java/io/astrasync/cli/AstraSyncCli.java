@@ -1,6 +1,7 @@
 package io.astrasync.cli;
 
 import io.astrasync.connector.file.CsvConnectorFactory;
+import io.astrasync.connector.jdbc.JdbcConnectorFactory;
 import io.astrasync.engine.jobspec.JobSpec;
 import io.astrasync.engine.jobspec.JobSpecParser;
 import io.astrasync.engine.kernel.SyncJobException;
@@ -60,7 +61,7 @@ public final class AstraSyncCli implements Callable<Integer> {
     }
 
     private static Supplier<LocalJobRunner> defaultRunner() {
-        return () -> new LocalJobRunner(ConnectorRegistry.of(new CsvConnectorFactory()));
+        return () -> new LocalJobRunner(ConnectorRegistry.of(new CsvConnectorFactory(), new JdbcConnectorFactory()));
     }
 
     @Command(name = "run", description = "Compile and run one UTF-8 JobSpec.", mixinStandardHelpOptions = true)
