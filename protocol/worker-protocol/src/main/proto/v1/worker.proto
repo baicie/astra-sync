@@ -1,0 +1,87 @@
+syntax = "proto3";
+
+package astra.protocol.worker;
+
+option java_multiple_files = true;
+option java_package = "io.astrasync.protocol.worker";
+option java_outer_classname = "WorkerProto";
+
+message WorkerRequest {
+  uint32 protocol_version = 1;
+
+  oneof operation {
+    ExecuteTaskRequest execute_task = 2;
+    CancelTaskRequest cancel_task = 3;
+  }
+}
+
+message ExecuteTaskRequest {
+  string worker_id = 1;
+  string task_id = 2;
+  SplitDescriptor split = 3;
+  int32 max_batch_records = 4;
+  int32 max_in_flight_batches = 5;
+}
+
+message CancelTaskRequest {
+  string worker_id = 1;
+  string task_id = 2;
+  string reason = 3;
+}
+
+message SplitDescriptor {
+  string split_id = 1;
+  string source_id = 2;
+  map<string, string> start_offsets = 3;
+  map<string, string> end_offsets = 4;
+}
+
+message WorkerResponse {
+  uint32 protocol_version = 1;
+
+  oneof result {
+    TaskResult task_result = 2;
+    ErrorResponse error = 3;
+    CancelResponse cancel_response = 4;
+  }
+}
+
+message TaskResult {
+  string worker_id = 1;
+  string task_id = 2;
+  bool success = 3;
+  SyncMetrics metrics = 4;
+  string error_type = 5;
+  string error_message = 6;
+}
+
+message SyncMetrics {
+  int64 read_count = 1;
+  int64 written_count = 2;
+  int64 batch_count = 3;
+  int32 max_observed_batch_size = 4;
+  int64 elapsed_nanos = 5;
+}
+
+message ErrorResponse {
+  ErrorCode code = 1;
+  string task_id = 2;
+  string message = 3;
+}
+
+message CancelResponse {
+  string task_id = 1;
+  bool cancelled = 2;
+  string message = 3;
+}
+
+enum ErrorCode {
+  ERROR_UNSPECIFIED = 0;
+  PROTOCOL_VERSION_MISMATCH = 1;
+  INVALID_REQUEST = 2;
+  RESOURCE_EXHAUSTED = 3;
+  TASK_NOT_FOUND = 4;
+  TASK_REJECTED = 5;
+  TASK_CANCELLED = 6;
+  INTERNAL = 7;
+}

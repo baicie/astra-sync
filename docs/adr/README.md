@@ -28,6 +28,7 @@ This directory contains the Architecture Decision Records (ADRs) for AstraSync.
 | [ADR-020](adr-020-cli-metrics-report.md) | CLI Metrics Report Contract | Accepted | 2026-08-03 |
 | [ADR-021](adr-021-distributed-batch-runtime.md) | Distributed Batch Runtime Boundary | Accepted | 2026-08-03 |
 | [ADR-022](adr-022-jdbc-range-splits.md) | Connector Split Enumeration and Numeric JDBC Ranges | Accepted | 2026-08-03 |
+| [ADR-023](adr-023-worker-network-protocol.md) | Versioned Worker Protocol and Bounded Remote Admission | Accepted | 2026-08-03 |
 
 ## Template
 
