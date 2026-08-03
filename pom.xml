@@ -31,6 +31,9 @@
         <module>connectors/connector-iceberg</module>
         <module>connectors/connector-clickhouse</module>
 
+        <!-- Local Applications -->
+        <module>cli</module>
+
         <!-- Transforms -->
         <module>transforms</module>
     </modules>
@@ -53,6 +56,7 @@
         <logback.version>1.5.6</logback.version>
         <guava.version>33.2.0-jre</guava.version>
         <commons-lang3.version>3.14.0</commons-lang3.version>
+        <commons-csv.version>1.11.0</commons-csv.version>
         <commons-compress.version>1.26.2</commons-compress.version>
         <snappy.version>1.1.10.6</snappy.version>
         <lz4.version>1.8.0</lz4.version>
@@ -70,6 +74,7 @@
         <testcontainers.version>1.19.8</testcontainers.version>
         <mockito.version>5.12.0</mockito.version>
         <assertj.version>3.25.3</assertj.version>
+        <picocli.version>4.7.6</picocli.version>
 
         <!-- Build Plugins -->
         <maven-compiler-plugin.version>3.13.0</maven-compiler-plugin.version>
@@ -182,6 +187,18 @@
                 <groupId>org.apache.commons</groupId>
                 <artifactId>commons-compress</artifactId>
                 <version>${commons-compress.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.commons</groupId>
+                <artifactId>commons-csv</artifactId>
+                <version>${commons-csv.version}</version>
+            </dependency>
+
+            <!-- CLI -->
+            <dependency>
+                <groupId>info.picocli</groupId>
+                <artifactId>picocli</artifactId>
+                <version>${picocli.version}</version>
             </dependency>
 
             <!-- Compression -->
