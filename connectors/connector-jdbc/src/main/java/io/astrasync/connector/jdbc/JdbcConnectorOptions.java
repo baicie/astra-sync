@@ -55,10 +55,7 @@ record JdbcConnectorOptions(
         Objects.requireNonNull(configuration, "configuration must not be null");
         rejectUnknown(configuration, Set.of(URL, USER, PASSWORD, TABLE, QUERY_TIMEOUT));
         String table = requiredNonBlank(configuration, TABLE);
-        if (!TABLE_PATTERN.matcher(table).matches()) {
-            throw new IllegalArgumentException(
-                    "connector option 'table' must be one or two unquoted SQL identifier segments");
-        }
+        validateTable(table);
         return new JdbcConnectorOptions(
                 requiredNonBlank(configuration, URL),
                 optional(configuration, USER),
@@ -70,6 +67,10 @@ record JdbcConnectorOptions(
     }
 
     Connection connect() throws SQLException {
+        return connect(url, user, password);
+    }
+
+    static Connection connect(String url, String user, String password) throws SQLException {
         Properties properties = new Properties();
         if (user != null) {
             properties.setProperty(USER, user);
@@ -78,6 +79,14 @@ record JdbcConnectorOptions(
             properties.setProperty(PASSWORD, password);
         }
         return properties.isEmpty() ? DriverManager.getConnection(url) : DriverManager.getConnection(url, properties);
+    }
+
+    static String validateTable(String table) {
+        if (!TABLE_PATTERN.matcher(table).matches()) {
+            throw new IllegalArgumentException(
+                    "connector option 'table' must be one or two unquoted SQL identifier segments");
+        }
+        return table;
     }
 
     @Override

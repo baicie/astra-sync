@@ -6,11 +6,15 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import io.astrasync.connector.api.data.RowBatch;
 import io.astrasync.connector.api.sink.BatchSink;
 import io.astrasync.connector.api.source.BatchSource;
+import io.astrasync.connector.api.source.SourceSplit;
+import io.astrasync.connector.api.source.SplitPosition;
 import io.astrasync.engine.kernel.SyncResult;
 import io.astrasync.engine.runtime.BatchTask;
+import io.astrasync.engine.runtime.BatchTaskFactory;
 import io.astrasync.engine.runtime.BatchWorker;
 import io.astrasync.engine.runtime.WorkerResult;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
@@ -50,6 +54,26 @@ class BatchCoordinatorTest {
         assertThat(assignments).isEmpty();
     }
 
+    @Test
+    void enumeratesSplitsAndMaterializesTasksBeforeScheduling() {
+        List<String> materialized = new CopyOnWriteArrayList<>();
+        List<String> assignments = new CopyOnWriteArrayList<>();
+        SourceSplit first = split("split-1");
+        SourceSplit second = split("split-2");
+        BatchWorker worker = worker("worker-a", assignments, new AtomicInteger(), new AtomicInteger());
+        BatchTaskFactory taskFactory = enumerated -> {
+            materialized.add(enumerated.splitId());
+            return task(enumerated);
+        };
+
+        DistributedRunResult result =
+                new BatchCoordinator(List.of(worker)).run(() -> List.of(first, second), taskFactory);
+
+        assertThat(materialized).containsExactly("split-1", "split-2");
+        assertThat(assignments).containsExactly("worker-a:split-1", "worker-a:split-2");
+        assertThat(result.taskResults()).extracting(WorkerResult::taskId).containsExactly("split-1", "split-2");
+    }
+
     private static BatchWorker worker(
             String workerId, List<String> assignments, AtomicInteger active, AtomicInteger maxActive) {
         return new BatchWorker() {
@@ -74,7 +98,15 @@ class BatchCoordinatorTest {
     }
 
     private static BatchTask task(String taskId) {
-        return new BatchTask(taskId, new EmptySource(), new EmptySink(), 2, 1);
+        return task(split(taskId));
+    }
+
+    private static BatchTask task(SourceSplit split) {
+        return new BatchTask(split, new EmptySource(), new EmptySink(), 2, 1);
+    }
+
+    private static SourceSplit split(String splitId) {
+        return new SourceSplit(splitId, "test-source", new SplitPosition(Map.of("id", "1")), SplitPosition.unbounded());
     }
 
     private static final class EmptySource implements BatchSource {

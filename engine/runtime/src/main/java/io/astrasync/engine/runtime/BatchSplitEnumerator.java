@@ -1,9 +1,7 @@
 package io.astrasync.engine.runtime;
 
-import java.util.List;
+import io.astrasync.connector.api.source.SplitEnumerator;
 
-/** Enumerates independent, resource-owned batch tasks for a Coordinator. */
+/** Runtime alias for the connector split enumeration contract. */
 @FunctionalInterface
-public interface BatchSplitEnumerator {
-    List<BatchTask> enumerate();
-}
+public interface BatchSplitEnumerator extends SplitEnumerator {}

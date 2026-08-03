@@ -16,8 +16,9 @@ concerns explicit and testable.
 
 ## Decision
 
-1. A `BatchSplitEnumerator` produces immutable `BatchTask` instances. A task owns one source,
-   one sink, a batch limit, and an exchange capacity.
+1. A `BatchSplitEnumerator` produces immutable `SourceSplit` descriptors. A `BatchTaskFactory`
+   materializes one `BatchTask` for each descriptor; a task owns the descriptor, one source, one
+   sink, a batch limit, and an exchange capacity.
 2. A Coordinator assigns tasks to registered Workers. A Worker is single-task-at-a-time from
    the Coordinator's perspective; tasks assigned to the same Worker are serialized.
 3. Each Worker runs Source and Sink execution concurrently and connects them through a bounded
