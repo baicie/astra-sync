@@ -67,8 +67,14 @@ public final class CoordinatorApplication {
                 .map(worker -> (BatchWorker) worker)
                 .toList();
         String jobId = jobSpec.metadata().name();
-        RemoteTaskFactory taskFactory = new RemoteTaskFactory(plan.maxBatchRecords(), checked.maxInFlightBatches());
-        if (plan.deliveryGuarantee() == io.astrasync.engine.jobspec.DeliveryGuarantee.AT_LEAST_ONCE) {
+        boolean checkpointExecution =
+                plan.deliveryGuarantee() == io.astrasync.engine.jobspec.DeliveryGuarantee.AT_LEAST_ONCE
+                        || plan.deliveryGuarantee() == io.astrasync.engine.jobspec.DeliveryGuarantee.EXACTLY_ONCE;
+        RemoteTaskFactory taskFactory = new RemoteTaskFactory(
+                plan.maxBatchRecords(),
+                checked.maxInFlightBatches(),
+                plan.deliveryGuarantee() == io.astrasync.engine.jobspec.DeliveryGuarantee.EXACTLY_ONCE);
+        if (checkpointExecution) {
             CheckpointRunResult checkpointed = new CheckpointBatchCoordinator(
                             workers,
                             new io.astrasync.engine.checkpoint.FileCheckpointStore(checked.progressDirectory()))

@@ -1,9 +1,11 @@
 package io.astrasync.engine.worker;
 
 import io.astrasync.connector.api.CheckpointContext;
+import io.astrasync.connector.api.SinkCommitContext;
 import io.astrasync.connector.api.data.RowBatch;
 import io.astrasync.connector.api.sink.BatchSink;
 import io.astrasync.connector.api.sink.CheckpointableBatchSink;
+import io.astrasync.connector.api.sink.ExactlyOnceBatchSink;
 import io.astrasync.connector.api.source.BatchSource;
 import io.astrasync.connector.api.source.CheckpointableBatchSource;
 import io.astrasync.connector.api.source.SplitPosition;
@@ -19,6 +21,7 @@ import io.astrasync.engine.runtime.CheckpointBatchWorker;
 import io.astrasync.engine.runtime.CheckpointExecutionContext;
 import io.astrasync.engine.runtime.CheckpointProgress;
 import io.astrasync.engine.runtime.CheckpointProgressListener;
+import io.astrasync.engine.runtime.CommitTokens;
 import io.astrasync.engine.runtime.ExchangeFailureException;
 import io.astrasync.engine.runtime.WorkerResult;
 import java.util.Objects;
@@ -97,6 +100,17 @@ public final class InProcessBatchWorker implements BatchWorker, CheckpointBatchW
                     new IllegalArgumentException("task sink does not support checkpoint recovery"),
                     SyncResult.empty());
         }
+        ExactlyOnceBatchSink exactlyOnceSink = null;
+        if (task.exactlyOnce()) {
+            if (!(task.sink() instanceof ExactlyOnceBatchSink checkedSink)) {
+                throw new BatchTaskException(
+                        workerId,
+                        task.taskId(),
+                        new IllegalArgumentException("exactly-once task sink does not support commit tokens"),
+                        SyncResult.empty());
+            }
+            exactlyOnceSink = checkedSink;
+        }
 
         long startedNanos = System.nanoTime();
         long sequence = context.checkpointSequence();
@@ -124,13 +138,27 @@ public final class InProcessBatchWorker implements BatchWorker, CheckpointBatchW
                 if (!batch.rows().isEmpty()) {
                     context.assertCurrent();
                     sink.assertEpoch(context.executionEpoch());
-                    sink.writeBatch(batch);
+                    long nextSequence = Math.addExact(sequence, 1);
+                    String batchDigest = BatchDigests.sha256(batch);
+                    String commitToken =
+                            CommitTokens.forBatch(context.jobId(), task.taskId(), nextSequence, batchDigest);
+                    if (exactlyOnceSink != null) {
+                        exactlyOnceSink.writeBatch(
+                                batch,
+                                new SinkCommitContext(
+                                        context.jobId(), task.taskId(), nextSequence, batchDigest, commitToken));
+                    } else {
+                        sink.writeBatch(batch);
+                    }
                     context.assertCurrent();
-                    sequence = Math.addExact(sequence, 1);
+                    sequence = nextSequence;
                     SplitPosition position = Objects.requireNonNull(
                             source.positionAfter(batch), "checkpoint source returned null position");
                     String token = Objects.requireNonNull(
                             sink.lastCommitToken(), "checkpoint sink returned null commit token");
+                    if (exactlyOnceSink != null && !commitToken.equals(token)) {
+                        throw new IllegalStateException("exactly-once sink returned an unexpected commit token");
+                    }
                     listener.onBatchCommitted(new CheckpointProgress(
                             context.jobId(),
                             context.executionEpoch(),

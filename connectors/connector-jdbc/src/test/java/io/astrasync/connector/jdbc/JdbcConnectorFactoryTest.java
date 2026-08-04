@@ -18,7 +18,11 @@ class JdbcConnectorFactoryTest {
         assertThat(factory.descriptor().version()).isEqualTo("1.0.0");
         assertThat(factory.descriptor().roles()).containsExactlyInAnyOrder(ConnectorRole.SOURCE, ConnectorRole.SINK);
         assertThat(factory.descriptor().capabilities())
-                .containsExactlyInAnyOrder(Capability.BATCH_READ, Capability.BATCH_WRITE, Capability.REPLAYABLE_OFFSET);
+                .containsExactlyInAnyOrder(
+                        Capability.BATCH_READ,
+                        Capability.BATCH_WRITE,
+                        Capability.REPLAYABLE_OFFSET,
+                        Capability.IDEMPOTENT_WRITE);
     }
 
     @Test

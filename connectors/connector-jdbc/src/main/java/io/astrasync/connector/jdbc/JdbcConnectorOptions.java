@@ -16,6 +16,7 @@ record JdbcConnectorOptions(
         String password,
         String query,
         String table,
+        String commitTokenTable,
         String resumeColumn,
         String resumeValue,
         int fetchSize,
@@ -44,6 +45,12 @@ record JdbcConnectorOptions(
         if (fetchSize < 0 || queryTimeoutSeconds < 0) {
             throw new IllegalArgumentException("JDBC numeric options must not be negative");
         }
+        if (table != null) {
+            validateTable(table);
+        }
+        if (commitTokenTable != null) {
+            validateTable(commitTokenTable);
+        }
     }
 
     static JdbcConnectorOptions source(ConnectorConfiguration configuration) {
@@ -58,6 +65,7 @@ record JdbcConnectorOptions(
                 optional(configuration, PASSWORD),
                 query,
                 null,
+                null,
                 optional(configuration, RESUME_COLUMN),
                 optional(configuration, "resumeValue"),
                 positiveOrDefault(configuration, FETCH_SIZE),
@@ -66,15 +74,21 @@ record JdbcConnectorOptions(
 
     static JdbcConnectorOptions sink(ConnectorConfiguration configuration) {
         Objects.requireNonNull(configuration, "configuration must not be null");
-        rejectUnknown(configuration, Set.of(URL, USER, PASSWORD, TABLE, QUERY_TIMEOUT));
+        rejectUnknown(configuration, Set.of(URL, USER, PASSWORD, TABLE, "commitTokenTable", QUERY_TIMEOUT));
         String table = requiredNonBlank(configuration, TABLE);
         validateTable(table);
+        String commitTokenTable = optional(configuration, "commitTokenTable");
+        if (commitTokenTable == null) {
+            commitTokenTable = defaultCommitTokenTable(table);
+        }
+        validateTable(commitTokenTable);
         return new JdbcConnectorOptions(
                 requiredNonBlank(configuration, URL),
                 optional(configuration, USER),
                 optional(configuration, PASSWORD),
                 null,
                 table,
+                commitTokenTable,
                 null,
                 null,
                 0,
@@ -104,10 +118,16 @@ record JdbcConnectorOptions(
         return table;
     }
 
+    static String defaultCommitTokenTable(String table) {
+        String leaf = table.substring(table.lastIndexOf('.') + 1);
+        return leaf + "__astrasync_commit_tokens";
+    }
+
     @Override
     public String toString() {
         return "JdbcConnectorOptions{keys=[url, "
                 + (query == null ? "table" : "query")
+                + (commitTokenTable == null ? "" : ", commitTokenTable")
                 + (user == null ? "" : ", user")
                 + (password == null ? "" : ", password")
                 + (resumeColumn == null ? "" : ", resumeColumn")

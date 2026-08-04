@@ -51,7 +51,9 @@ public final class JdbcWorkerTaskFactoryProvider implements WorkerTaskFactoryPro
             public BatchTask create(
                     io.astrasync.connector.api.source.SourceSplit split, CheckpointExecutionContext context) {
                 Objects.requireNonNull(context, "context must not be null");
-                if (plan.deliveryGuarantee() != io.astrasync.engine.jobspec.DeliveryGuarantee.AT_LEAST_ONCE
+                if ((plan.deliveryGuarantee() != io.astrasync.engine.jobspec.DeliveryGuarantee.AT_LEAST_ONCE
+                                && plan.deliveryGuarantee()
+                                        != io.astrasync.engine.jobspec.DeliveryGuarantee.EXACTLY_ONCE)
                         || !plan.source().options().containsKey("resumeColumn")) {
                     throw new IllegalArgumentException("checkpoint recovery requires an explicit JDBC resumeColumn");
                 }
@@ -65,7 +67,13 @@ public final class JdbcWorkerTaskFactoryProvider implements WorkerTaskFactoryPro
                 try {
                     BatchSink sink = Objects.requireNonNull(
                             connectorFactory.createSink(sinkConfiguration), "JDBC connector returned a null Sink");
-                    return new BatchTask(split, source, sink, plan.maxBatchRecords(), maxInFlightBatches);
+                    return new BatchTask(
+                            split,
+                            source,
+                            sink,
+                            plan.maxBatchRecords(),
+                            maxInFlightBatches,
+                            plan.deliveryGuarantee() == io.astrasync.engine.jobspec.DeliveryGuarantee.EXACTLY_ONCE);
                 } catch (RuntimeException exception) {
                     try {
                         source.close();

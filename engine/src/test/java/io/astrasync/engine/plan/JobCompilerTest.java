@@ -2,6 +2,7 @@ package io.astrasync.engine.plan;
 
 import static io.astrasync.connector.api.Capability.BATCH_READ;
 import static io.astrasync.connector.api.Capability.BATCH_WRITE;
+import static io.astrasync.connector.api.Capability.IDEMPOTENT_WRITE;
 import static io.astrasync.connector.api.Capability.REPLAYABLE_OFFSET;
 import static io.astrasync.connector.api.Capability.STREAM_READ;
 import static io.astrasync.connector.api.Capability.TRANSACTIONAL_COMMIT;
@@ -154,6 +155,19 @@ class JobCompilerTest {
                 () -> compiler.compileCheckpointed(jobSpec(
                         "source", Map.of("resumeColumn", "ID"), "sink", Map.of(), DeliveryGuarantee.EXACTLY_ONCE)),
                 CompilationErrorCode.DELIVERY_UNSUPPORTED);
+    }
+
+    @Test
+    void checkpointRuntimeAcceptsExactlyOnceWithAnIdempotentSink() {
+        ProbeFactory source = probe("source", Set.of(SOURCE), Set.of(BATCH_READ, REPLAYABLE_OFFSET));
+        ProbeFactory sink = probe("sink", Set.of(SINK), Set.of(BATCH_WRITE, IDEMPOTENT_WRITE));
+        JobSpec exactlyOnce =
+                jobSpec("source", Map.of("resumeColumn", "ID"), "sink", Map.of(), DeliveryGuarantee.EXACTLY_ONCE);
+
+        assertThat(new JobCompiler(ConnectorRegistry.of(source, sink))
+                        .compileCheckpointed(exactlyOnce)
+                        .deliveryGuarantee())
+                .isEqualTo(DeliveryGuarantee.EXACTLY_ONCE);
     }
 
     private static JobSpec jobSpec(

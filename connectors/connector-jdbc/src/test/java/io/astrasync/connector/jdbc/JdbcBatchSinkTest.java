@@ -3,10 +3,13 @@ package io.astrasync.connector.jdbc;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import io.astrasync.connector.api.CheckpointContext;
 import io.astrasync.connector.api.ConnectorConfiguration;
+import io.astrasync.connector.api.SinkCommitContext;
 import io.astrasync.connector.api.data.Row;
 import io.astrasync.connector.api.data.RowBatch;
 import io.astrasync.connector.api.sink.BatchSink;
+import io.astrasync.connector.api.sink.IdempotentBatchSink;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
@@ -160,8 +163,56 @@ class JdbcBatchSinkTest {
         }
     }
 
+    @Test
+    void retriesACommittedTokenWithoutDuplicatingRows() throws Exception {
+        String url = JdbcTestSupport.url();
+        createTargetTable(url, false);
+        SinkCommitContext commit = new SinkCommitContext("orders", "split-0", 1, "digest-1", "token-1");
+
+        IdempotentBatchSink first = idempotentSink(url);
+        first.open(new CheckpointContext("orders", 1, "split-0"));
+        first.writeBatch(RowBatch.data(List.of(row(1))), commit);
+        first.close();
+
+        IdempotentBatchSink retry = idempotentSink(url);
+        retry.open(new CheckpointContext("orders", 2, "split-0"));
+        retry.writeBatch(RowBatch.data(List.of(row(1))), commit);
+        assertThat(retry.lastCommitToken()).isEqualTo("token-1");
+        retry.close();
+
+        try (Connection connection = JdbcTestSupport.connect(url);
+                ResultSet result = connection.createStatement().executeQuery("SELECT COUNT(*) FROM \"target\"")) {
+            assertThat(result.next()).isTrue();
+            assertThat(result.getInt(1)).isEqualTo(1);
+        }
+    }
+
+    @Test
+    void rejectsACommitTokenWithADifferentBatchDigest() throws Exception {
+        String url = JdbcTestSupport.url();
+        createTargetTable(url, false);
+        IdempotentBatchSink sink = idempotentSink(url);
+        sink.open(new CheckpointContext("orders", 1, "split-0"));
+        sink.writeBatch(
+                RowBatch.data(List.of(row(1))), new SinkCommitContext("orders", "split-0", 1, "digest-1", "token-1"));
+        sink.close();
+
+        IdempotentBatchSink retry = idempotentSink(url);
+        retry.open(new CheckpointContext("orders", 2, "split-0"));
+        assertThatThrownBy(() -> retry.writeBatch(
+                        RowBatch.data(List.of(row(1))),
+                        new SinkCommitContext("orders", "split-0", 1, "digest-2", "token-1")))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("different batch digest");
+        retry.close();
+    }
+
     private BatchSink sink(String url) {
         return factory.createSink(ConnectorConfiguration.of(Map.of("url", url, "table", "target")));
+    }
+
+    private IdempotentBatchSink idempotentSink(String url) {
+        return (IdempotentBatchSink) sink(url);
     }
 
     private static Row row(int id) {

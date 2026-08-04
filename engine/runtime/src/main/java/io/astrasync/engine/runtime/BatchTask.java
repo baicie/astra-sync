@@ -7,7 +7,17 @@ import java.util.Objects;
 
 /** A self-contained batch split assigned to one Worker. */
 public record BatchTask(
-        SourceSplit split, BatchSource source, BatchSink sink, int maxBatchRecords, int maxInFlightBatches) {
+        SourceSplit split,
+        BatchSource source,
+        BatchSink sink,
+        int maxBatchRecords,
+        int maxInFlightBatches,
+        boolean exactlyOnce) {
+    public BatchTask(
+            SourceSplit split, BatchSource source, BatchSink sink, int maxBatchRecords, int maxInFlightBatches) {
+        this(split, source, sink, maxBatchRecords, maxInFlightBatches, false);
+    }
+
     public BatchTask {
         split = Objects.requireNonNull(split, "split must not be null");
         source = Objects.requireNonNull(source, "source must not be null");

@@ -64,6 +64,7 @@ final class WorkerProtocolMapper {
                 .setCheckpointSequence(context.checkpointSequence())
                 .putAllSourcePosition(context.sourcePosition().offsets())
                 .setSplitFingerprint(requireText(splitFingerprint, "splitFingerprint"))
+                .setExactlyOnce(task.exactlyOnce())
                 .build();
         return WorkerRequest.newBuilder()
                 .setProtocolVersion(WorkerProtocol.CHECKPOINT_VERSION)

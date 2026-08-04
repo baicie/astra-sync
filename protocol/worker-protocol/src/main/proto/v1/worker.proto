@@ -42,6 +42,7 @@ message ExecuteCheckpointTaskRequest {
   uint64 checkpoint_sequence = 8;
   map<string, string> source_position = 9;
   string split_fingerprint = 10;
+  bool exactly_once = 11;
 }
 
 message CheckpointAckRequest {
