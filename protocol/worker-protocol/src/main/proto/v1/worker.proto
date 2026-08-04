@@ -12,6 +12,8 @@ message WorkerRequest {
   oneof operation {
     ExecuteTaskRequest execute_task = 2;
     CancelTaskRequest cancel_task = 3;
+    ExecuteCheckpointTaskRequest execute_checkpoint_task = 4;
+    CheckpointAckRequest checkpoint_ack = 5;
   }
 }
 
@@ -29,6 +31,28 @@ message CancelTaskRequest {
   string reason = 3;
 }
 
+message ExecuteCheckpointTaskRequest {
+  string worker_id = 1;
+  string job_id = 2;
+  uint64 execution_epoch = 3;
+  string task_id = 4;
+  SplitDescriptor split = 5;
+  int32 max_batch_records = 6;
+  int32 max_in_flight_batches = 7;
+  uint64 checkpoint_sequence = 8;
+  map<string, string> source_position = 9;
+  string split_fingerprint = 10;
+}
+
+message CheckpointAckRequest {
+  string worker_id = 1;
+  string job_id = 2;
+  uint64 execution_epoch = 3;
+  string task_id = 4;
+  uint64 checkpoint_sequence = 5;
+  string checkpoint_fingerprint = 6;
+}
+
 message SplitDescriptor {
   string split_id = 1;
   string source_id = 2;
@@ -43,7 +67,19 @@ message WorkerResponse {
     TaskResult task_result = 2;
     ErrorResponse error = 3;
     CancelResponse cancel_response = 4;
+    BatchCommittedResponse batch_committed = 5;
   }
+}
+
+message BatchCommittedResponse {
+  string worker_id = 1;
+  string job_id = 2;
+  uint64 execution_epoch = 3;
+  string task_id = 4;
+  uint64 checkpoint_sequence = 5;
+  map<string, string> source_position = 6;
+  string sink_commit_token = 7;
+  string batch_digest = 8;
 }
 
 message TaskResult {
@@ -84,4 +120,5 @@ enum ErrorCode {
   TASK_REJECTED = 5;
   TASK_CANCELLED = 6;
   INTERNAL = 7;
+  EPOCH_FENCED = 8;
 }

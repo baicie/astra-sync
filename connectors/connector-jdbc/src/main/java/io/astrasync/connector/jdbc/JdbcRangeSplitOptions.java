@@ -12,6 +12,7 @@ record JdbcRangeSplitOptions(
         String password,
         String table,
         String splitColumn,
+        String resumeColumn,
         int splitCount,
         int fetchSize,
         int queryTimeoutSeconds) {
@@ -20,6 +21,7 @@ record JdbcRangeSplitOptions(
     private static final String PASSWORD = "password";
     private static final String TABLE = "table";
     private static final String SPLIT_COLUMN = "splitColumn";
+    private static final String RESUME_COLUMN = "resumeColumn";
     private static final String SPLIT_COUNT = "splitCount";
     private static final String FETCH_SIZE = "fetchSize";
     private static final String QUERY_TIMEOUT = "queryTimeoutSeconds";
@@ -33,6 +35,10 @@ record JdbcRangeSplitOptions(
         if (!COLUMN_PATTERN.matcher(splitColumn).matches()) {
             throw new IllegalArgumentException("connector option 'splitColumn' must be one unquoted SQL identifier");
         }
+        String resumeColumn = optional(configuration, RESUME_COLUMN);
+        if (resumeColumn != null && !COLUMN_PATTERN.matcher(resumeColumn).matches()) {
+            throw new IllegalArgumentException("connector option 'resumeColumn' must be one unquoted SQL identifier");
+        }
         int splitCount = positive(configuration, SPLIT_COUNT, 1);
         int fetchSize = positive(configuration, FETCH_SIZE, 0);
         int queryTimeoutSeconds = positive(configuration, QUERY_TIMEOUT, 0);
@@ -42,6 +48,7 @@ record JdbcRangeSplitOptions(
                 optional(configuration, PASSWORD),
                 table,
                 splitColumn,
+                resumeColumn,
                 splitCount,
                 fetchSize,
                 queryTimeoutSeconds);
@@ -72,7 +79,8 @@ record JdbcRangeSplitOptions(
 
     private static void rejectUnknown(ConnectorConfiguration configuration) {
         Set<String> unknown = new HashSet<>(configuration.asMap().keySet());
-        unknown.removeAll(Set.of(URL, USER, PASSWORD, TABLE, SPLIT_COLUMN, SPLIT_COUNT, FETCH_SIZE, QUERY_TIMEOUT));
+        unknown.removeAll(Set.of(
+                URL, USER, PASSWORD, TABLE, SPLIT_COLUMN, RESUME_COLUMN, SPLIT_COUNT, FETCH_SIZE, QUERY_TIMEOUT));
         if (!unknown.isEmpty()) {
             throw new IllegalArgumentException(
                     "unknown JDBC split option '" + unknown.iterator().next() + "'");

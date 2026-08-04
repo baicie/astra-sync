@@ -135,6 +135,27 @@ class JobCompilerTest {
         assertThat(sink.openCount).hasValue(0);
     }
 
+    @Test
+    void checkpointRuntimeAcceptsAtLeastOnceWithAReplayableExplicitResumeKey() {
+        ProbeFactory source = probe("source", Set.of(SOURCE), Set.of(BATCH_READ, REPLAYABLE_OFFSET));
+        ProbeFactory sink = probe("sink", Set.of(SINK), Set.of(BATCH_WRITE));
+        JobCompiler compiler = new JobCompiler(ConnectorRegistry.of(source, sink));
+        JobSpec checkpointed =
+                jobSpec("source", Map.of("resumeColumn", "ID"), "sink", Map.of(), DeliveryGuarantee.AT_LEAST_ONCE);
+
+        assertThat(compiler.compileCheckpointed(checkpointed).deliveryGuarantee())
+                .isEqualTo(DeliveryGuarantee.AT_LEAST_ONCE);
+        assertCompilationFailure(() -> compiler.compile(checkpointed), CompilationErrorCode.DELIVERY_UNSUPPORTED);
+        assertCompilationFailure(
+                () -> compiler.compileCheckpointed(
+                        jobSpec("source", Map.of(), "sink", Map.of(), DeliveryGuarantee.AT_LEAST_ONCE)),
+                CompilationErrorCode.DELIVERY_UNSUPPORTED);
+        assertCompilationFailure(
+                () -> compiler.compileCheckpointed(jobSpec(
+                        "source", Map.of("resumeColumn", "ID"), "sink", Map.of(), DeliveryGuarantee.EXACTLY_ONCE)),
+                CompilationErrorCode.DELIVERY_UNSUPPORTED);
+    }
+
     private static JobSpec jobSpec(
             String source,
             Map<String, String> sourceOptions,

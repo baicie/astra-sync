@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import io.astrasync.connector.api.ConnectorConfiguration;
 import io.astrasync.connector.api.data.RowBatch;
 import io.astrasync.connector.api.source.BatchSource;
+import io.astrasync.connector.api.source.CheckpointableBatchSource;
 import io.astrasync.connector.api.source.SourceSplit;
 import io.astrasync.connector.api.source.SplitPosition;
 import java.sql.Connection;
@@ -109,6 +110,69 @@ class JdbcRangeSplitSourceTest {
                         SplitPosition.unbounded())))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("JDBC split boundary must be an integer");
+    }
+
+    @Test
+    void resumesWithinTheOriginalRangeFromAnExplicitResumeColumn() throws Exception {
+        String url = JdbcTestSupport.url();
+        createRangeTable(url, "CREATE TABLE RECORDS (ID INT NOT NULL, PAYLOAD VARCHAR(20))", 1, 2, 3, 4, 5);
+        JdbcRangeSplitSource source = new JdbcRangeSplitSource(ConnectorConfiguration.of(Map.of(
+                "url", url,
+                "table", "RECORDS",
+                "splitColumn", "ID",
+                "resumeColumn", "ID",
+                "splitCount", "1")));
+        SourceSplit split = source.enumerate().getFirst();
+
+        CheckpointableBatchSource reader =
+                (CheckpointableBatchSource) source.createSource(split, new SplitPosition(Map.of("ID", "2")));
+        List<Integer> ids = new ArrayList<>();
+        try (reader) {
+            reader.openAt(new SplitPosition(Map.of("ID", "2")));
+            while (true) {
+                RowBatch batch = reader.readBatch(2);
+                ids.addAll(batch.rows().stream()
+                        .map(row -> (Integer) row.get("ID"))
+                        .toList());
+                if (batch.endOfInput()) {
+                    break;
+                }
+            }
+        }
+        assertThat(ids).containsExactly(3, 4, 5);
+    }
+
+    @Test
+    void rejectsNullableOrDuplicateResumeValuesBeforeCreatingSplits() throws Exception {
+        String duplicateUrl = JdbcTestSupport.url();
+        try (Connection connection = JdbcTestSupport.connect(duplicateUrl);
+                Statement statement = connection.createStatement()) {
+            statement.execute("CREATE TABLE RECORDS (ID INT NOT NULL, RESUME_KEY INT)");
+            statement.execute("INSERT INTO RECORDS VALUES (1, 7), (2, 7)");
+        }
+        assertThatThrownBy(() -> new JdbcRangeSplitSource(ConnectorConfiguration.of(Map.of(
+                                "url", duplicateUrl,
+                                "table", "RECORDS",
+                                "splitColumn", "ID",
+                                "resumeColumn", "RESUME_KEY")))
+                        .enumerate())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("JDBC resumeColumn must be unique");
+
+        String nullableUrl = JdbcTestSupport.url();
+        try (Connection connection = JdbcTestSupport.connect(nullableUrl);
+                Statement statement = connection.createStatement()) {
+            statement.execute("CREATE TABLE RECORDS (ID INT NOT NULL, RESUME_KEY INT)");
+            statement.execute("INSERT INTO RECORDS VALUES (1, NULL), (2, 8)");
+        }
+        assertThatThrownBy(() -> new JdbcRangeSplitSource(ConnectorConfiguration.of(Map.of(
+                                "url", nullableUrl,
+                                "table", "RECORDS",
+                                "splitColumn", "ID",
+                                "resumeColumn", "RESUME_KEY")))
+                        .enumerate())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("JDBC resumeColumn must be non-null");
     }
 
     private static ConnectorConfiguration configuration(

@@ -55,6 +55,8 @@ class ResumableBatchCoordinatorTest {
                 .containsExactly("split-1", "split-2", "split-3");
         assertThat(resumed.resumedSplitCount()).isEqualTo(1);
         assertThat(resumed.executedSplitCount()).isEqualTo(2);
+        assertThat(resumed.executionEpoch()).isZero();
+        assertThat(resumed.recoveredSplitCount()).isZero();
         assertThat(resumed.metrics().readCount()).isEqualTo(3);
         assertThat(resumed.metrics().writtenCount()).isEqualTo(3);
 

@@ -1,8 +1,9 @@
 package io.astrasync.connector.jdbc;
 
+import io.astrasync.connector.api.CheckpointContext;
 import io.astrasync.connector.api.data.Row;
 import io.astrasync.connector.api.data.RowBatch;
-import io.astrasync.connector.api.sink.BatchSink;
+import io.astrasync.connector.api.sink.CheckpointableBatchSink;
 import java.sql.Connection;
 import java.sql.DatabaseMetaData;
 import java.sql.PreparedStatement;
@@ -13,7 +14,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.TreeSet;
 
-final class JdbcBatchSink implements BatchSink {
+final class JdbcBatchSink implements CheckpointableBatchSink {
     private final JdbcConnectorOptions options;
 
     private State state = State.NEW;
@@ -21,6 +22,8 @@ final class JdbcBatchSink implements BatchSink {
     private PreparedStatement statement;
     private List<String> columns;
     private Set<String> columnSet;
+    private CheckpointContext checkpointContext;
+    private long commitSequence;
 
     JdbcBatchSink(JdbcConnectorOptions options) {
         this.options = options;
@@ -28,6 +31,16 @@ final class JdbcBatchSink implements BatchSink {
 
     @Override
     public void open() {
+        openInternal(null);
+    }
+
+    @Override
+    public void open(CheckpointContext context) {
+        checkpointContext = Objects.requireNonNull(context, "context must not be null");
+        openInternal(context);
+    }
+
+    private void openInternal(CheckpointContext context) {
         requireState(State.NEW, "open");
         Connection openedConnection = null;
         try {
@@ -67,7 +80,13 @@ final class JdbcBatchSink implements BatchSink {
                     throw new SQLException("JDBC driver reported an executeBatch failure");
                 }
             }
+            if (checkpointContext != null) {
+                assertEpoch(checkpointContext.executionEpoch());
+            }
             connection.commit();
+            if (checkpointContext != null) {
+                commitSequence++;
+            }
         } catch (IllegalArgumentException exception) {
             failure = exception;
             rollbackAfterFailure(failure);
@@ -82,6 +101,26 @@ final class JdbcBatchSink implements BatchSink {
     }
 
     @Override
+    public void assertEpoch(long executionEpoch) {
+        if (checkpointContext == null) {
+            throw new IllegalStateException("JDBC sink is not open for checkpoint execution");
+        }
+        if (checkpointContext.executionEpoch() != executionEpoch) {
+            throw new IllegalStateException(
+                    "sink epoch " + executionEpoch + " does not match " + checkpointContext.executionEpoch());
+        }
+        checkpointContext.assertCurrent();
+    }
+
+    @Override
+    public String lastCommitToken() {
+        if (checkpointContext == null || commitSequence <= 0) {
+            throw new IllegalStateException("JDBC sink has not committed a checkpoint batch");
+        }
+        return checkpointContext.executionEpoch() + ":" + checkpointContext.splitId() + ":" + commitSequence;
+    }
+
+    @Override
     public void close() {
         if (state == State.CLOSED) {
             return;
@@ -93,6 +132,8 @@ final class JdbcBatchSink implements BatchSink {
         connection = null;
         columns = null;
         columnSet = null;
+        checkpointContext = null;
+        commitSequence = 0;
 
         RuntimeException failure = null;
         if (openedConnection != null) {

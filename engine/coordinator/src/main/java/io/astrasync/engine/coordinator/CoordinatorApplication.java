@@ -27,12 +27,23 @@ public final class CoordinatorApplication {
     public static void main(String[] args) {
         try {
             ResumableRunResult result = run(CoordinatorConfiguration.fromEnvironment(System.getenv()));
-            System.out.printf(
-                    "SUCCEEDED resumedSplits=%d executedSplits=%d recordsRead=%d recordsWritten=%d%n",
-                    result.resumedSplitCount(),
-                    result.executedSplitCount(),
-                    result.metrics().readCount(),
-                    result.metrics().writtenCount());
+            if (result.executionEpoch() == 0) {
+                System.out.printf(
+                        "SUCCEEDED resumedSplits=%d executedSplits=%d recordsRead=%d recordsWritten=%d%n",
+                        result.resumedSplitCount(),
+                        result.executedSplitCount(),
+                        result.metrics().readCount(),
+                        result.metrics().writtenCount());
+            } else {
+                System.out.printf(
+                        "SUCCEEDED executionEpoch=%d resumedSplits=%d recoveredSplits=%d executedSplits=%d recordsRead=%d recordsWritten=%d%n",
+                        result.executionEpoch(),
+                        result.resumedSplitCount(),
+                        result.recoveredSplitCount(),
+                        result.executedSplitCount(),
+                        result.metrics().readCount(),
+                        result.metrics().writtenCount());
+            }
         } catch (RuntimeException exception) {
             System.err.println("FAILED to start or execute Coordinator: " + message(exception));
             System.exit(1);
@@ -42,7 +53,8 @@ public final class CoordinatorApplication {
     public static ResumableRunResult run(CoordinatorConfiguration configuration) {
         CoordinatorConfiguration checked = Objects.requireNonNull(configuration, "configuration must not be null");
         JobSpec jobSpec = readJobSpec(checked);
-        CompiledJobPlan plan = new JobCompiler(ConnectorRegistry.of(new JdbcConnectorFactory())).compile(jobSpec);
+        CompiledJobPlan plan =
+                new JobCompiler(ConnectorRegistry.of(new JdbcConnectorFactory())).compileCheckpointed(jobSpec);
         requireJdbcPlan(plan);
 
         SplitSource splitSource =
@@ -54,11 +66,23 @@ public final class CoordinatorApplication {
                         checked.maxInFlightTasks()))
                 .map(worker -> (BatchWorker) worker)
                 .toList();
+        String jobId = jobSpec.metadata().name();
+        RemoteTaskFactory taskFactory = new RemoteTaskFactory(plan.maxBatchRecords(), checked.maxInFlightBatches());
+        if (plan.deliveryGuarantee() == io.astrasync.engine.jobspec.DeliveryGuarantee.AT_LEAST_ONCE) {
+            CheckpointRunResult checkpointed = new CheckpointBatchCoordinator(
+                            workers,
+                            new io.astrasync.engine.checkpoint.FileCheckpointStore(checked.progressDirectory()))
+                    .run(jobId, splitSource, taskFactory);
+            return new ResumableRunResult(
+                    checkpointed.taskResults(),
+                    checkpointed.metrics(),
+                    checkpointed.resumedSplitCount(),
+                    checkpointed.executedSplitCount(),
+                    checkpointed.executionEpoch(),
+                    checkpointed.recoveredSplitCount());
+        }
         return new ResumableBatchCoordinator(workers, new FileSplitProgressStore(checked.progressDirectory()))
-                .run(
-                        jobSpec.metadata().name(),
-                        splitSource,
-                        new RemoteTaskFactory(plan.maxBatchRecords(), checked.maxInFlightBatches()));
+                .run(jobId, splitSource, taskFactory);
     }
 
     private static JobSpec readJobSpec(CoordinatorConfiguration configuration) {

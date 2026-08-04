@@ -1,15 +1,24 @@
 package io.astrasync.engine.worker;
 
+import io.astrasync.connector.api.CheckpointContext;
 import io.astrasync.connector.api.data.RowBatch;
 import io.astrasync.connector.api.sink.BatchSink;
+import io.astrasync.connector.api.sink.CheckpointableBatchSink;
 import io.astrasync.connector.api.source.BatchSource;
+import io.astrasync.connector.api.source.CheckpointableBatchSource;
+import io.astrasync.connector.api.source.SplitPosition;
 import io.astrasync.engine.kernel.SyncJobException;
 import io.astrasync.engine.kernel.SyncResult;
 import io.astrasync.engine.kernel.SyncStage;
+import io.astrasync.engine.runtime.BatchDigests;
 import io.astrasync.engine.runtime.BatchExchange;
 import io.astrasync.engine.runtime.BatchTask;
 import io.astrasync.engine.runtime.BatchTaskException;
 import io.astrasync.engine.runtime.BatchWorker;
+import io.astrasync.engine.runtime.CheckpointBatchWorker;
+import io.astrasync.engine.runtime.CheckpointExecutionContext;
+import io.astrasync.engine.runtime.CheckpointProgress;
+import io.astrasync.engine.runtime.CheckpointProgressListener;
 import io.astrasync.engine.runtime.ExchangeFailureException;
 import io.astrasync.engine.runtime.WorkerResult;
 import java.util.Objects;
@@ -21,7 +30,7 @@ import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /** A Worker implementation that runs a bounded Source-to-Sink exchange in one JVM. */
-public final class InProcessBatchWorker implements BatchWorker {
+public final class InProcessBatchWorker implements BatchWorker, CheckpointBatchWorker {
     private final String workerId;
 
     public InProcessBatchWorker(String workerId) {
@@ -66,6 +75,110 @@ public final class InProcessBatchWorker implements BatchWorker {
             throw new BatchTaskException(workerId, task.taskId(), failure, metrics);
         }
         return new WorkerResult(workerId, task.taskId(), metrics);
+    }
+
+    @Override
+    public WorkerResult executeCheckpoint(
+            CheckpointExecutionContext context, BatchTask task, CheckpointProgressListener progressListener) {
+        Objects.requireNonNull(context, "context must not be null");
+        Objects.requireNonNull(task, "task must not be null");
+        CheckpointProgressListener listener = CheckpointProgressListener.require(progressListener);
+        if (!(task.source() instanceof CheckpointableBatchSource source)) {
+            throw new BatchTaskException(
+                    workerId,
+                    task.taskId(),
+                    new IllegalArgumentException("task source does not support checkpoint recovery"),
+                    SyncResult.empty());
+        }
+        if (!(task.sink() instanceof CheckpointableBatchSink sink)) {
+            throw new BatchTaskException(
+                    workerId,
+                    task.taskId(),
+                    new IllegalArgumentException("task sink does not support checkpoint recovery"),
+                    SyncResult.empty());
+        }
+
+        long startedNanos = System.nanoTime();
+        long sequence = context.checkpointSequence();
+        MutableMetrics metrics = new MutableMetrics();
+        boolean sourceOpened = false;
+        boolean sinkOpened = false;
+        RuntimeException failure = null;
+        try {
+            context.assertCurrent();
+            source.openAt(context.sourcePosition());
+            sourceOpened = true;
+            sink.open(new CheckpointContext(
+                    context.jobId(), context.executionEpoch(), task.taskId(), context::assertCurrent));
+            sinkOpened = true;
+
+            boolean endOfInput = false;
+            while (!endOfInput) {
+                RowBatch batch =
+                        Objects.requireNonNull(source.readBatch(task.maxBatchRecords()), "source returned null batch");
+                if (batch.size() > task.maxBatchRecords()) {
+                    throw new IllegalStateException(
+                            "source returned " + batch.size() + " records, limit is " + task.maxBatchRecords());
+                }
+                metrics.observe(batch);
+                if (!batch.rows().isEmpty()) {
+                    context.assertCurrent();
+                    sink.assertEpoch(context.executionEpoch());
+                    sink.writeBatch(batch);
+                    context.assertCurrent();
+                    sequence = Math.addExact(sequence, 1);
+                    SplitPosition position = Objects.requireNonNull(
+                            source.positionAfter(batch), "checkpoint source returned null position");
+                    String token = Objects.requireNonNull(
+                            sink.lastCommitToken(), "checkpoint sink returned null commit token");
+                    listener.onBatchCommitted(new CheckpointProgress(
+                            context.jobId(),
+                            context.executionEpoch(),
+                            task.taskId(),
+                            sequence,
+                            position,
+                            token,
+                            BatchDigests.sha256(batch)));
+                    metrics.writtenCount += batch.size();
+                }
+                endOfInput = batch.endOfInput();
+            }
+        } catch (RuntimeException exception) {
+            failure = exception;
+        } finally {
+            if (sourceOpened) {
+                try {
+                    source.close();
+                } catch (RuntimeException closeFailure) {
+                    if (failure == null) {
+                        failure = closeFailure;
+                    } else {
+                        failure.addSuppressed(closeFailure);
+                    }
+                }
+            }
+            if (sinkOpened) {
+                try {
+                    sink.close();
+                } catch (RuntimeException closeFailure) {
+                    if (failure == null) {
+                        failure = closeFailure;
+                    } else {
+                        failure.addSuppressed(closeFailure);
+                    }
+                }
+            }
+        }
+        SyncResult result = new SyncResult(
+                metrics.readCount,
+                metrics.writtenCount,
+                metrics.batchCount,
+                metrics.maxObservedBatchSize,
+                Math.max(0, System.nanoTime() - startedNanos));
+        if (failure != null) {
+            throw new BatchTaskException(workerId, task.taskId(), failure, result);
+        }
+        return new WorkerResult(workerId, task.taskId(), result);
     }
 
     private ThreadOutcome produce(BatchTask task, BatchExchange exchange, long startedNanos) {

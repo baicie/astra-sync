@@ -1,5 +1,6 @@
 package io.astrasync.connector.api.source;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import java.util.Collections;
 import java.util.Map;
 import java.util.Objects;
@@ -23,6 +24,7 @@ public record SplitPosition(Map<String, String> offsets) {
         return new SplitPosition(Map.of());
     }
 
+    @JsonIgnore
     public boolean isUnbounded() {
         return offsets.isEmpty();
     }

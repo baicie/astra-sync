@@ -2,19 +2,24 @@ package io.astrasync.engine.network;
 
 import io.astrasync.engine.runtime.BatchTask;
 import io.astrasync.engine.runtime.BatchWorker;
+import io.astrasync.engine.runtime.CheckpointBatchWorker;
+import io.astrasync.engine.runtime.CheckpointExecutionContext;
+import io.astrasync.engine.runtime.CheckpointProgressListener;
 import io.astrasync.engine.runtime.WorkerResult;
 import java.util.Objects;
 import java.util.concurrent.Semaphore;
 
 /** BatchWorker adapter with a bounded number of remote tasks in flight. */
-public final class RemoteBatchWorker implements BatchWorker {
+public final class RemoteBatchWorker implements BatchWorker, CheckpointBatchWorker {
     private final String workerId;
     private final WorkerClient client;
+    private final CheckpointWorkerClient checkpointClient;
     private final Semaphore inFlight;
 
     public RemoteBatchWorker(String workerId, WorkerClient client, int maxInFlightTasks) {
         this.workerId = requireText(workerId, "workerId");
         this.client = Objects.requireNonNull(client, "client must not be null");
+        this.checkpointClient = new CheckpointWorkerClient(client.host(), client.port(), client.timeout());
         if (maxInFlightTasks <= 0) {
             throw new IllegalArgumentException("maxInFlightTasks must be positive");
         }
@@ -40,6 +45,12 @@ public final class RemoteBatchWorker implements BatchWorker {
         } finally {
             inFlight.release();
         }
+    }
+
+    @Override
+    public WorkerResult executeCheckpoint(
+            CheckpointExecutionContext context, BatchTask task, CheckpointProgressListener progressListener) {
+        return checkpointClient.execute(workerId, context, task, progressListener);
     }
 
     public boolean cancel(String taskId, String reason) {

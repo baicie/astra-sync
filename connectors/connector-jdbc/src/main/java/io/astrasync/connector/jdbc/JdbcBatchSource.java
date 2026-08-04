@@ -2,7 +2,8 @@ package io.astrasync.connector.jdbc;
 
 import io.astrasync.connector.api.data.Row;
 import io.astrasync.connector.api.data.RowBatch;
-import io.astrasync.connector.api.source.BatchSource;
+import io.astrasync.connector.api.source.CheckpointableBatchSource;
+import io.astrasync.connector.api.source.SplitPosition;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -10,8 +11,9 @@ import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 
-final class JdbcBatchSource implements BatchSource {
+final class JdbcBatchSource implements CheckpointableBatchSource {
     private final JdbcConnectorOptions options;
 
     private State state = State.NEW;
@@ -28,7 +30,13 @@ final class JdbcBatchSource implements BatchSource {
 
     @Override
     public void open() {
+        openAt(SplitPosition.unbounded());
+    }
+
+    @Override
+    public void openAt(SplitPosition resumePosition) {
         requireState(State.NEW, "open");
+        validateResumePosition(Objects.requireNonNull(resumePosition, "resumePosition must not be null"));
         Connection openedConnection = null;
         PreparedStatement openedStatement = null;
         ResultSet openedResultSet = null;
@@ -38,6 +46,9 @@ final class JdbcBatchSource implements BatchSource {
             openedConnection.setAutoCommit(false);
             openedStatement = openedConnection.prepareStatement(
                     options.query(), ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY);
+            if (options.resumeValue() != null) {
+                openedStatement.setString(1, options.resumeValue());
+            }
             if (options.fetchSize() > 0) {
                 openedStatement.setFetchSize(options.fetchSize());
             }
@@ -92,6 +103,38 @@ final class JdbcBatchSource implements BatchSource {
             }
         }
         return RowBatch.data(rows);
+    }
+
+    private void validateResumePosition(SplitPosition position) {
+        if (position.isUnbounded()) {
+            if (options.resumeValue() != null) {
+                throw new IllegalArgumentException("configured JDBC resume value requires a bounded resume position");
+            }
+            return;
+        }
+        if (options.resumeColumn() == null || options.resumeValue() == null) {
+            throw new IllegalArgumentException("bounded JDBC resume position was not applied to the source query");
+        }
+        if (position.offsets().size() != 1
+                || !options.resumeValue().equals(position.offsets().get(options.resumeColumn()))) {
+            throw new IllegalArgumentException("JDBC resume position does not match the materialized source query");
+        }
+    }
+
+    @Override
+    public SplitPosition positionAfter(RowBatch batch) {
+        Objects.requireNonNull(batch, "batch must not be null");
+        if (options.resumeColumn() == null) {
+            throw new IllegalStateException("JDBC source has no configured resumeColumn");
+        }
+        if (batch.rows().isEmpty()) {
+            return SplitPosition.unbounded();
+        }
+        Object value = batch.rows().get(batch.rows().size() - 1).get(options.resumeColumn());
+        if (value == null) {
+            throw new IllegalStateException("JDBC checkpoint resume column is null: " + options.resumeColumn());
+        }
+        return new SplitPosition(java.util.Map.of(options.resumeColumn(), value.toString()));
     }
 
     @Override

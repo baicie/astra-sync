@@ -59,6 +59,8 @@ class CoordinatorApplicationTest {
 
             assertThat(result.resumedSplitCount()).isZero();
             assertThat(result.executedSplitCount()).isEqualTo(2);
+            assertThat(result.executionEpoch()).isZero();
+            assertThat(result.recoveredSplitCount()).isZero();
             assertThat(result.metrics().readCount()).isEqualTo(4);
             assertThat(result.metrics().writtenCount()).isEqualTo(4);
             assertThat(assignments).containsExactlyInAnyOrder("worker-0:" + FIRST_SPLIT, "worker-1:" + SECOND_SPLIT);
