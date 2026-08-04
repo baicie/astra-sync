@@ -16,6 +16,8 @@ import io.astrasync.engine.runtime.WorkerResult;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
@@ -74,6 +76,49 @@ class BatchCoordinatorTest {
         assertThat(result.taskResults()).extracting(WorkerResult::taskId).containsExactly("split-1", "split-2");
     }
 
+    @Test
+    void reportsCompletionsAsTheyFinishWhileKeepingResultsInTaskOrder() {
+        CountDownLatch slowStarted = new CountDownLatch(1);
+        CountDownLatch releaseSlow = new CountDownLatch(1);
+        List<String> completions = new CopyOnWriteArrayList<>();
+        BatchWorker slow = new BatchWorker() {
+            @Override
+            public String workerId() {
+                return "worker-a";
+            }
+
+            @Override
+            public WorkerResult execute(BatchTask task) {
+                slowStarted.countDown();
+                await(releaseSlow);
+                return result(workerId(), task);
+            }
+        };
+        BatchWorker fast = new BatchWorker() {
+            @Override
+            public String workerId() {
+                return "worker-b";
+            }
+
+            @Override
+            public WorkerResult execute(BatchTask task) {
+                await(slowStarted);
+                return result(workerId(), task);
+            }
+        };
+
+        DistributedRunResult run = new BatchCoordinator(List.of(slow, fast))
+                .run(List.of(task("split-1"), task("split-2")), completed -> {
+                    completions.add(completed.taskId());
+                    if (completed.taskId().equals("split-2")) {
+                        releaseSlow.countDown();
+                    }
+                });
+
+        assertThat(completions).containsExactly("split-2", "split-1");
+        assertThat(run.taskResults()).extracting(WorkerResult::taskId).containsExactly("split-1", "split-2");
+    }
+
     private static BatchWorker worker(
             String workerId, List<String> assignments, AtomicInteger active, AtomicInteger maxActive) {
         return new BatchWorker() {
@@ -103,6 +148,21 @@ class BatchCoordinatorTest {
 
     private static BatchTask task(SourceSplit split) {
         return new BatchTask(split, new EmptySource(), new EmptySink(), 2, 1);
+    }
+
+    private static WorkerResult result(String workerId, BatchTask task) {
+        return new WorkerResult(workerId, task.taskId(), new SyncResult(1, 1, 1, 1, 0));
+    }
+
+    private static void await(CountDownLatch latch) {
+        try {
+            if (!latch.await(5, TimeUnit.SECONDS)) {
+                throw new IllegalStateException("timed out waiting for coordinated test task");
+            }
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("coordinated test task was interrupted", exception);
+        }
     }
 
     private static SourceSplit split(String splitId) {

@@ -1,3 +1,4 @@
+{{- if .Values.worker.enabled }}
 # Worker Deployment
 apiVersion: apps/v1
 kind: Deployment
@@ -32,39 +33,38 @@ spec:
           securityContext:
             {{- toYaml .Values.containerSecurityContext | nindent 12 }}
           ports:
-            - name: http
-              containerPort: 8080
-              protocol: TCP
-            - name: data
-              containerPort: 50051
+            - name: worker
+              containerPort: {{ .Values.worker.protocolPort }}
               protocol: TCP
           livenessProbe:
-            httpGet:
-              path: /health
-              port: http
-            initialDelaySeconds: 60
+            tcpSocket:
+              port: worker
+            initialDelaySeconds: 10
             periodSeconds: 10
-            timeoutSeconds: 5
+            timeoutSeconds: 3
           readinessProbe:
-            httpGet:
-              path: /ready
-              port: http
-            initialDelaySeconds: 30
+            tcpSocket:
+              port: worker
+            initialDelaySeconds: 5
             periodSeconds: 5
           resources:
             {{- toYaml .Values.worker.resources | nindent 12 }}
           env:
-            - name: ROLE
-              value: "worker"
-            - name: WORKER_SLOTS
-              value: "{{ .Values.worker.slotsPerWorker }}"
-            - name: ETCD_ENDPOINTS
-              value: {{ include "astrasync.etcd.endpoints" . }}
-            - name: OBJECT_STORAGE_ENDPOINT
-              value: {{ .Values.objectStorage.endpoint }}
-            - name: OBJECT_STORAGE_BUCKET
-              value: {{ .Values.objectStorage.bucket }}
-            - name: JAVA_OPTS
+            - name: ASTRASYNC_WORKER_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: ASTRASYNC_WORKER_PORT
+              value: {{ .Values.worker.protocolPort | quote }}
+            - name: ASTRASYNC_TASK_FACTORY_PROVIDER
+              value: {{ required "worker.taskFactoryProvider is required when worker.enabled=true" .Values.worker.taskFactoryProvider | quote }}
+            - name: ASTRASYNC_MAX_CONCURRENT_TASKS
+              value: {{ .Values.worker.maxConcurrentTasks | quote }}
+            - name: ASTRASYNC_TASK_QUEUE_CAPACITY
+              value: {{ .Values.worker.taskQueueCapacity | quote }}
+            - name: ASTRASYNC_MAX_CONNECTIONS
+              value: {{ .Values.worker.maxConnections | quote }}
+            - name: JAVA_TOOL_OPTIONS
               value: >-
                 -Xmx{{ .Values.worker.jvm.heapSize }}
                 -XX:+Use{{ .Values.worker.jvm.gc }}
@@ -102,3 +102,4 @@ spec:
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+{{- end }}

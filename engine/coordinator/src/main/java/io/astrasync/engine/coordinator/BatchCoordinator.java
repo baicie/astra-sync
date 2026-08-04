@@ -8,17 +8,24 @@ import io.astrasync.engine.runtime.BatchTaskFactory;
 import io.astrasync.engine.runtime.BatchWorker;
 import io.astrasync.engine.runtime.WorkerResult;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletionService;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorCompletionService;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
 
 /** Assigns independent batch tasks to Workers with one serialized queue per Worker. */
 public final class BatchCoordinator {
@@ -62,7 +69,13 @@ public final class BatchCoordinator {
     }
 
     public DistributedRunResult run(List<? extends BatchTask> tasks) {
+        return run(tasks, ignored -> {});
+    }
+
+    public DistributedRunResult run(
+            List<? extends BatchTask> tasks, Consumer<? super WorkerResult> completionListener) {
         Objects.requireNonNull(tasks, "tasks must not be null");
+        Objects.requireNonNull(completionListener, "completionListener must not be null");
         List<BatchTask> copy = new ArrayList<>(tasks.size());
         Set<String> taskIds = new HashSet<>();
         for (BatchTask task : tasks) {
@@ -78,22 +91,47 @@ public final class BatchCoordinator {
 
         long startedNanos = System.nanoTime();
         List<ExecutorService> queues = new ArrayList<>(workers.size());
-        List<Future<WorkerResult>> futures = new ArrayList<>(copy.size());
+        List<CompletionService<IndexedWorkerResult>> completionServices = new ArrayList<>(workers.size());
+        BlockingQueue<Future<IndexedWorkerResult>> completions = new LinkedBlockingQueue<>();
+        List<Future<IndexedWorkerResult>> futures = new ArrayList<>(copy.size());
+        AtomicBoolean taskFailed = new AtomicBoolean();
         try {
             for (int index = 0; index < workers.size(); index++) {
-                queues.add(Executors.newSingleThreadExecutor(new CoordinatorThreadFactory(index)));
+                ExecutorService queue = Executors.newSingleThreadExecutor(new CoordinatorThreadFactory(index));
+                queues.add(queue);
+                completionServices.add(new ExecutorCompletionService<>(queue, completions));
             }
             for (int index = 0; index < copy.size(); index++) {
                 BatchTask task = copy.get(index);
                 BatchWorker worker = workers.get(index % workers.size());
-                ExecutorService queue = queues.get(index % workers.size());
-                futures.add(queue.submit(() -> worker.execute(task)));
+                int taskIndex = index;
+                futures.add(completionServices
+                        .get(index % workers.size())
+                        .submit(() -> execute(taskIndex, worker, task, taskFailed)));
             }
 
-            List<WorkerResult> results = new ArrayList<>(copy.size());
-            for (Future<WorkerResult> future : futures) {
+            List<WorkerResult> results = new ArrayList<>(Collections.nCopies(copy.size(), null));
+            for (int completed = 0; completed < copy.size(); completed++) {
                 try {
-                    results.add(future.get());
+                    IndexedWorkerResult indexed = completions.take().get();
+                    if (indexed.skipped()) {
+                        continue;
+                    }
+                    if (indexed.failure() != null) {
+                        cancelAll(futures);
+                        throw indexed.failure();
+                    }
+                    try {
+                        completionListener.accept(indexed.result());
+                    } catch (RuntimeException exception) {
+                        taskFailed.set(true);
+                        cancelAll(futures);
+                        throw new BatchCoordinatorException(
+                                "task completion listener failed for "
+                                        + indexed.result().taskId(),
+                                exception);
+                    }
+                    results.set(indexed.index(), indexed.result());
                 } catch (InterruptedException exception) {
                     cancelAll(futures);
                     Thread.currentThread().interrupt();
@@ -119,6 +157,20 @@ public final class BatchCoordinator {
 
     private static void cancelAll(List<? extends Future<?>> futures) {
         futures.forEach(future -> future.cancel(true));
+    }
+
+    private static IndexedWorkerResult execute(
+            int index, BatchWorker worker, BatchTask task, AtomicBoolean taskFailed) {
+        if (taskFailed.get()) {
+            return new IndexedWorkerResult(index, null, null, true);
+        }
+        try {
+            WorkerResult result = Objects.requireNonNull(worker.execute(task), "Worker returned null result");
+            return new IndexedWorkerResult(index, result, null, false);
+        } catch (RuntimeException exception) {
+            taskFailed.set(true);
+            return new IndexedWorkerResult(index, null, exception, false);
+        }
     }
 
     private static SyncResult aggregate(List<WorkerResult> results, long startedNanos) {
@@ -157,4 +209,6 @@ public final class BatchCoordinator {
             return thread;
         }
     }
+
+    private record IndexedWorkerResult(int index, WorkerResult result, RuntimeException failure, boolean skipped) {}
 }

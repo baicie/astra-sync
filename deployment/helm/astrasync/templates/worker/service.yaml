@@ -1,0 +1,20 @@
+{{- if .Values.worker.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "astrasync.componentFullname" (dict "context" . "component" "worker") }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "astrasync.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+  clusterIP: None
+  ports:
+    - name: worker
+      port: {{ .Values.worker.protocolPort }}
+      targetPort: worker
+      protocol: TCP
+  selector:
+    {{- include "astrasync.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+{{- end }}

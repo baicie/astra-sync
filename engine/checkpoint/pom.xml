@@ -6,12 +6,41 @@
 
     <parent>
         <groupId>io.astrasync</groupId>
-        <artifactId>astrasync-engine</artifactId>
+        <artifactId>astrasync</artifactId>
         <version>0.1.0-SNAPSHOT</version>
+        <relativePath>../../pom.xml</relativePath>
     </parent>
 
     <artifactId>checkpoint</artifactId>
     <packaging>jar</packaging>
 
     <name>AstraSync Checkpoint</name>
+    <description>Durable split-completion manifests for resumable full-load execution</description>
+
+    <dependencies>
+        <dependency>
+            <groupId>io.astrasync</groupId>
+            <artifactId>runtime</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter-api</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter-engine</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.assertj</groupId>
+            <artifactId>assertj-core</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
 </project>

@@ -55,9 +55,6 @@ logs/
 .env.local
 .env.*.local
 
-# Container
-.dockerignore
-
 # Test output
 test-output/
 surefire-reports/
