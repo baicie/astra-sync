@@ -22,6 +22,7 @@
         <module>formats</module>
         <module>engine</module>
         <module>engine/runtime</module>
+        <module>engine/checkpoint</module>
         <module>engine/network</module>
         <module>engine/coordinator</module>
         <module>engine/worker</module>

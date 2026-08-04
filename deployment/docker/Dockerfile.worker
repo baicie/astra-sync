@@ -1,57 +1,30 @@
-# AstraSync Worker
-FROM eclipse-temurin:21-jdk-alpine AS builder
+# AstraSync Worker protocol service
+FROM maven:3.9.9-eclipse-temurin-21-alpine AS builder
 
-WORKDIR /app
+WORKDIR /workspace
+COPY . .
+RUN mvn -B -ntp -DskipTests -pl engine/worker -am package
 
-# Copy Maven wrapper and pom.xml
-COPY mvnw .
-COPY .mvn .mvn
-COPY pom.xml .
-
-# Copy source code
-COPY connector-api ./connector-api
-COPY engine ./engine
-COPY formats ./formats
-COPY protocol ./protocol
-
-# Build the application
-RUN ./mvnw -DskipTests package -pl engine -am
-
-# Runtime image
 FROM eclipse-temurin:21-jre-alpine
 
 WORKDIR /app
+RUN addgroup -g 1000 astra \
+    && adduser -u 1000 -G astra -D astra \
+    && mkdir -p /app/plugins \
+    && chown -R astra:astra /app
 
-# Install required packages
-RUN apk add --no-cache \
-    bash \
-    curl \
-    ca-certificates \
-    tzdata
-
-# Create non-root user
-RUN addgroup -g 1000 astra && \
-    adduser -u 1000 -G astra -D astra
-
-# Copy the jar
-COPY --from=builder /app/engine/target/*.jar app.jar
-
-# Copy configuration
-COPY config ./config
-
-# Set ownership
-RUN chown -R astra:astra /app
+COPY --from=builder /workspace/engine/worker/target/worker-*-all.jar /app/astrasync-worker.jar
 
 USER astra
+EXPOSE 50051
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD curl -f http://localhost:8080/health || exit 1
+ENV ASTRASYNC_WORKER_PORT=50051 \
+    ASTRASYNC_MAX_CONCURRENT_TASKS=1 \
+    ASTRASYNC_TASK_QUEUE_CAPACITY=0 \
+    ASTRASYNC_MAX_CONNECTIONS=16 \
+    JAVA_TOOL_OPTIONS="-XX:+UseG1GC -XX:MaxRAMPercentage=75"
 
-# Expose ports
-EXPOSE 8080 50051
+HEALTHCHECK --interval=10s --timeout=3s --start-period=10s --retries=3 \
+    CMD ["java", "-cp", "/app/astrasync-worker.jar:/app/plugins/*", "io.astrasync.engine.worker.WorkerHealthProbe"]
 
-# JVM options
-ENV JAVA_OPTS="-Xmx4g -Xms2g -XX:+UseG1GC -XX:MaxGCPauseMillis=200"
-
-ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -jar app.jar"]
+ENTRYPOINT ["java", "-cp", "/app/astrasync-worker.jar:/app/plugins/*", "io.astrasync.engine.worker.WorkerApplication"]

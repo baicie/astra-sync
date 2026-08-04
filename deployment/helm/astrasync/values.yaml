@@ -135,9 +135,15 @@ scheduler:
 
 # Worker configuration
 worker:
-  enabled: true
+  # Enable only with an image that contains a WorkerTaskFactoryProvider plugin.
+  enabled: false
   replicaCount: 5
   slotsPerWorker: 4
+  protocolPort: 50051
+  taskFactoryProvider: ""
+  maxConcurrentTasks: 1
+  taskQueueCapacity: 0
+  maxConnections: 16
   resources:
     limits:
       cpu: 4000m

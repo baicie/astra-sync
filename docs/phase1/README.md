@@ -1,8 +1,8 @@
 # Phase 1: Distributed Batch Sync
 
-Phase 1 extends the verified Phase 0 single-process path toward distributed full-load execution.
-The first slice establishes the Coordinator/Worker boundary with a bounded direct exchange. It
-is deliberately transport-neutral and does not claim production distributed execution yet.
+Phase 1 extends the verified Phase 0 single-process path to split-based distributed full-load
+execution. Its four slices establish bounded Worker execution, connector split enumeration, a
+versioned network protocol, split-level restart, and an operational Worker deployment boundary.
 
 ## Delivery Slices
 
@@ -11,9 +11,9 @@ is deliberately transport-neutral and does not claim production distributed exec
 | 01 | Coordinator task scheduling, in-process Workers, bounded direct exchange, failure propagation | Complete |
 | 02 | Connector split enumeration and source-position-aware full-load tasks | Complete |
 | 03 | Network Worker protocol and distributed task admission backpressure | Complete |
-| 04 | Resumable full-load execution and operational deployment | Planned |
+| 04 | Resumable full-load execution and operational deployment | Complete |
 
-## Slice 01 Boundary
+## Delivered Boundary
 
 The Coordinator accepts a `BatchSplitEnumerator`, asks a `BatchTaskFactory` to materialize one
 resource-owned `BatchTask` per immutable `SourceSplit`, and schedules the tasks across a fixed
@@ -31,17 +31,24 @@ contract, and returns task metrics or structured failure. The server has a bound
 the client has a bounded in-flight window; a full remote Worker rejects work instead of growing an
 unbounded queue. Cancellation is an explicit interrupt request.
 
-The slice supports parallel independent tasks and reports aggregate `SyncResult` metrics. A task
-failure stops outstanding tasks and preserves the task's partial metrics in the exception.
+Slice 04 persists the first successful result for each split in an atomic, versioned manifest. A
+restart with the same job ID and split plan skips durable completions and materializes only unfinished
+tasks. It also packages the Worker as an executable service with a deployment-provided task-factory
+plugin, real TCP health checks, a Worker image, and guarded Helm resources.
+
+The phase supports parallel independent tasks and reports aggregate `SyncResult` metrics. A task
+failure stops outstanding tasks, preserves the task's partial metrics in the exception, and retains
+successful split records already written to the progress manifest.
 
 ## Excluded
 
 - gRPC, TLS/mTLS, authentication, service discovery, and durable Worker registration
 - network RowBatch streaming between separate Source and Sink processes
 - dynamic split discovery beyond the static JDBC range enumerator
-- retries, checkpoints, replay, savepoints, epoch fencing, and exactly-once
+- automatic retries, intra-split checkpoints, savepoints, epoch fencing, and exactly-once
 - shared transactional sink commits
-- autoscaling, durable scheduling state, and Kubernetes reconciliation
+- autoscaling, durable scheduling state beyond split completions, and Kubernetes reconciliation
+- a bundled production `WorkerTaskFactoryProvider` or connector-specific Worker image
 
 ## Acceptance
 
@@ -58,6 +65,10 @@ failure stops outstanding tasks and preserves the task's partial metrics in the 
   integer value range, and rejects non-integral split columns.
 - A remote Worker validates protocol version and task identity, materializes resources on the Worker,
   returns metrics/failures, rejects work at bounded capacity, and responds to cancellation.
+- A restart rejects split-plan drift, skips durable completions, and runs only unfinished splits from
+  their original boundaries; duplicate completions preserve the first durable success.
+- The Worker executable validates its provider contract, serves the real TCP protocol port, passes a
+  TCP health check, and renders through Helm only when a provider is configured.
 - Phase 0 behavior and its at-most-once boundary remain unchanged.
 
 ## Records
@@ -65,8 +76,11 @@ failure stops outstanding tasks and preserves the task's partial metrics in the 
 - [ADR-021: Distributed Batch Runtime Boundary](../adr/adr-021-distributed-batch-runtime.md)
 - [ADR-022: Connector Split Enumeration and Numeric JDBC Ranges](../adr/adr-022-jdbc-range-splits.md)
 - [ADR-023: Versioned Worker Protocol and Bounded Remote Admission](../adr/adr-023-worker-network-protocol.md)
+- [ADR-024: Split-level Resumable Full-load Execution](../adr/adr-024-resumable-full-load.md)
 - [Slice 02 design](02-connector-split-enumeration/design.md)
 - [Slice 02 verification](02-connector-split-enumeration/verification.md)
 - [Slice 03 design](03-network-worker-protocol/design.md)
 - [Slice 03 verification](03-network-worker-protocol/verification.md)
+- [Slice 04 design](04-resumable-full-load/design.md)
+- [Slice 04 verification](04-resumable-full-load/verification.md)
 - [Architecture delivery phases](../architecture.md)
