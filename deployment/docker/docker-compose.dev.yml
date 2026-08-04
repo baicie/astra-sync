@@ -1,156 +1,70 @@
-version: "3.8"
-
 services:
-  # PostgreSQL for metadata
   postgres:
     image: postgres:16-alpine
     environment:
       POSTGRES_DB: astrasync
       POSTGRES_USER: astra
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-astra}
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
+      POSTGRES_PASSWORD: astra
     ports:
       - "5432:5432"
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U astra"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  # etcd for coordination
-  etcd:
-    image: quay.io/coreos/etcd:v3.5.15
-    environment:
-      ETCD_NAME: etcd
-      ETCD_INITIAL_ADVERTISE_PEER_URLS: http://etcd:2380
-      ETCD_LISTEN_PEER_URLS: http://0.0.0.0:2380
-      ETCD_LISTEN_CLIENT_URLS: http://0.0.0.0:2379
-      ETCD_ADVERTISE_CLIENT_URLS: http://etcd:2379
-      ETCD_INITIAL_CLUSTER_STATE: new
-      ETCD_INITIAL_CLUSTER_TOKEN: astra-etcd
-    ports:
-      - "2379:2379"
     volumes:
-      - etcd_data:/etcd
+      - postgres_data:/var/lib/postgresql/data
+      - ./init/jdbc-demo.sql:/docker-entrypoint-initdb.d/001-jdbc-demo.sql:ro
     healthcheck:
-      test: ["CMD", "etcdctl", "endpoint", "health"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      test: ["CMD-SHELL", "pg_isready -U astra -d astrasync"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
-  # MinIO for object storage (dev mode)
-  minio:
-    image: minio/minio:latest
-    environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
-    command: server /data --console-address ":9001"
-    ports:
-      - "9000:9000"
-      - "9001:9001"
-    volumes:
-      - minio_data:/data
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
-      interval: 30s
-      timeout: 20s
-      retries: 3
-
-  # API Server
-  api-server:
+  worker-0:
     build:
-      context: ..
-      dockerfile: deployment/docker/Dockerfile.api
-    ports:
-      - "8080:8080"
-      - "50051:50051"
+      context: ../..
+      dockerfile: deployment/docker/Dockerfile.worker
     environment:
-      POSTGRES_HOST: postgres
-      POSTGRES_PORT: 5432
-      POSTGRES_DB: astrasync
-      POSTGRES_USER: astra
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-astra}
-      ETCD_ENDPOINTS: etcd:2379
+      ASTRASYNC_WORKER_ID: worker-0
+      ASTRASYNC_TASK_FACTORY_PROVIDER: io.astrasync.engine.worker.JdbcWorkerTaskFactoryProvider
+      ASTRASYNC_WORKER_JOB_SPEC: /etc/astrasync/job/job.yaml
+      ASTRASYNC_WORKER_MAX_IN_FLIGHT_BATCHES: "1"
+    ports:
+      - "50051:50051"
+    volumes:
+      - ./examples/jdbc-job.yaml:/etc/astrasync/job/job.yaml:ro
     depends_on:
       postgres:
         condition: service_healthy
-      etcd:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8080/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
 
-  # Controller
-  controller:
-    build:
-      context: ..
-      dockerfile: deployment/docker/Dockerfile.controller
-    ports:
-      - "8081:8081"
-    environment:
-      ETCD_ENDPOINTS: etcd:2379
-      KUBERNETES_ENABLED: "false"
-    depends_on:
-      etcd:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8081/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  # Worker (multiple instances)
   worker-1:
     build:
-      context: ..
+      context: ../..
       dockerfile: deployment/docker/Dockerfile.worker
+    environment:
+      ASTRASYNC_WORKER_ID: worker-1
+      ASTRASYNC_TASK_FACTORY_PROVIDER: io.astrasync.engine.worker.JdbcWorkerTaskFactoryProvider
+      ASTRASYNC_WORKER_JOB_SPEC: /etc/astrasync/job/job.yaml
+      ASTRASYNC_WORKER_MAX_IN_FLIGHT_BATCHES: "1"
     ports:
-      - "8082:8080"
-    environment:
-      WORKER_ID: worker-1
-      COORDINATOR_ADDRESS: coordinator:50051
-      ETCD_ENDPOINTS: etcd:2379
-      OBJECT_STORAGE_ENDPOINT: minio:9000
-      OBJECT_STORAGE_ACCESS_KEY: minioadmin
-      OBJECT_STORAGE_SECRET_KEY: minioadmin
-      OBJECT_STORAGE_BUCKET: astra-checkpoints
+      - "50052:50051"
+    volumes:
+      - ./examples/jdbc-job.yaml:/etc/astrasync/job/job.yaml:ro
     depends_on:
-      - coordinator
-      - minio
+      postgres:
+        condition: service_healthy
 
-  worker-2:
-    build:
-      context: ..
-      dockerfile: deployment/docker/Dockerfile.worker
-    environment:
-      WORKER_ID: worker-2
-      COORDINATOR_ADDRESS: coordinator:50051
-      ETCD_ENDPOINTS: etcd:2379
-      OBJECT_STORAGE_ENDPOINT: minio:9000
-      OBJECT_STORAGE_ACCESS_KEY: minioadmin
-      OBJECT_STORAGE_SECRET_KEY: minioadmin
-      OBJECT_STORAGE_BUCKET: astra-checkpoints
-    depends_on:
-      - coordinator
-      - minio
-
-  # Coordinator (standalone for dev mode)
   coordinator:
-    image: astrasync/worker:latest
-    command: ["java", "-jar", "app.jar", "--role=coordinator"]
-    ports:
-      - "8083:8080"
+    build:
+      context: ../..
+      dockerfile: deployment/docker/Dockerfile.coordinator
     environment:
-      ROLE: coordinator
-      ETCD_ENDPOINTS: etcd:2379
+      ASTRASYNC_COORDINATOR_WORKERS: worker-0@worker-0:50051,worker-1@worker-1:50051
+    volumes:
+      - ./examples/jdbc-job.yaml:/etc/astrasync/job/job.yaml:ro
+      - coordinator_progress:/var/lib/astrasync/progress
     depends_on:
-      etcd:
+      worker-0:
+        condition: service_healthy
+      worker-1:
         condition: service_healthy
 
 volumes:
   postgres_data:
-  etcd_data:
-  minio_data:
+  coordinator_progress:

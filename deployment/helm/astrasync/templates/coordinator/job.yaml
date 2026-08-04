@@ -1,0 +1,97 @@
+{{- if .Values.coordinator.enabled }}
+{{- if not .Values.worker.enabled }}
+{{- fail "worker.enabled must be true when coordinator.enabled=true" }}
+{{- end }}
+{{- if lt (int .Values.worker.replicaCount) 1 }}
+{{- fail "worker.replicaCount must be positive when coordinator.enabled=true" }}
+{{- end }}
+{{- $jobSpecSecret := required "jobSpec.existingSecret is required when coordinator.enabled=true" .Values.jobSpec.existingSecret }}
+{{- $progressClaim := required "coordinator.progress.existingClaim is required when coordinator.enabled=true" .Values.coordinator.progress.existingClaim }}
+{{- $workerName := include "astrasync.workerFullname" . }}
+{{- $workers := list }}
+{{- range $index := until (int .Values.worker.replicaCount) }}
+{{- $workerPod := printf "%s-%d" $workerName $index }}
+{{- $workers = append $workers (printf "%s@%s.%s:%d" $workerPod $workerPod $workerName (int $.Values.worker.protocolPort)) }}
+{{- end }}
+{{- $revision := printf "%d" .Release.Revision }}
+{{- $component := printf "coordinator-%s" $revision }}
+{{- $baseLimit := sub 62 (len $component) | int }}
+{{- $baseName := include "astrasync.fullname" . | trunc $baseLimit | trimSuffix "-" }}
+{{- $jobName := printf "%s-%s" $baseName $component }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $jobName }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "astrasync.labels" . | nindent 4 }}
+    app.kubernetes.io/component: coordinator
+spec:
+  backoffLimit: {{ .Values.coordinator.backoffLimit }}
+  {{- if gt (int .Values.coordinator.ttlSecondsAfterFinished) 0 }}
+  ttlSecondsAfterFinished: {{ .Values.coordinator.ttlSecondsAfterFinished }}
+  {{- end }}
+  template:
+    metadata:
+      labels:
+        {{- include "astrasync.labels" . | nindent 8 }}
+        app.kubernetes.io/component: coordinator
+    spec:
+      restartPolicy: OnFailure
+      serviceAccountName: {{ include "astrasync.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.securityContext | nindent 8 }}
+      containers:
+        - name: coordinator
+          image: "{{ .Values.image.coordinator.repository }}:{{ .Values.image.coordinator.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          resources:
+            {{- toYaml .Values.coordinator.resources | nindent 12 }}
+          env:
+            - name: ASTRASYNC_COORDINATOR_JOB_SPEC
+              value: {{ printf "%s/job.yaml" .Values.jobSpec.mountPath | quote }}
+            - name: ASTRASYNC_COORDINATOR_PROGRESS_DIR
+              value: {{ .Values.coordinator.progress.mountPath | quote }}
+            - name: ASTRASYNC_COORDINATOR_WORKERS
+              value: {{ join "," $workers | quote }}
+            - name: ASTRASYNC_COORDINATOR_WORKER_TIMEOUT_MS
+              value: {{ .Values.coordinator.workerTimeoutMillis | quote }}
+            - name: ASTRASYNC_COORDINATOR_MAX_IN_FLIGHT_TASKS
+              value: {{ .Values.coordinator.maxInFlightTasks | quote }}
+            - name: ASTRASYNC_COORDINATOR_MAX_IN_FLIGHT_BATCHES
+              value: {{ .Values.worker.maxInFlightBatches | quote }}
+            - name: JAVA_TOOL_OPTIONS
+              value: >-
+                -Xmx{{ .Values.coordinator.jvm.heapSize }}
+                -XX:+Use{{ .Values.coordinator.jvm.gc }}
+          volumeMounts:
+            - name: scratch
+              mountPath: /tmp
+            - name: job-spec
+              mountPath: {{ .Values.jobSpec.mountPath }}
+              readOnly: true
+            - name: progress
+              mountPath: {{ .Values.coordinator.progress.mountPath }}
+      volumes:
+        - name: scratch
+          emptyDir: {}
+        - name: job-spec
+          secret:
+            secretName: {{ $jobSpecSecret }}
+            items:
+              - key: {{ .Values.jobSpec.key }}
+                path: job.yaml
+        - name: progress
+          persistentVolumeClaim:
+            claimName: {{ $progressClaim }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

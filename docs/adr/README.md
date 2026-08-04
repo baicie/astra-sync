@@ -30,6 +30,7 @@ This directory contains the Architecture Decision Records (ADRs) for AstraSync.
 | [ADR-022](adr-022-jdbc-range-splits.md) | Connector Split Enumeration and Numeric JDBC Ranges | Accepted | 2026-08-03 |
 | [ADR-023](adr-023-worker-network-protocol.md) | Versioned Worker Protocol and Bounded Remote Admission | Accepted | 2026-08-03 |
 | [ADR-024](adr-024-resumable-full-load.md) | Split-level Resumable Full-load Execution | Accepted | 2026-08-04 |
+| [ADR-025](adr-025-distributed-jdbc-operational-slice.md) | Distributed JDBC Operational Slice | Accepted | 2026-08-04 |
 
 ## Template
 

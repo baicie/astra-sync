@@ -31,6 +31,16 @@ Create a component name that preserves its suffix within the 63-character DNS la
 {{- end }}
 
 {{/*
+Worker name with room for the StatefulSet ordinal in a DNS label.
+*/}}
+{{- define "astrasync.workerFullname" }}
+{{- $component := "worker" }}
+{{- $baseLength := sub 57 (len $component) | int }}
+{{- $base := include "astrasync.fullname" . | trunc $baseLength | trimSuffix "-" }}
+{{- printf "%s-%s" $base $component }}
+{{- end }}
+
+{{/*
 Create chart name and version as used by the chart label.
 */}}
 {{- define "astrasync.chart" }}

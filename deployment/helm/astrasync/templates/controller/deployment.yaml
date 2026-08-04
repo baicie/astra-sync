@@ -1,3 +1,4 @@
+{{- if .Values.controller.enabled }}
 # Controller Deployment
 apiVersion: apps/v1
 kind: Deployment
@@ -58,3 +59,4 @@ spec:
             - --leader-elect-lease-duration={{ .Values.controller.leaderElection.leaseDuration }}
             - --leader-elect-renew-deadline={{ .Values.controller.leaderElection.renewDeadline }}
             - --leader-elect-retry-period={{ .Values.controller.leaderElection.retryPeriod }}
+{{- end }}

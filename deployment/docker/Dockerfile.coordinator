@@ -1,0 +1,27 @@
+# AstraSync one-shot JDBC Coordinator
+FROM maven:3.9.9-eclipse-temurin-21-alpine AS builder
+
+WORKDIR /workspace
+COPY . .
+RUN mvn -B -ntp -DskipTests -pl engine/coordinator -am package
+
+FROM eclipse-temurin:21-jre-alpine
+
+WORKDIR /app
+RUN addgroup -g 1000 astra \
+    && adduser -u 1000 -G astra -D astra \
+    && mkdir -p /var/lib/astrasync/progress \
+    && chown -R astra:astra /app /var/lib/astrasync
+
+COPY --from=builder /workspace/engine/coordinator/target/coordinator-*-all.jar /app/astrasync-coordinator.jar
+
+USER astra
+
+ENV ASTRASYNC_COORDINATOR_JOB_SPEC=/etc/astrasync/job/job.yaml \
+    ASTRASYNC_COORDINATOR_PROGRESS_DIR=/var/lib/astrasync/progress \
+    ASTRASYNC_COORDINATOR_WORKER_TIMEOUT_MS=30000 \
+    ASTRASYNC_COORDINATOR_MAX_IN_FLIGHT_TASKS=1 \
+    ASTRASYNC_COORDINATOR_MAX_IN_FLIGHT_BATCHES=1 \
+    JAVA_TOOL_OPTIONS="-XX:+UseG1GC -XX:MaxRAMPercentage=75"
+
+ENTRYPOINT ["java", "-jar", "/app/astrasync-coordinator.jar"]

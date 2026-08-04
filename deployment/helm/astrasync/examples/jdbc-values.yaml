@@ -1,0 +1,24 @@
+apiServer:
+  enabled: false
+
+controller:
+  enabled: false
+
+podDisruptionBudget:
+  enabled: false
+
+rbac:
+  create: false
+
+jobSpec:
+  existingSecret: astrasync-jdbc-job
+  key: job.yaml
+
+worker:
+  enabled: true
+  replicaCount: 2
+
+coordinator:
+  enabled: true
+  progress:
+    existingClaim: astrasync-jdbc-progress

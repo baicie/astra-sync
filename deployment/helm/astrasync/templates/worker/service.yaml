@@ -1,14 +1,16 @@
 {{- if .Values.worker.enabled }}
+{{- $workerName := include "astrasync.workerFullname" . }}
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ include "astrasync.componentFullname" (dict "context" . "component" "worker") }}
+  name: {{ $workerName }}
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "astrasync.labels" . | nindent 4 }}
     app.kubernetes.io/component: worker
 spec:
   clusterIP: None
+  publishNotReadyAddresses: true
   ports:
     - name: worker
       port: {{ .Values.worker.protocolPort }}

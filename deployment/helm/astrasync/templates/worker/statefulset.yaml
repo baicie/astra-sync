@@ -1,14 +1,17 @@
 {{- if .Values.worker.enabled }}
-# Worker Deployment
+{{- $jobSpecSecret := required "jobSpec.existingSecret is required when worker.enabled=true" .Values.jobSpec.existingSecret }}
+{{- $workerName := include "astrasync.workerFullname" . }}
 apiVersion: apps/v1
-kind: Deployment
+kind: StatefulSet
 metadata:
-  name: {{ include "astrasync.componentFullname" (dict "context" . "component" "worker") }}
+  name: {{ $workerName }}
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "astrasync.labels" . | nindent 4 }}
     app.kubernetes.io/component: worker
 spec:
+  serviceName: {{ $workerName }}
+  podManagementPolicy: Parallel
   replicas: {{ .Values.worker.replicaCount }}
   selector:
     matchLabels:
@@ -19,9 +22,6 @@ spec:
       labels:
         {{- include "astrasync.labels" . | nindent 8 }}
         app.kubernetes.io/component: worker
-      annotations:
-        prometheus.io/scrape: "true"
-        prometheus.io/port: "9090"
     spec:
       serviceAccountName: {{ include "astrasync.serviceAccountName" . }}
       securityContext:
@@ -47,6 +47,7 @@ spec:
               port: worker
             initialDelaySeconds: 5
             periodSeconds: 5
+            timeoutSeconds: 3
           resources:
             {{- toYaml .Values.worker.resources | nindent 12 }}
           env:
@@ -57,7 +58,11 @@ spec:
             - name: ASTRASYNC_WORKER_PORT
               value: {{ .Values.worker.protocolPort | quote }}
             - name: ASTRASYNC_TASK_FACTORY_PROVIDER
-              value: {{ required "worker.taskFactoryProvider is required when worker.enabled=true" .Values.worker.taskFactoryProvider | quote }}
+              value: {{ .Values.worker.taskFactoryProvider | quote }}
+            - name: ASTRASYNC_WORKER_JOB_SPEC
+              value: {{ printf "%s/job.yaml" .Values.jobSpec.mountPath | quote }}
+            - name: ASTRASYNC_WORKER_MAX_IN_FLIGHT_BATCHES
+              value: {{ .Values.worker.maxInFlightBatches | quote }}
             - name: ASTRASYNC_MAX_CONCURRENT_TASKS
               value: {{ .Values.worker.maxConcurrentTasks | quote }}
             - name: ASTRASYNC_TASK_QUEUE_CAPACITY
@@ -72,17 +77,18 @@ spec:
           volumeMounts:
             - name: scratch
               mountPath: /tmp
-            - name: pod-info
-              mountPath: /etc/podinfo
+            - name: job-spec
+              mountPath: {{ .Values.jobSpec.mountPath }}
+              readOnly: true
       volumes:
         - name: scratch
           emptyDir: {}
-        - name: pod-info
-          downwardAPI:
+        - name: job-spec
+          secret:
+            secretName: {{ $jobSpecSecret }}
             items:
-              - path: "labels"
-                fieldRef:
-                  fieldPath: metadata.labels
+              - key: {{ .Values.jobSpec.key }}
+                path: job.yaml
       {{- if .Values.podAntiAffinity.enabled }}
       affinity:
         podAntiAffinity:

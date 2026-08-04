@@ -20,6 +20,10 @@ image:
     repository: astrasync/worker
     tag: "latest"
 
+  coordinator:
+    repository: astrasync/coordinator
+    tag: "latest"
+
 imagePullSecrets: []
 nameOverride: ""
 fullnameOverride: ""
@@ -135,15 +139,16 @@ scheduler:
 
 # Worker configuration
 worker:
-  # Enable only with an image that contains a WorkerTaskFactoryProvider plugin.
+  # The standard Worker image contains the production JDBC provider and JDBC drivers.
   enabled: false
-  replicaCount: 5
+  replicaCount: 2
   slotsPerWorker: 4
   protocolPort: 50051
-  taskFactoryProvider: ""
+  taskFactoryProvider: io.astrasync.engine.worker.JdbcWorkerTaskFactoryProvider
   maxConcurrentTasks: 1
   taskQueueCapacity: 0
   maxConnections: 16
+  maxInFlightBatches: 1
   resources:
     limits:
       cpu: 4000m
@@ -165,6 +170,28 @@ worker:
       bucket: astrasync-checkpoints
       accessKey: ""
       secretKey: ""
+
+# One-shot distributed JDBC full-load Coordinator. A failed Job is retried against the same
+# progress claim and resumes only unfinished splits.
+coordinator:
+  enabled: false
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 86400
+  workerTimeoutMillis: 30000
+  maxInFlightTasks: 1
+  progress:
+    existingClaim: ""
+    mountPath: /var/lib/astrasync/progress
+  resources:
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+    requests:
+      cpu: 100m
+      memory: 256Mi
+  jvm:
+    heapSize: 768m
+    gc: G1GC
 
 # Object Storage configuration
 objectStorage:
@@ -284,3 +311,9 @@ serviceMonitor:
 
 # Priority class
 priorityClassName: ""
+
+# Immutable JobSpec shared by the Coordinator and all Workers.
+jobSpec:
+  existingSecret: ""
+  key: job.yaml
+  mountPath: /etc/astrasync/job

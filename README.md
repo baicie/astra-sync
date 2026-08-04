@@ -160,19 +160,14 @@ mvn clean package -DskipTests
 mvn clean package
 ```
 
-### Local Development
+### Distributed JDBC Demo
 
 ```bash
-# Start dependencies (PostgreSQL, etcd, MinIO)
-cd deployment/docker
-docker-compose -f docker-compose.dev.yml up -d
+# Start PostgreSQL and two stable TCP Workers.
+docker compose -f deployment/docker/docker-compose.dev.yml up --build --wait postgres worker-0 worker-1
 
-# Start API server
-cd control-plane/api-server
-go run ./cmd/server
-
-# Start Worker (in another terminal)
-java -jar engine/target/engine-*.jar
+# Run the one-shot resumable Coordinator.
+docker compose -f deployment/docker/docker-compose.dev.yml run --rm --build coordinator
 ```
 
 ### Create a Sync Job
@@ -216,7 +211,7 @@ spec:
 | Phase | Focus | Status |
 |-------|-------|--------|
 | Phase 0 | Protocol & Single-node Kernel | Complete |
-| Phase 1 | Distributed Batch Sync | In progress |
+| Phase 1 | Distributed Batch Sync | Complete |
 | Phase 2 | Checkpoint & Exactly-Once | Planning |
 | Phase 3 | CDC (MySQL, PostgreSQL) | Planning |
 | Phase 4 | Control Plane HA | Planning |
