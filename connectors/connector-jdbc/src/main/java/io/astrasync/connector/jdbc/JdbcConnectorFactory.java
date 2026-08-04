@@ -18,7 +18,7 @@ public final class JdbcConnectorFactory implements ConnectorFactory {
             CONNECTOR_NAME,
             CONNECTOR_VERSION,
             Set.of(ConnectorRole.SOURCE, ConnectorRole.SINK),
-            Set.of(Capability.BATCH_READ, Capability.BATCH_WRITE));
+            Set.of(Capability.BATCH_READ, Capability.BATCH_WRITE, Capability.REPLAYABLE_OFFSET));
 
     @Override
     public ConnectorDescriptor descriptor() {

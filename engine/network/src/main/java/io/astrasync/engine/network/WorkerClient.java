@@ -43,6 +43,18 @@ public final class WorkerClient {
         return WorkerProtocolMapper.toWorkerResult(response.getTaskResult(), workerId, task.taskId());
     }
 
+    String host() {
+        return host;
+    }
+
+    int port() {
+        return port;
+    }
+
+    Duration timeout() {
+        return Duration.ofMillis(timeoutMillis);
+    }
+
     public boolean cancel(String workerId, String taskId, String reason) {
         String expectedWorkerId = requireText(workerId, "workerId");
         String expectedTaskId = requireText(taskId, "taskId");

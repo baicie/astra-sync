@@ -16,6 +16,15 @@ public final class JobCompiler {
     }
 
     public CompiledJobPlan compile(JobSpec jobSpec) {
+        return compile(jobSpec, false);
+    }
+
+    /** Compiles the distributed checkpoint runtime while keeping local Phase 1 callers unchanged. */
+    public CompiledJobPlan compileCheckpointed(JobSpec jobSpec) {
+        return compile(jobSpec, true);
+    }
+
+    private CompiledJobPlan compile(JobSpec jobSpec, boolean checkpointRuntime) {
         Objects.requireNonNull(jobSpec, "jobSpec must not be null");
 
         ConnectorDescriptor sourceDescriptor = resolve(jobSpec.spec().source(), ConnectorRole.SOURCE);
@@ -33,11 +42,26 @@ public final class JobCompiler {
         }
 
         DeliveryGuarantee requested = jobSpec.spec().delivery().guarantee();
-        if (requested != DeliveryGuarantee.AT_MOST_ONCE) {
+        if (requested == DeliveryGuarantee.EXACTLY_ONCE) {
             throw new JobCompilationException(
                     CompilationErrorCode.DELIVERY_UNSUPPORTED,
-                    "requested " + requested.externalName()
-                            + " but the Phase 0 runtime supports only at-most-once because checkpoint, replay, and commit coordination are absent");
+                    checkpointRuntime
+                            ? "requested exactly-once but no transactional or idempotent sink commit protocol is available"
+                            : "requested exactly-once but the Phase 0 runtime supports only at-most-once because checkpoint, replay, and commit coordination are absent");
+        }
+        if (requested == DeliveryGuarantee.AT_LEAST_ONCE) {
+            if (!checkpointRuntime) {
+                throw new JobCompilationException(
+                        CompilationErrorCode.DELIVERY_UNSUPPORTED,
+                        "requested at-least-once but this runtime does not coordinate durable checkpoints");
+            }
+            requireCapability(sourceDescriptor, Capability.REPLAYABLE_OFFSET, ConnectorRole.SOURCE);
+            String resumeColumn = jobSpec.spec().source().options().get("resumeColumn");
+            if (resumeColumn == null || resumeColumn.isBlank()) {
+                throw new JobCompilationException(
+                        CompilationErrorCode.DELIVERY_UNSUPPORTED,
+                        "at-least-once requires an explicit stable unique source resumeColumn");
+            }
         }
 
         return new CompiledJobPlan(
@@ -46,7 +70,7 @@ public final class JobCompiler {
                 connectorPlan(
                         ConnectorRole.SOURCE, sourceDescriptor, jobSpec.spec().source()),
                 connectorPlan(ConnectorRole.SINK, sinkDescriptor, jobSpec.spec().sink()),
-                DeliveryGuarantee.AT_MOST_ONCE,
+                requested,
                 jobSpec.spec().runtime().maxBatchRecords());
     }
 

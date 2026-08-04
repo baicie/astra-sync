@@ -5,8 +5,12 @@ import io.astrasync.connector.api.source.SplitPosition;
 import io.astrasync.engine.kernel.SyncResult;
 import io.astrasync.engine.runtime.BatchTask;
 import io.astrasync.engine.runtime.BatchTaskException;
+import io.astrasync.engine.runtime.CheckpointExecutionContext;
+import io.astrasync.engine.runtime.CheckpointProgress;
+import io.astrasync.engine.runtime.EpochFence;
 import io.astrasync.engine.runtime.WorkerResult;
 import io.astrasync.protocol.worker.ErrorCode;
+import io.astrasync.protocol.worker.ExecuteCheckpointTaskRequest;
 import io.astrasync.protocol.worker.ExecuteTaskRequest;
 import io.astrasync.protocol.worker.SplitDescriptor;
 import io.astrasync.protocol.worker.SyncMetrics;
@@ -45,7 +49,90 @@ final class WorkerProtocolMapper {
                 .build();
     }
 
+    static WorkerRequest checkpointRequest(
+            String workerId, String splitFingerprint, CheckpointExecutionContext context, BatchTask task) {
+        Objects.requireNonNull(context, "context must not be null");
+        Objects.requireNonNull(task, "task must not be null");
+        ExecuteCheckpointTaskRequest execute = ExecuteCheckpointTaskRequest.newBuilder()
+                .setWorkerId(workerId)
+                .setJobId(context.jobId())
+                .setExecutionEpoch(context.executionEpoch())
+                .setTaskId(task.taskId())
+                .setSplit(toDescriptor(task.split()))
+                .setMaxBatchRecords(task.maxBatchRecords())
+                .setMaxInFlightBatches(task.maxInFlightBatches())
+                .setCheckpointSequence(context.checkpointSequence())
+                .putAllSourcePosition(context.sourcePosition().offsets())
+                .setSplitFingerprint(requireText(splitFingerprint, "splitFingerprint"))
+                .build();
+        return WorkerRequest.newBuilder()
+                .setProtocolVersion(WorkerProtocol.CHECKPOINT_VERSION)
+                .setExecuteCheckpointTask(execute)
+                .build();
+    }
+
+    static WorkerRequest checkpointAck(String workerId, CheckpointProgress progress, String checkpointFingerprint) {
+        return WorkerRequest.newBuilder()
+                .setProtocolVersion(WorkerProtocol.CHECKPOINT_VERSION)
+                .setCheckpointAck(io.astrasync.protocol.worker.CheckpointAckRequest.newBuilder()
+                        .setWorkerId(workerId)
+                        .setJobId(progress.jobId())
+                        .setExecutionEpoch(progress.executionEpoch())
+                        .setTaskId(progress.taskId())
+                        .setCheckpointSequence(progress.checkpointSequence())
+                        .setCheckpointFingerprint(requireText(checkpointFingerprint, "checkpointFingerprint"))
+                        .build())
+                .build();
+    }
+
+    static CheckpointProgress toCheckpointProgress(io.astrasync.protocol.worker.BatchCommittedResponse response) {
+        return new CheckpointProgress(
+                response.getJobId(),
+                response.getExecutionEpoch(),
+                response.getTaskId(),
+                response.getCheckpointSequence(),
+                new SplitPosition(response.getSourcePositionMap()),
+                response.getSinkCommitToken(),
+                response.getBatchDigest());
+    }
+
+    static CheckpointExecutionContext checkpointContext(ExecuteCheckpointTaskRequest request, EpochFence epochFence) {
+        return new CheckpointExecutionContext(
+                request.getJobId(),
+                request.getExecutionEpoch(),
+                request.getTaskId(),
+                request.getSplitFingerprint(),
+                request.getCheckpointSequence(),
+                new SplitPosition(request.getSourcePositionMap()),
+                epochFence);
+    }
+
+    static WorkerResponse batchCommitted(CheckpointProgress progress, String workerId) {
+        return WorkerResponse.newBuilder()
+                .setProtocolVersion(WorkerProtocol.CHECKPOINT_VERSION)
+                .setBatchCommitted(io.astrasync.protocol.worker.BatchCommittedResponse.newBuilder()
+                        .setWorkerId(workerId)
+                        .setJobId(progress.jobId())
+                        .setExecutionEpoch(progress.executionEpoch())
+                        .setTaskId(progress.taskId())
+                        .setCheckpointSequence(progress.checkpointSequence())
+                        .putAllSourcePosition(progress.sourcePosition().offsets())
+                        .setSinkCommitToken(progress.sinkCommitToken())
+                        .setBatchDigest(progress.batchDigest())
+                        .build())
+                .build();
+    }
+
     static SourceSplit toSplit(ExecuteTaskRequest request) {
+        SplitDescriptor descriptor = request.getSplit();
+        return new SourceSplit(
+                descriptor.getSplitId(),
+                descriptor.getSourceId(),
+                new SplitPosition(descriptor.getStartOffsetsMap()),
+                new SplitPosition(descriptor.getEndOffsetsMap()));
+    }
+
+    static SourceSplit toSplit(ExecuteCheckpointTaskRequest request) {
         SplitDescriptor descriptor = request.getSplit();
         return new SourceSplit(
                 descriptor.getSplitId(),
@@ -80,6 +167,32 @@ final class WorkerProtocolMapper {
                 .build();
     }
 
+    static WorkerResponse checkpointSuccess(WorkerResult result) {
+        return WorkerResponse.newBuilder()
+                .setProtocolVersion(WorkerProtocol.CHECKPOINT_VERSION)
+                .setTaskResult(TaskResult.newBuilder()
+                        .setWorkerId(result.workerId())
+                        .setTaskId(result.taskId())
+                        .setSuccess(true)
+                        .setMetrics(toMetrics(result.metrics()))
+                        .build())
+                .build();
+    }
+
+    static WorkerResponse checkpointTaskFailure(String workerId, String taskId, Throwable failure, SyncResult metrics) {
+        return WorkerResponse.newBuilder()
+                .setProtocolVersion(WorkerProtocol.CHECKPOINT_VERSION)
+                .setTaskResult(TaskResult.newBuilder()
+                        .setWorkerId(workerId)
+                        .setTaskId(taskId)
+                        .setSuccess(false)
+                        .setMetrics(toMetrics(metrics))
+                        .setErrorType(failure.getClass().getName())
+                        .setErrorMessage(message(failure))
+                        .build())
+                .build();
+    }
+
     static WorkerResponse error(ErrorCode code, String taskId, String message) {
         return WorkerResponse.newBuilder()
                 .setProtocolVersion(WorkerProtocol.CURRENT_VERSION)
@@ -88,6 +201,12 @@ final class WorkerProtocolMapper {
                         .setTaskId(taskId == null ? "" : taskId)
                         .setMessage(message)
                         .build())
+                .build();
+    }
+
+    static WorkerResponse checkpointError(ErrorCode code, String taskId, String message) {
+        return error(code, taskId, message).toBuilder()
+                .setProtocolVersion(WorkerProtocol.CHECKPOINT_VERSION)
                 .build();
     }
 
@@ -149,5 +268,13 @@ final class WorkerProtocolMapper {
 
     private static String message(Throwable failure) {
         return failure.getMessage() == null ? failure.getClass().getName() : failure.getMessage();
+    }
+
+    private static String requireText(String value, String name) {
+        Objects.requireNonNull(value, name + " must not be null");
+        if (value.isBlank()) {
+            throw new IllegalArgumentException(name + " must not be blank");
+        }
+        return value;
     }
 }

@@ -12,6 +12,7 @@ import io.astrasync.engine.plan.ConnectorRegistry;
 import io.astrasync.engine.plan.JobCompiler;
 import io.astrasync.engine.runtime.BatchTask;
 import io.astrasync.engine.runtime.BatchTaskFactory;
+import io.astrasync.engine.runtime.CheckpointExecutionContext;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -32,7 +33,7 @@ public final class JdbcWorkerTaskFactoryProvider implements WorkerTaskFactoryPro
                 .normalize();
         JobSpec jobSpec = readJobSpec(jobSpecPath);
         JdbcConnectorFactory connectorFactory = new JdbcConnectorFactory();
-        CompiledJobPlan plan = new JobCompiler(ConnectorRegistry.of(connectorFactory)).compile(jobSpec);
+        CompiledJobPlan plan = new JobCompiler(ConnectorRegistry.of(connectorFactory)).compileCheckpointed(jobSpec);
         requireJdbcPlan(plan);
 
         JdbcRangeSplitSource splitSource =
@@ -40,19 +41,39 @@ public final class JdbcWorkerTaskFactoryProvider implements WorkerTaskFactoryPro
         ConnectorConfiguration sinkConfiguration =
                 ConnectorConfiguration.of(plan.sink().options());
         int maxInFlightBatches = positiveInteger(environment, MAX_IN_FLIGHT_BATCHES_ENVIRONMENT, 1);
-        return split -> {
-            BatchSource source = splitSource.createSource(split);
-            try {
-                BatchSink sink = Objects.requireNonNull(
-                        connectorFactory.createSink(sinkConfiguration), "JDBC connector returned a null Sink");
-                return new BatchTask(split, source, sink, plan.maxBatchRecords(), maxInFlightBatches);
-            } catch (RuntimeException exception) {
-                try {
-                    source.close();
-                } catch (RuntimeException closeFailure) {
-                    exception.addSuppressed(closeFailure);
+        return new BatchTaskFactory() {
+            @Override
+            public BatchTask create(io.astrasync.connector.api.source.SourceSplit split) {
+                return createTask(split, io.astrasync.connector.api.source.SplitPosition.unbounded());
+            }
+
+            @Override
+            public BatchTask create(
+                    io.astrasync.connector.api.source.SourceSplit split, CheckpointExecutionContext context) {
+                Objects.requireNonNull(context, "context must not be null");
+                if (plan.deliveryGuarantee() != io.astrasync.engine.jobspec.DeliveryGuarantee.AT_LEAST_ONCE
+                        || !plan.source().options().containsKey("resumeColumn")) {
+                    throw new IllegalArgumentException("checkpoint recovery requires an explicit JDBC resumeColumn");
                 }
-                throw exception;
+                return createTask(split, context.sourcePosition());
+            }
+
+            private BatchTask createTask(
+                    io.astrasync.connector.api.source.SourceSplit split,
+                    io.astrasync.connector.api.source.SplitPosition resumePosition) {
+                BatchSource source = splitSource.createSource(split, resumePosition);
+                try {
+                    BatchSink sink = Objects.requireNonNull(
+                            connectorFactory.createSink(sinkConfiguration), "JDBC connector returned a null Sink");
+                    return new BatchTask(split, source, sink, plan.maxBatchRecords(), maxInFlightBatches);
+                } catch (RuntimeException exception) {
+                    try {
+                        source.close();
+                    } catch (RuntimeException closeFailure) {
+                        exception.addSuppressed(closeFailure);
+                    }
+                    throw exception;
+                }
             }
         };
     }

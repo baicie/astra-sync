@@ -11,7 +11,15 @@ import java.util.Set;
 import java.util.regex.Pattern;
 
 record JdbcConnectorOptions(
-        String url, String user, String password, String query, String table, int fetchSize, int queryTimeoutSeconds) {
+        String url,
+        String user,
+        String password,
+        String query,
+        String table,
+        String resumeColumn,
+        String resumeValue,
+        int fetchSize,
+        int queryTimeoutSeconds) {
     private static final String URL = "url";
     private static final String USER = "user";
     private static final String PASSWORD = "password";
@@ -19,6 +27,7 @@ record JdbcConnectorOptions(
     private static final String TABLE = "table";
     private static final String FETCH_SIZE = "fetchSize";
     private static final String QUERY_TIMEOUT = "queryTimeoutSeconds";
+    private static final String RESUME_COLUMN = "resumeColumn";
     private static final Pattern TABLE_PATTERN = Pattern.compile("[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)?");
 
     JdbcConnectorOptions {
@@ -39,7 +48,9 @@ record JdbcConnectorOptions(
 
     static JdbcConnectorOptions source(ConnectorConfiguration configuration) {
         Objects.requireNonNull(configuration, "configuration must not be null");
-        rejectUnknown(configuration, Set.of(URL, USER, PASSWORD, QUERY, FETCH_SIZE, QUERY_TIMEOUT));
+        rejectUnknown(
+                configuration,
+                Set.of(URL, USER, PASSWORD, QUERY, RESUME_COLUMN, "resumeValue", FETCH_SIZE, QUERY_TIMEOUT));
         String query = requiredNonBlank(configuration, QUERY);
         return new JdbcConnectorOptions(
                 requiredNonBlank(configuration, URL),
@@ -47,6 +58,8 @@ record JdbcConnectorOptions(
                 optional(configuration, PASSWORD),
                 query,
                 null,
+                optional(configuration, RESUME_COLUMN),
+                optional(configuration, "resumeValue"),
                 positiveOrDefault(configuration, FETCH_SIZE),
                 positiveOrDefault(configuration, QUERY_TIMEOUT));
     }
@@ -62,6 +75,8 @@ record JdbcConnectorOptions(
                 optional(configuration, PASSWORD),
                 null,
                 table,
+                null,
+                null,
                 0,
                 positiveOrDefault(configuration, QUERY_TIMEOUT));
     }
@@ -95,6 +110,8 @@ record JdbcConnectorOptions(
                 + (query == null ? "table" : "query")
                 + (user == null ? "" : ", user")
                 + (password == null ? "" : ", password")
+                + (resumeColumn == null ? "" : ", resumeColumn")
+                + (resumeValue == null ? "" : ", resumeValue")
                 + (fetchSize == 0 ? "" : ", fetchSize")
                 + (queryTimeoutSeconds == 0 ? "" : ", queryTimeoutSeconds")
                 + "]}";

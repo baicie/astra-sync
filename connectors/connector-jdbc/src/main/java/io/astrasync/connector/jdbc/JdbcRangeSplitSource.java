@@ -35,6 +35,11 @@ public final class JdbcRangeSplitSource implements SplitSource {
             connection.setReadOnly(true);
             String table = JdbcIdentifiers.quoteTable(connection.getMetaData(), options.table());
             String column = JdbcIdentifiers.quoteColumns(connection.getMetaData(), List.of(options.splitColumn()));
+            if (options.resumeColumn() != null) {
+                String resumeColumn =
+                        JdbcIdentifiers.quoteColumns(connection.getMetaData(), List.of(options.resumeColumn()));
+                validateResumeValues(connection, table, resumeColumn);
+            }
             try (PreparedStatement statement = connection.prepareStatement(
                             "SELECT MIN(" + column + "), MAX(" + column + ") FROM " + table);
                     ResultSet resultSet = statement.executeQuery()) {
@@ -51,7 +56,8 @@ public final class JdbcRangeSplitSource implements SplitSource {
         } catch (SQLException | RuntimeException exception) {
             if (exception instanceof IllegalStateException stateException
                     && stateException.getMessage() != null
-                    && stateException.getMessage().startsWith("JDBC split")) {
+                    && (stateException.getMessage().startsWith("JDBC split")
+                            || stateException.getMessage().startsWith("JDBC resume"))) {
                 throw stateException;
             }
             throw new IllegalStateException("failed to enumerate JDBC source splits", exception);
@@ -60,7 +66,30 @@ public final class JdbcRangeSplitSource implements SplitSource {
 
     @Override
     public BatchSource createSource(SourceSplit split) {
+        return createSource(split, SplitPosition.unbounded());
+    }
+
+    private static void validateResumeValues(Connection connection, String table, String resumeColumn)
+            throws SQLException {
+        String sql = "SELECT COUNT(*), COUNT(" + resumeColumn + "), COUNT(DISTINCT " + resumeColumn + ") FROM " + table;
+        try (PreparedStatement statement = connection.prepareStatement(sql);
+                ResultSet resultSet = statement.executeQuery()) {
+            if (!resultSet.next()) {
+                throw new IllegalStateException("JDBC resume column validation returned no result");
+            }
+            long rows = resultSet.getLong(1);
+            if (resultSet.getLong(2) != rows) {
+                throw new IllegalStateException("JDBC resumeColumn must be non-null");
+            }
+            if (resultSet.getLong(3) != rows) {
+                throw new IllegalStateException("JDBC resumeColumn must be unique");
+            }
+        }
+    }
+
+    public BatchSource createSource(SourceSplit split, SplitPosition resumePosition) {
         Objects.requireNonNull(split, "split must not be null");
+        SplitPosition checkedResume = Objects.requireNonNull(resumePosition, "resumePosition must not be null");
         if (!sourceId.equals(split.sourceId())) {
             throw new IllegalArgumentException("split belongs to source '" + split.sourceId() + "'");
         }
@@ -72,6 +101,7 @@ public final class JdbcRangeSplitSource implements SplitSource {
         if (start != null && end != null && start.compareTo(end) >= 0) {
             throw new IllegalArgumentException("split start must be less than split end");
         }
+        String resume = resumeBoundary(checkedResume);
 
         StringBuilder query = new StringBuilder("SELECT * FROM ")
                 .append(options.table())
@@ -86,7 +116,11 @@ public final class JdbcRangeSplitSource implements SplitSource {
             }
             query.append(options.splitColumn()).append(" < ").append(end);
         }
-        query.append(" ORDER BY ").append(options.splitColumn());
+        if (resume != null) {
+            query.append(" AND ").append(options.resumeColumn()).append(" > ?");
+        }
+        query.append(" ORDER BY ")
+                .append(options.resumeColumn() == null ? options.splitColumn() : options.resumeColumn());
 
         Map<String, String> sourceOptions = new LinkedHashMap<>();
         sourceOptions.put("url", options.url());
@@ -103,7 +137,27 @@ public final class JdbcRangeSplitSource implements SplitSource {
         if (options.queryTimeoutSeconds() > 0) {
             sourceOptions.put("queryTimeoutSeconds", Integer.toString(options.queryTimeoutSeconds()));
         }
+        if (options.resumeColumn() != null) {
+            sourceOptions.put("resumeColumn", options.resumeColumn());
+        }
+        if (resume != null) {
+            sourceOptions.put("resumeValue", resume);
+        }
         return new JdbcConnectorFactory().createSource(ConnectorConfiguration.of(sourceOptions));
+    }
+
+    private String resumeBoundary(SplitPosition position) {
+        if (position.isUnbounded()) {
+            return null;
+        }
+        if (options.resumeColumn() == null) {
+            throw new IllegalArgumentException("checkpoint recovery requires a configured resumeColumn");
+        }
+        if (position.offsets().size() != 1 || !position.offsets().containsKey(options.resumeColumn())) {
+            throw new IllegalArgumentException(
+                    "JDBC resume position must contain only '" + options.resumeColumn() + "'");
+        }
+        return position.offsets().get(options.resumeColumn());
     }
 
     private List<SourceSplit> ranges(BigInteger minimum, BigInteger maximum) {

@@ -13,12 +13,12 @@ class JdbcConnectorFactoryTest {
     private final JdbcConnectorFactory factory = new JdbcConnectorFactory();
 
     @Test
-    void exposesOnlyTheBoundedJdbcContract() {
+    void exposesBoundedAndOptInReplayableJdbcCapabilities() {
         assertThat(factory.descriptor().name()).isEqualTo("jdbc");
         assertThat(factory.descriptor().version()).isEqualTo("1.0.0");
         assertThat(factory.descriptor().roles()).containsExactlyInAnyOrder(ConnectorRole.SOURCE, ConnectorRole.SINK);
         assertThat(factory.descriptor().capabilities())
-                .containsExactlyInAnyOrder(Capability.BATCH_READ, Capability.BATCH_WRITE);
+                .containsExactlyInAnyOrder(Capability.BATCH_READ, Capability.BATCH_WRITE, Capability.REPLAYABLE_OFFSET);
     }
 
     @Test
