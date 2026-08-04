@@ -24,7 +24,17 @@
         </dependency>
         <dependency>
             <groupId>io.astrasync</groupId>
+            <artifactId>astrasync-engine</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.astrasync</groupId>
             <artifactId>network</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.astrasync</groupId>
+            <artifactId>connector-jdbc</artifactId>
             <version>${project.version}</version>
         </dependency>
         <dependency>
@@ -40,6 +50,11 @@
         <dependency>
             <groupId>org.assertj</groupId>
             <artifactId>assertj-core</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.h2database</groupId>
+            <artifactId>h2</artifactId>
             <scope>test</scope>
         </dependency>
     </dependencies>
@@ -60,6 +75,7 @@
                             <shadedClassifierName>all</shadedClassifierName>
                             <createDependencyReducedPom>false</createDependencyReducedPom>
                             <transformers>
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer" />
                                 <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
                                     <mainClass>io.astrasync.engine.worker.WorkerApplication</mainClass>
                                 </transformer>

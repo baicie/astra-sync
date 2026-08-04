@@ -58,7 +58,7 @@ subjects:
 ---
 
 # PodDisruptionBudget
-{{- if .Values.podDisruptionBudget.enabled }}
+{{- if and .Values.podDisruptionBudget.enabled .Values.apiServer.enabled }}
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
@@ -72,6 +72,8 @@ spec:
     matchLabels:
       {{- include "astrasync.selectorLabels" . | nindent 6 }}
       app.kubernetes.io/component: api-server
+{{- end }}
+{{- if and .Values.podDisruptionBudget.enabled .Values.controller.enabled }}
 ---
 apiVersion: policy/v1
 kind: PodDisruptionBudget

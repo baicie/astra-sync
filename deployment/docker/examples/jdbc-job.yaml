@@ -1,0 +1,25 @@
+apiVersion: sync.astrasync.io/v1
+kind: SyncJob
+metadata:
+  name: docker-jdbc-full-load
+spec:
+  source:
+    connector: jdbc
+    options:
+      url: jdbc:postgresql://postgres:5432/astrasync
+      user: astra
+      password: astra
+      table: source_data
+      splitColumn: id
+      splitCount: "2"
+  sink:
+    connector: jdbc
+    options:
+      url: jdbc:postgresql://postgres:5432/astrasync
+      user: astra
+      password: astra
+      table: target_data
+  delivery:
+    guarantee: at-most-once
+  runtime:
+    maxBatchRecords: 2

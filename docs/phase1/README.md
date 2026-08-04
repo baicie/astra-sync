@@ -1,8 +1,10 @@
 # Phase 1: Distributed Batch Sync
 
 Phase 1 extends the verified Phase 0 single-process path to split-based distributed full-load
-execution. Its four slices establish bounded Worker execution, connector split enumeration, a
-versioned network protocol, split-level restart, and an operational Worker deployment boundary.
+execution. Its five slices establish bounded Worker execution, connector split enumeration, a
+versioned network protocol, split-level restart, and an operational distributed JDBC path.
+
+**Status: Complete**
 
 ## Delivery Slices
 
@@ -12,6 +14,7 @@ versioned network protocol, split-level restart, and an operational Worker deplo
 | 02 | Connector split enumeration and source-position-aware full-load tasks | Complete |
 | 03 | Network Worker protocol and distributed task admission backpressure | Complete |
 | 04 | Resumable full-load execution and operational deployment | Complete |
+| 05 | Production JDBC Workers, executable Coordinator, persistent deployment, and restart E2E | Complete |
 
 ## Delivered Boundary
 
@@ -36,19 +39,25 @@ restart with the same job ID and split plan skips durable completions and materi
 tasks. It also packages the Worker as an executable service with a deployment-provided task-factory
 plugin, real TCP health checks, a Worker image, and guarded Helm resources.
 
+Slice 05 packages a production JDBC task provider and executable Coordinator. The Coordinator and
+Workers consume one immutable JobSpec; only Workers create JDBC task resources. Stateful Worker
+identity, a one-shot Coordinator Job, a shared Secret, and a persistent progress claim make the path
+deployable. Real TCP tests prove two-Worker execution, partial completion persistence, restart,
+zero-task complete reruns, and plan-drift rejection.
+
 The phase supports parallel independent tasks and reports aggregate `SyncResult` metrics. A task
 failure stops outstanding tasks, preserves the task's partial metrics in the exception, and retains
 successful split records already written to the progress manifest.
 
 ## Excluded
 
-- gRPC, TLS/mTLS, authentication, service discovery, and durable Worker registration
+- gRPC, TLS/mTLS, authentication, dynamic service discovery, and durable Worker registration
 - network RowBatch streaming between separate Source and Sink processes
 - dynamic split discovery beyond the static JDBC range enumerator
-- automatic retries, intra-split checkpoints, savepoints, epoch fencing, and exactly-once
+- task retries within one Coordinator invocation, intra-split checkpoints, savepoints, epoch fencing,
+  and exactly-once
 - shared transactional sink commits
 - autoscaling, durable scheduling state beyond split completions, and Kubernetes reconciliation
-- a bundled production `WorkerTaskFactoryProvider` or connector-specific Worker image
 
 ## Acceptance
 
@@ -69,6 +78,10 @@ successful split records already written to the progress manifest.
   their original boundaries; duplicate completions preserve the first durable success.
 - The Worker executable validates its provider contract, serves the real TCP protocol port, passes a
   TCP health check, and renders through Helm only when a provider is configured.
+- The packaged Coordinator enumerates JDBC splits, dispatches them to two real TCP Workers, persists
+  successful completions, and resumes only unfinished splits after failure.
+- Docker Compose and Helm mount one JobSpec into all processes and retain Coordinator progress on a
+  durable volume; Helm uses stable StatefulSet Worker identities.
 - Phase 0 behavior and its at-most-once boundary remain unchanged.
 
 ## Records
@@ -77,10 +90,13 @@ successful split records already written to the progress manifest.
 - [ADR-022: Connector Split Enumeration and Numeric JDBC Ranges](../adr/adr-022-jdbc-range-splits.md)
 - [ADR-023: Versioned Worker Protocol and Bounded Remote Admission](../adr/adr-023-worker-network-protocol.md)
 - [ADR-024: Split-level Resumable Full-load Execution](../adr/adr-024-resumable-full-load.md)
+- [ADR-025: Distributed JDBC Operational Slice](../adr/adr-025-distributed-jdbc-operational-slice.md)
 - [Slice 02 design](02-connector-split-enumeration/design.md)
 - [Slice 02 verification](02-connector-split-enumeration/verification.md)
 - [Slice 03 design](03-network-worker-protocol/design.md)
 - [Slice 03 verification](03-network-worker-protocol/verification.md)
 - [Slice 04 design](04-resumable-full-load/design.md)
 - [Slice 04 verification](04-resumable-full-load/verification.md)
+- [Slice 05 design](05-distributed-jdbc-operational/design.md)
+- [Slice 05 verification](05-distributed-jdbc-operational/verification.md)
 - [Architecture delivery phases](../architecture.md)
