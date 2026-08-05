@@ -1,14 +1,15 @@
 # Phase 2: Checkpoint and Exactly-Once Foundations
 
 Phase 2 adds consistency state to the distributed batch runtime. Slice 06 delivers the durable
-checkpoint and stale-execution fencing foundation. Exactly-once remains a later capability.
+checkpoint and stale-execution fencing foundation. Slice 07 closes the sink replay window for
+connectors with a transactional or idempotent commit protocol.
 
 ## Delivery Slices
 
 | Slice | Scope | Status |
 |---:|---|---|
 | 06 | Durable batch checkpoints, remote progress acknowledgement, and epoch fencing | Complete |
-| 07 | Transactional or idempotent sink commit and exactly-once capability negotiation | Planned |
+| 07 | Transactional or idempotent sink commit and exactly-once capability negotiation | Complete |
 
 ## Boundary
 
@@ -17,9 +18,9 @@ stale Coordinator executions. It provides at-least-once recovery when the source
 resume position. It does not claim exactly-once because a process can still fail after a sink commit
 and before the checkpoint record is durable.
 
-Slice 07 will add a sink commit protocol that closes that replay window for connectors whose
-capabilities support it. A requested exactly-once guarantee remains rejected until that slice is
-complete.
+Slice 07 adds a stable logical commit token and a sink protocol that closes that replay window for
+connectors whose capabilities support it. A requested exactly-once guarantee is accepted only after
+source replayability, sink capability, and runtime SPI validation all pass.
 
 ## Records
 
@@ -28,3 +29,5 @@ complete.
 - [Slice 06 design](06-checkpoint-fencing-foundation/design.md)
 - [Slice 06 implementation plan](06-checkpoint-fencing-foundation/implementation-plan.md)
 - [Slice 06 verification](06-checkpoint-fencing-foundation/verification.md)
+- [Slice 07 design](07-transactional-idempotent-commit/design.md)
+- [ADR-027: Transactional or Idempotent Sink Commit](../adr/adr-027-transactional-idempotent-sink-commit.md)

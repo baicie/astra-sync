@@ -288,7 +288,8 @@ public final class WorkerServer implements AutoCloseable {
             if (!split.equals(task.split())
                     || !request.getTaskId().equals(task.taskId())
                     || request.getMaxBatchRecords() != task.maxBatchRecords()
-                    || request.getMaxInFlightBatches() != task.maxInFlightBatches()) {
+                    || request.getMaxInFlightBatches() != task.maxInFlightBatches()
+                    || request.getExactlyOnce() != task.exactlyOnce()) {
                 return WorkerProtocolMapper.checkpointError(
                         ErrorCode.TASK_REJECTED, request.getTaskId(), "task factory changed the requested split");
             }

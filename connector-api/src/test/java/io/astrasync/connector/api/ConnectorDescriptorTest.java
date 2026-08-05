@@ -71,6 +71,8 @@ class ConnectorDescriptorTest {
                 Set.of(ConnectorRole.SINK), Set.of(Capability.BATCH_READ, Capability.BATCH_WRITE), "BATCH_READ");
         assertInconsistent(
                 Set.of(ConnectorRole.SOURCE), Set.of(Capability.BATCH_READ, Capability.BATCH_WRITE), "BATCH_WRITE");
+        assertInconsistent(
+                Set.of(ConnectorRole.SOURCE), Set.of(Capability.BATCH_READ, Capability.IDEMPOTENT_WRITE), "SINK");
     }
 
     @Test

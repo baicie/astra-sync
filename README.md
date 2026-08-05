@@ -212,7 +212,7 @@ spec:
 |-------|-------|--------|
 | Phase 0 | Protocol & Single-node Kernel | Complete |
 | Phase 1 | Distributed Batch Sync | Complete |
-| Phase 2 | Checkpoint & Exactly-Once | Planning |
+| Phase 2 | Checkpoint & Exactly-Once | Complete |
 | Phase 3 | CDC (MySQL, PostgreSQL) | Planning |
 | Phase 4 | Control Plane HA | Planning |
 | Phase 5 | Performance Optimization | Planning |

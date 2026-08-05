@@ -3,7 +3,10 @@ package io.astrasync.engine.coordinator;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import io.astrasync.connector.api.CheckpointContext;
+import io.astrasync.connector.api.SinkCommitContext;
 import io.astrasync.connector.api.data.RowBatch;
+import io.astrasync.connector.api.sink.IdempotentBatchSink;
 import io.astrasync.connector.api.source.CheckpointableBatchSource;
 import io.astrasync.connector.api.source.SourceSplit;
 import io.astrasync.connector.api.source.SplitPosition;
@@ -97,6 +100,36 @@ class CheckpointCoordinatorApplicationTest {
         }
     }
 
+    @Test
+    void retriesACommittedExactlyOnceBatchWithoutDuplicatingTheTargetRows() throws Exception {
+        String url = jdbcUrl();
+        initializeDatabase(url);
+        Path jobSpec = writeJob(url, "exactly-once");
+        Path progressDirectory = tempDirectory.resolve("exactly-once-progress");
+
+        BatchTaskFactory failingFactory = exactlyOnceFactory(jobSpec, true);
+        try (WorkerService worker = worker(failingFactory)) {
+            worker.start();
+            assertThatThrownBy(() -> CoordinatorApplication.run(configuration(jobSpec, progressDirectory, worker)))
+                    .isInstanceOf(BatchTaskException.class)
+                    .hasRootCauseMessage("remote task failed: planned failure after exactly-once sink commit");
+        }
+
+        assertThat(readTarget(url)).containsExactly("1:Ada", "2:Lin");
+        FileCheckpointStore store = new FileCheckpointStore(progressDirectory);
+        assertThat(store.load(JOB_ID, SPLIT_ID)).isEmpty();
+
+        try (WorkerService worker = worker(exactlyOnceFactory(jobSpec, false))) {
+            worker.start();
+            ResumableRunResult recovered =
+                    CoordinatorApplication.run(configuration(jobSpec, progressDirectory, worker));
+
+            assertThat(recovered.executionEpoch()).isEqualTo(2);
+            assertThat(readTarget(url)).containsExactly("1:Ada", "2:Lin", "3:Kai", "4:May");
+            assertThat(store.loadCompletion(JOB_ID, SPLIT_ID)).isPresent();
+        }
+    }
+
     private static BatchTaskFactory checkpointFactory(
             Path jobSpec, List<SplitPosition> positions, boolean failAfterFirstBatch) {
         BatchTaskFactory delegate = new JdbcWorkerTaskFactoryProvider()
@@ -124,6 +157,32 @@ class CheckpointCoordinatorApplicationTest {
         };
     }
 
+    private static BatchTaskFactory exactlyOnceFactory(Path jobSpec, boolean failAfterFirstCommit) {
+        BatchTaskFactory delegate = new JdbcWorkerTaskFactoryProvider()
+                .create(Map.of(JdbcWorkerTaskFactoryProvider.JOB_SPEC_ENVIRONMENT, jobSpec.toString()));
+        return new BatchTaskFactory() {
+            @Override
+            public BatchTask create(SourceSplit split) {
+                return delegate.create(split);
+            }
+
+            @Override
+            public BatchTask create(SourceSplit split, CheckpointExecutionContext context) {
+                BatchTask task = delegate.create(split, context);
+                if (!failAfterFirstCommit) {
+                    return task;
+                }
+                return new BatchTask(
+                        task.split(),
+                        task.source(),
+                        new FailAfterCommitSink((IdempotentBatchSink) task.sink()),
+                        task.maxBatchRecords(),
+                        task.maxInFlightBatches(),
+                        task.exactlyOnce());
+            }
+        };
+    }
+
     private static WorkerService worker(BatchTaskFactory taskFactory) {
         return new WorkerService(
                 new WorkerConfiguration("worker-0", 0, JdbcWorkerTaskFactoryProvider.class.getName(), 1, 0, 4),
@@ -141,6 +200,10 @@ class CheckpointCoordinatorApplicationTest {
     }
 
     private Path writeJob(String url) throws IOException {
+        return writeJob(url, "at-least-once");
+    }
+
+    private Path writeJob(String url, String guarantee) throws IOException {
         Path path = tempDirectory.resolve(JOB_ID + ".yaml");
         Files.writeString(
                 path,
@@ -164,11 +227,11 @@ class CheckpointCoordinatorApplicationTest {
                       url: '%s'
                       table: TARGET_DATA
                   delivery:
-                    guarantee: at-least-once
+                    guarantee: %s
                   runtime:
                     maxBatchRecords: 2
                 """
-                        .formatted(JOB_ID, yaml(url), yaml(url)),
+                        .formatted(JOB_ID, yaml(url), yaml(url), guarantee),
                 StandardCharsets.UTF_8);
         return path;
     }
@@ -231,6 +294,44 @@ class CheckpointCoordinatorApplicationTest {
         @Override
         public SplitPosition positionAfter(RowBatch batch) {
             return delegate.positionAfter(batch);
+        }
+
+        @Override
+        public void close() {
+            delegate.close();
+        }
+    }
+
+    private static final class FailAfterCommitSink implements IdempotentBatchSink {
+        private final IdempotentBatchSink delegate;
+        private boolean failed;
+
+        private FailAfterCommitSink(IdempotentBatchSink delegate) {
+            this.delegate = delegate;
+        }
+
+        @Override
+        public void open(CheckpointContext context) {
+            delegate.open(context);
+        }
+
+        @Override
+        public void assertEpoch(long executionEpoch) {
+            delegate.assertEpoch(executionEpoch);
+        }
+
+        @Override
+        public void writeBatch(RowBatch batch, SinkCommitContext commitContext) {
+            delegate.writeBatch(batch, commitContext);
+            if (!failed) {
+                failed = true;
+                throw new IllegalStateException("planned failure after exactly-once sink commit");
+            }
+        }
+
+        @Override
+        public String lastCommitToken() {
+            return delegate.lastCommitToken();
         }
 
         @Override

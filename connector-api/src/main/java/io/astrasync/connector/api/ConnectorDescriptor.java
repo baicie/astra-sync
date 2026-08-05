@@ -30,6 +30,8 @@ public record ConnectorDescriptor(String name, String version, Set<ConnectorRole
         }
         validateBatchCapability(roles, capabilities, ConnectorRole.SOURCE, Capability.BATCH_READ);
         validateBatchCapability(roles, capabilities, ConnectorRole.SINK, Capability.BATCH_WRITE);
+        validateSinkCapability(roles, capabilities, Capability.TRANSACTIONAL_COMMIT);
+        validateSinkCapability(roles, capabilities, Capability.IDEMPOTENT_WRITE);
     }
 
     public boolean supportsRole(ConnectorRole role) {
@@ -44,6 +46,13 @@ public record ConnectorDescriptor(String name, String version, Set<ConnectorRole
             Set<ConnectorRole> roles, Set<Capability> capabilities, ConnectorRole role, Capability capability) {
         if (capabilities.contains(capability) && !roles.contains(role)) {
             throw new IllegalArgumentException(capability + " capability requires the " + role + " role");
+        }
+    }
+
+    private static void validateSinkCapability(
+            Set<ConnectorRole> roles, Set<Capability> capabilities, Capability capability) {
+        if (capabilities.contains(capability) && !roles.contains(ConnectorRole.SINK)) {
+            throw new IllegalArgumentException(capability + " capability requires the SINK role");
         }
     }
 

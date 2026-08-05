@@ -12,8 +12,13 @@ import java.util.Objects;
 public final class RemoteTaskFactory implements BatchTaskFactory {
     private final int maxBatchRecords;
     private final int maxInFlightBatches;
+    private final boolean exactlyOnce;
 
     public RemoteTaskFactory(int maxBatchRecords, int maxInFlightBatches) {
+        this(maxBatchRecords, maxInFlightBatches, false);
+    }
+
+    public RemoteTaskFactory(int maxBatchRecords, int maxInFlightBatches, boolean exactlyOnce) {
         if (maxBatchRecords <= 0) {
             throw new IllegalArgumentException("maxBatchRecords must be positive");
         }
@@ -22,13 +27,19 @@ public final class RemoteTaskFactory implements BatchTaskFactory {
         }
         this.maxBatchRecords = maxBatchRecords;
         this.maxInFlightBatches = maxInFlightBatches;
+        this.exactlyOnce = exactlyOnce;
     }
 
     @Override
     public BatchTask create(SourceSplit split) {
         SourceSplit checked = Objects.requireNonNull(split, "split must not be null");
         return new BatchTask(
-                checked, new DescriptorSource(), new DescriptorSink(), maxBatchRecords, maxInFlightBatches);
+                checked,
+                new DescriptorSource(),
+                new DescriptorSink(),
+                maxBatchRecords,
+                maxInFlightBatches,
+                exactlyOnce);
     }
 
     private static final class DescriptorSource implements BatchSource {

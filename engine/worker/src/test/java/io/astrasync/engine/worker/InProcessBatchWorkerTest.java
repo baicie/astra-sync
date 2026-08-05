@@ -4,10 +4,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import io.astrasync.connector.api.CheckpointContext;
+import io.astrasync.connector.api.SinkCommitContext;
 import io.astrasync.connector.api.data.Row;
 import io.astrasync.connector.api.data.RowBatch;
 import io.astrasync.connector.api.sink.BatchSink;
 import io.astrasync.connector.api.sink.CheckpointableBatchSink;
+import io.astrasync.connector.api.sink.IdempotentBatchSink;
 import io.astrasync.connector.api.source.BatchSource;
 import io.astrasync.connector.api.source.CheckpointableBatchSource;
 import io.astrasync.connector.api.source.SourceSplit;
@@ -80,6 +82,48 @@ class InProcessBatchWorkerTest {
                 .isInstanceOf(BatchTaskException.class)
                 .hasRootCauseInstanceOf(EpochFencedException.class);
         assertThat(sink.writeCount).isZero();
+    }
+
+    @Test
+    void usesStableCommitContextForExactlyOnceTasks() {
+        EpochFence fence = new EpochFence();
+        fence.activate("orders", 2);
+        ExactSource source = new ExactSource();
+        ExactSink sink = new ExactSink();
+        CheckpointExecutionContext context = new CheckpointExecutionContext(
+                "orders", 2, "split-1", "fingerprint", 0, SplitPosition.unbounded(), fence);
+        List<SinkCommitContext> commits = new ArrayList<>();
+
+        new InProcessBatchWorker("worker-a")
+                .executeCheckpoint(
+                        context,
+                        new BatchTask(split("split-1"), source, sink, 1, 1, true),
+                        progress -> commits.add(new SinkCommitContext(
+                                progress.jobId(),
+                                progress.taskId(),
+                                progress.checkpointSequence(),
+                                progress.batchDigest(),
+                                progress.sinkCommitToken())));
+
+        assertThat(commits).hasSize(1);
+        assertThat(commits.get(0).commitToken()).isEqualTo(sink.commitToken);
+        assertThat(sink.writeCount).isEqualTo(1);
+    }
+
+    @Test
+    void rejectsExactlyOnceTaskBeforeOpeningAPlainCheckpointSink() {
+        EpochFence fence = new EpochFence();
+        fence.activate("orders", 1);
+        CheckpointExecutionContext context = new CheckpointExecutionContext(
+                "orders", 1, "split-1", "fingerprint", 0, SplitPosition.unbounded(), fence);
+
+        assertThatThrownBy(() -> new InProcessBatchWorker("worker-a")
+                        .executeCheckpoint(
+                                context,
+                                new BatchTask(split("split-1"), new ExactSource(), new CheckpointSink(), 1, 1, true),
+                                ignored -> {}))
+                .isInstanceOf(BatchTaskException.class)
+                .hasRootCauseMessage("exactly-once task sink does not support commit tokens");
     }
 
     private static SourceSplit split(String splitId) {
@@ -188,6 +232,64 @@ class InProcessBatchWorkerTest {
         @Override
         public void writeBatch(RowBatch batch) {
             writeCount++;
+        }
+
+        @Override
+        public void close() {}
+    }
+
+    private static final class ExactSource implements CheckpointableBatchSource {
+        private boolean emitted;
+
+        @Override
+        public void openAt(SplitPosition resumePosition) {}
+
+        @Override
+        public RowBatch readBatch(int maxRows) {
+            if (emitted) {
+                return RowBatch.end();
+            }
+            emitted = true;
+            return RowBatch.last(List.of(Row.of("id", 1)));
+        }
+
+        @Override
+        public SplitPosition positionAfter(RowBatch batch) {
+            return new SplitPosition(Map.of("id", "1"));
+        }
+
+        @Override
+        public void close() {}
+    }
+
+    private static final class ExactSink implements IdempotentBatchSink {
+        private CheckpointContext context;
+        private int writeCount;
+        private String commitToken;
+
+        @Override
+        public void open(CheckpointContext context) {
+            this.context = context;
+        }
+
+        @Override
+        public void assertEpoch(long executionEpoch) {
+            if (context.executionEpoch() != executionEpoch) {
+                throw new IllegalStateException("unexpected epoch");
+            }
+            context.assertCurrent();
+        }
+
+        @Override
+        public void writeBatch(RowBatch batch, SinkCommitContext commitContext) {
+            assertEpoch(context.executionEpoch());
+            writeCount++;
+            commitToken = commitContext.commitToken();
+        }
+
+        @Override
+        public String lastCommitToken() {
+            return commitToken;
         }
 
         @Override

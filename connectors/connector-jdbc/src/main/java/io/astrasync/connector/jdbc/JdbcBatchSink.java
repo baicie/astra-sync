@@ -1,9 +1,10 @@
 package io.astrasync.connector.jdbc;
 
 import io.astrasync.connector.api.CheckpointContext;
+import io.astrasync.connector.api.SinkCommitContext;
 import io.astrasync.connector.api.data.Row;
 import io.astrasync.connector.api.data.RowBatch;
-import io.astrasync.connector.api.sink.CheckpointableBatchSink;
+import io.astrasync.connector.api.sink.IdempotentBatchSink;
 import java.sql.Connection;
 import java.sql.DatabaseMetaData;
 import java.sql.PreparedStatement;
@@ -14,7 +15,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.TreeSet;
 
-final class JdbcBatchSink implements CheckpointableBatchSink {
+final class JdbcBatchSink implements IdempotentBatchSink {
     private final JdbcConnectorOptions options;
 
     private State state = State.NEW;
@@ -24,6 +25,8 @@ final class JdbcBatchSink implements CheckpointableBatchSink {
     private Set<String> columnSet;
     private CheckpointContext checkpointContext;
     private long commitSequence;
+    private String lastCommitToken;
+    private boolean commitTokenTableReady;
 
     JdbcBatchSink(JdbcConnectorOptions options) {
         this.options = options;
@@ -57,6 +60,15 @@ final class JdbcBatchSink implements CheckpointableBatchSink {
 
     @Override
     public void writeBatch(RowBatch batch) {
+        writeBatchInternal(batch, null);
+    }
+
+    @Override
+    public void writeBatch(RowBatch batch, SinkCommitContext commitContext) {
+        writeBatchInternal(batch, Objects.requireNonNull(commitContext, "commitContext must not be null"));
+    }
+
+    private void writeBatchInternal(RowBatch batch, SinkCommitContext commitContext) {
         requireState(State.OPEN, "write");
         Objects.requireNonNull(batch, "batch must not be null");
         if (batch.rows().isEmpty()) {
@@ -65,6 +77,20 @@ final class JdbcBatchSink implements CheckpointableBatchSink {
 
         RuntimeException failure = null;
         try {
+            if (commitContext != null) {
+                validateCommitContext(commitContext);
+                ensureCommitTokenTable();
+                String recordedDigest = findCommitDigest(commitContext.commitToken());
+                if (recordedDigest != null) {
+                    if (!recordedDigest.equals(commitContext.batchDigest())) {
+                        throw new IllegalStateException(
+                                "commit token is already associated with a different batch digest");
+                    }
+                    connection.commit();
+                    lastCommitToken = commitContext.commitToken();
+                    return;
+                }
+            }
             if (statement == null) {
                 establishStatement(batch.rows().get(0));
             }
@@ -80,12 +106,19 @@ final class JdbcBatchSink implements CheckpointableBatchSink {
                     throw new SQLException("JDBC driver reported an executeBatch failure");
                 }
             }
+            if (commitContext != null) {
+                insertCommitMarker(commitContext);
+            }
             if (checkpointContext != null) {
                 assertEpoch(checkpointContext.executionEpoch());
             }
             connection.commit();
-            if (checkpointContext != null) {
+            if (commitContext != null) {
+                lastCommitToken = commitContext.commitToken();
+            } else if (checkpointContext != null) {
                 commitSequence++;
+                lastCommitToken =
+                        checkpointContext.executionEpoch() + ":" + checkpointContext.splitId() + ":" + commitSequence;
             }
         } catch (IllegalArgumentException exception) {
             failure = exception;
@@ -114,10 +147,10 @@ final class JdbcBatchSink implements CheckpointableBatchSink {
 
     @Override
     public String lastCommitToken() {
-        if (checkpointContext == null || commitSequence <= 0) {
+        if (checkpointContext == null || (commitSequence <= 0 && lastCommitToken == null)) {
             throw new IllegalStateException("JDBC sink has not committed a checkpoint batch");
         }
-        return checkpointContext.executionEpoch() + ":" + checkpointContext.splitId() + ":" + commitSequence;
+        return lastCommitToken;
     }
 
     @Override
@@ -134,6 +167,8 @@ final class JdbcBatchSink implements CheckpointableBatchSink {
         columnSet = null;
         checkpointContext = null;
         commitSequence = 0;
+        lastCommitToken = null;
+        commitTokenTableReady = false;
 
         RuntimeException failure = null;
         if (openedConnection != null) {
@@ -147,6 +182,59 @@ final class JdbcBatchSink implements CheckpointableBatchSink {
         failure = closeResource(openedConnection, "JDBC sink connection", failure);
         if (failure != null) {
             throw failure;
+        }
+    }
+
+    private void validateCommitContext(SinkCommitContext commitContext) {
+        if (checkpointContext == null) {
+            throw new IllegalStateException("JDBC sink is not open for checkpoint execution");
+        }
+        if (!checkpointContext.jobId().equals(commitContext.jobId())
+                || !checkpointContext.splitId().equals(commitContext.splitId())) {
+            throw new IllegalArgumentException("commit context does not match the JDBC checkpoint context");
+        }
+        checkpointContext.assertCurrent();
+    }
+
+    private void ensureCommitTokenTable() throws SQLException {
+        if (commitTokenTableReady) {
+            return;
+        }
+        DatabaseMetaData metadata = connection.getMetaData();
+        String table = JdbcIdentifiers.quoteTable(metadata, options.commitTokenTable());
+        String tokenColumn = JdbcIdentifiers.quoteColumns(metadata, List.of("commit_token"));
+        String digestColumn = JdbcIdentifiers.quoteColumns(metadata, List.of("batch_digest"));
+        try (Statement create = connection.createStatement()) {
+            create.execute("CREATE TABLE IF NOT EXISTS " + table + " (" + tokenColumn + " VARCHAR(128) PRIMARY KEY, "
+                    + digestColumn + " VARCHAR(128) NOT NULL)");
+        }
+        connection.commit();
+        commitTokenTableReady = true;
+    }
+
+    private String findCommitDigest(String commitToken) throws SQLException {
+        DatabaseMetaData metadata = connection.getMetaData();
+        String table = JdbcIdentifiers.quoteTable(metadata, options.commitTokenTable());
+        String digestColumn = JdbcIdentifiers.quoteColumns(metadata, List.of("batch_digest"));
+        String tokenColumn = JdbcIdentifiers.quoteColumns(metadata, List.of("commit_token"));
+        try (PreparedStatement lookup = connection.prepareStatement(
+                "SELECT " + digestColumn + " FROM " + table + " WHERE " + tokenColumn + " = ?")) {
+            lookup.setString(1, commitToken);
+            try (var result = lookup.executeQuery()) {
+                return result.next() ? result.getString(1) : null;
+            }
+        }
+    }
+
+    private void insertCommitMarker(SinkCommitContext commitContext) throws SQLException {
+        DatabaseMetaData metadata = connection.getMetaData();
+        String table = JdbcIdentifiers.quoteTable(metadata, options.commitTokenTable());
+        String tokenColumn = JdbcIdentifiers.quoteColumns(metadata, List.of("commit_token", "batch_digest"));
+        try (PreparedStatement marker =
+                connection.prepareStatement("INSERT INTO " + table + " (" + tokenColumn + ") VALUES (?, ?)")) {
+            marker.setString(1, commitContext.commitToken());
+            marker.setString(2, commitContext.batchDigest());
+            marker.executeUpdate();
         }
     }
 
