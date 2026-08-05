@@ -6,6 +6,7 @@ import io.astrasync.connector.api.ConnectorDescriptor;
 import io.astrasync.connector.api.ConnectorFactory;
 import io.astrasync.connector.api.ConnectorRole;
 import io.astrasync.connector.api.sink.BatchSink;
+import io.astrasync.connector.api.sink.CdcSink;
 import io.astrasync.connector.api.source.BatchSource;
 import java.util.Set;
 
@@ -22,7 +23,9 @@ public final class JdbcConnectorFactory implements ConnectorFactory {
                     Capability.BATCH_READ,
                     Capability.BATCH_WRITE,
                     Capability.REPLAYABLE_OFFSET,
-                    Capability.IDEMPOTENT_WRITE));
+                    Capability.IDEMPOTENT_WRITE,
+                    Capability.UPSERT,
+                    Capability.DELETE));
 
     @Override
     public ConnectorDescriptor descriptor() {
@@ -37,5 +40,10 @@ public final class JdbcConnectorFactory implements ConnectorFactory {
     @Override
     public BatchSink createSink(ConnectorConfiguration configuration) {
         return new JdbcBatchSink(JdbcConnectorOptions.sink(configuration));
+    }
+
+    @Override
+    public CdcSink createCdcSink(ConnectorConfiguration configuration) {
+        return new JdbcCdcSink(JdbcCdcSinkOptions.from(configuration));
     }
 }

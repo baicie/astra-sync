@@ -5,6 +5,19 @@ import java.util.Optional;
 
 public interface SourcePosition {
 
+    static SourcePosition of(
+            String positionId,
+            String sourceInstance,
+            String database,
+            String table,
+            Map<String, String> offset,
+            long timestamp,
+            String transactionId,
+            long eventIndex) {
+        return new ImmutableSourcePosition(
+                positionId, sourceInstance, database, table, offset, timestamp, transactionId, eventIndex);
+    }
+
     String getPositionId();
 
     String getSourceInstance();

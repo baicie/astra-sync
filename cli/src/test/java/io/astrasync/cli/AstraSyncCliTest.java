@@ -48,6 +48,15 @@ class AstraSyncCliTest {
     }
 
     @Test
+    void discoversCdcSourcesAndJdbcSinkThroughServiceLoader() {
+        ConnectorRegistry registry = ConnectorRegistry.discover(getClass().getClassLoader());
+
+        assertThat(registry.findDescriptor("mysql-cdc")).isPresent();
+        assertThat(registry.findDescriptor("postgres-cdc")).isPresent();
+        assertThat(registry.findDescriptor("jdbc")).isPresent();
+    }
+
+    @Test
     void emitsSanitizedJsonForParameterFailures() throws IOException {
         Invocation missingJob = invoke("run", "--metrics", "json");
         Invocation unknownOption = invoke("run", "--metrics=json", "ignored.yaml", "--password", "super-secret-value");

@@ -32,7 +32,19 @@ public final class JobCompiler {
 
         requireRole(sourceDescriptor, ConnectorRole.SOURCE);
         requireRole(sinkDescriptor, ConnectorRole.SINK);
-        requireCapability(sourceDescriptor, Capability.BATCH_READ, ConnectorRole.SOURCE);
+        boolean cdc = sourceDescriptor.hasCapability(Capability.CHANGE_DATA_CAPTURE);
+        if (cdc) {
+            if (!checkpointRuntime) {
+                throw new JobCompilationException(
+                        CompilationErrorCode.DELIVERY_UNSUPPORTED, "CDC sources require the checkpoint runtime");
+            }
+            requireCapability(sourceDescriptor, Capability.STREAM_READ, ConnectorRole.SOURCE);
+            requireCapability(sourceDescriptor, Capability.REPLAYABLE_OFFSET, ConnectorRole.SOURCE);
+            requireCapability(sinkDescriptor, Capability.UPSERT, ConnectorRole.SINK);
+            requireCapability(sinkDescriptor, Capability.DELETE, ConnectorRole.SINK);
+        } else {
+            requireCapability(sourceDescriptor, Capability.BATCH_READ, ConnectorRole.SOURCE);
+        }
         requireCapability(sinkDescriptor, Capability.BATCH_WRITE, ConnectorRole.SINK);
 
         if (!jobSpec.spec().transforms().isEmpty()) {
@@ -48,7 +60,10 @@ public final class JobCompiler {
                         CompilationErrorCode.DELIVERY_UNSUPPORTED,
                         "requested exactly-once but the Phase 0 runtime supports only at-most-once because checkpoint, replay, and commit coordination are absent");
             }
-            requireReplayableSource(jobSpec, sourceDescriptor);
+            requireReplayableSource(jobSpec, sourceDescriptor, cdc);
+            if (cdc) {
+                requireCapability(sourceDescriptor, Capability.EXACTLY_ONCE_SOURCE, ConnectorRole.SOURCE);
+            }
             if (!sinkDescriptor.hasCapability(Capability.TRANSACTIONAL_COMMIT)
                     && !sinkDescriptor.hasCapability(Capability.IDEMPOTENT_WRITE)) {
                 throw new JobCompilationException(
@@ -62,7 +77,7 @@ public final class JobCompiler {
                         CompilationErrorCode.DELIVERY_UNSUPPORTED,
                         "requested at-least-once but this runtime does not coordinate durable checkpoints");
             }
-            requireReplayableSource(jobSpec, sourceDescriptor);
+            requireReplayableSource(jobSpec, sourceDescriptor, cdc);
         }
 
         return new CompiledJobPlan(
@@ -71,6 +86,7 @@ public final class JobCompiler {
                 connectorPlan(
                         ConnectorRole.SOURCE, sourceDescriptor, jobSpec.spec().source()),
                 connectorPlan(ConnectorRole.SINK, sinkDescriptor, jobSpec.spec().sink()),
+                cdc ? ExecutionMode.CDC : ExecutionMode.BATCH,
                 requested,
                 jobSpec.spec().runtime().maxBatchRecords());
     }
@@ -98,8 +114,11 @@ public final class JobCompiler {
         }
     }
 
-    private static void requireReplayableSource(JobSpec jobSpec, ConnectorDescriptor sourceDescriptor) {
+    private static void requireReplayableSource(JobSpec jobSpec, ConnectorDescriptor sourceDescriptor, boolean cdc) {
         requireCapability(sourceDescriptor, Capability.REPLAYABLE_OFFSET, ConnectorRole.SOURCE);
+        if (cdc) {
+            return;
+        }
         String resumeColumn = jobSpec.spec().source().options().get("resumeColumn");
         if (resumeColumn == null || resumeColumn.isBlank()) {
             throw new JobCompilationException(
