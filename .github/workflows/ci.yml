@@ -149,13 +149,21 @@ jobs:
         uses: actions/setup-go@v7
         with:
           go-version: '1.22.x'
-          cache-dependency-path: control-plane/go.sum
+          cache-dependency-path: |
+            control-plane/go.sum
+            control-plane/scheduler/go.sum
 
       - name: Run PostgreSQL lifecycle integration
         working-directory: control-plane
         env:
           ASTRASYNC_TEST_POSTGRES_URL: postgres://astra:astra@127.0.0.1:5432/astrasync?sslmode=disable
         run: go test -v -count=1 ./job/postgres -run '^TestRepositoryPersistsLifecycleAcrossConnections$'
+
+      - name: Run PostgreSQL scheduler admission integration
+        working-directory: control-plane/scheduler
+        env:
+          ASTRASYNC_TEST_POSTGRES_URL: postgres://astra:astra@127.0.0.1:5432/astrasync?sslmode=disable
+        run: go test -v -count=1 ./internal/dispatch/postgres -run '^TestStoreSerializesCapacityAndTakesOverOnlyTheExpiredEpoch$'
 
   protocols:
     name: Protocol and YAML validation
@@ -221,10 +229,46 @@ jobs:
         if: needs.changes.outputs.helm == 'true'
         run: helm lint deployment/helm/astrasync
 
+      - name: Lint and render dynamic and manual execution modes
+        if: needs.changes.outputs.helm == 'true'
+        run: |
+          helm template astrasync deployment/helm/astrasync > /dev/null
+          helm lint deployment/helm/astrasync \
+            --set scheduler.enabled=false \
+            --set worker.enabled=true \
+            --set coordinator.enabled=true \
+            --set jobSpec.existingSecret=job-spec \
+            --set coordinator.progress.existingClaim=progress
+          helm template astrasync deployment/helm/astrasync \
+            --set scheduler.enabled=false \
+            --set worker.enabled=true \
+            --set coordinator.enabled=true \
+            --set jobSpec.existingSecret=job-spec \
+            --set coordinator.progress.existingClaim=progress > /dev/null
+
   container-images:
-    name: Build control-plane images
+    name: Build ${{ matrix.name }} image
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: API Server
+            file: deployment/docker/Dockerfile.api
+            tag: astrasync/api-server:ci
+          - name: Controller
+            file: deployment/docker/Dockerfile.controller
+            tag: astrasync/controller:ci
+          - name: Scheduler
+            file: deployment/docker/Dockerfile.scheduler
+            tag: astrasync/scheduler:ci
+          - name: Coordinator
+            file: deployment/docker/Dockerfile.coordinator
+            tag: astrasync/coordinator:ci
+          - name: Worker
+            file: deployment/docker/Dockerfile.worker
+            tag: astrasync/worker:ci
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
@@ -232,21 +276,13 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build API image
+      - name: Build image
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: deployment/docker/Dockerfile.api
+          file: ${{ matrix.file }}
           push: false
-          tags: astrasync/api-server:ci
-
-      - name: Build controller image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: deployment/docker/Dockerfile.controller
-          push: false
-          tags: astrasync/controller:ci
+          tags: ${{ matrix.tag }}
 
   repository:
     name: Repository policy checks

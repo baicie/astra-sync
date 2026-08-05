@@ -29,6 +29,23 @@ class FileCheckpointStoreTest {
     }
 
     @Test
+    void acceptsExternallyAllocatedEpochIdempotentlyAndRejectsStaleOrSkippedEpochs() {
+        FileCheckpointStore store = new FileCheckpointStore(directory);
+        SplitPlan plan = plan("1");
+
+        assertThat(store.acquireEpoch("orders", plan, 1)).isEqualTo(1);
+        assertThat(new FileCheckpointStore(directory).acquireEpoch("orders", plan, 1))
+                .isEqualTo(1);
+        assertThatThrownBy(() -> store.acquireEpoch("orders", plan, 3))
+                .isInstanceOf(StaleCheckpointException.class)
+                .hasMessage("checkpoint epoch 3 cannot advance active epoch 1");
+        assertThat(store.acquireEpoch("orders", plan, 2)).isEqualTo(2);
+        assertThatThrownBy(() -> store.acquireEpoch("orders", plan, 1))
+                .isInstanceOf(StaleCheckpointException.class)
+                .hasMessage("checkpoint epoch 1 cannot advance active epoch 2");
+    }
+
+    @Test
     void rejectsStaleEpochAndSequenceWithoutChangingDurableState() {
         FileCheckpointStore store = new FileCheckpointStore(directory);
         store.acquireEpoch("orders", plan("1"));

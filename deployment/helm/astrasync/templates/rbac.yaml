@@ -26,6 +26,9 @@ rules:
   - apiGroups: ["apps"]
     resources: ["deployments", "replicasets", "statefulsets"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: [""]
     resources: ["events"]
     verbs: ["create", "patch"]
@@ -53,6 +56,22 @@ subjects:
   - kind: ServiceAccount
     name: {{ include "astrasync.serviceAccountName" . }}
     namespace: {{ .Release.Namespace }}
+{{- end }}
+{{- if and .Values.podDisruptionBudget.enabled .Values.scheduler.enabled }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "astrasync.componentFullname" (dict "context" . "component" "scheduler") }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "astrasync.labels" . | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.podDisruptionBudget.scheduler.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "astrasync.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: scheduler
 {{- end }}
 
 ---

@@ -16,10 +16,21 @@ public record CoordinatorConfiguration(
         List<WorkerEndpoint> workers,
         Duration workerTimeout,
         int maxInFlightTasks,
-        int maxInFlightBatches) {
+        int maxInFlightBatches,
+        long executionEpoch) {
     public static final int DEFAULT_WORKER_TIMEOUT_MILLIS = 30_000;
     public static final int DEFAULT_MAX_IN_FLIGHT_TASKS = 1;
     public static final int DEFAULT_MAX_IN_FLIGHT_BATCHES = 1;
+
+    public CoordinatorConfiguration(
+            Path jobSpecPath,
+            Path progressDirectory,
+            List<WorkerEndpoint> workers,
+            Duration workerTimeout,
+            int maxInFlightTasks,
+            int maxInFlightBatches) {
+        this(jobSpecPath, progressDirectory, workers, workerTimeout, maxInFlightTasks, maxInFlightBatches, 0);
+    }
 
     public CoordinatorConfiguration {
         jobSpecPath = normalizePath(jobSpecPath, "jobSpecPath");
@@ -49,6 +60,9 @@ public record CoordinatorConfiguration(
         if (maxInFlightBatches <= 0) {
             throw new IllegalArgumentException("maxInFlightBatches must be positive");
         }
+        if (executionEpoch < 0) {
+            throw new IllegalArgumentException("executionEpoch must not be negative");
+        }
     }
 
     public static CoordinatorConfiguration fromEnvironment(Map<String, String> environment) {
@@ -60,7 +74,8 @@ public record CoordinatorConfiguration(
                 Duration.ofMillis(
                         integer(environment, "ASTRASYNC_COORDINATOR_WORKER_TIMEOUT_MS", DEFAULT_WORKER_TIMEOUT_MILLIS)),
                 integer(environment, "ASTRASYNC_COORDINATOR_MAX_IN_FLIGHT_TASKS", DEFAULT_MAX_IN_FLIGHT_TASKS),
-                integer(environment, "ASTRASYNC_COORDINATOR_MAX_IN_FLIGHT_BATCHES", DEFAULT_MAX_IN_FLIGHT_BATCHES));
+                integer(environment, "ASTRASYNC_COORDINATOR_MAX_IN_FLIGHT_BATCHES", DEFAULT_MAX_IN_FLIGHT_BATCHES),
+                optionalPositiveLong(environment, "ASTRASYNC_COORDINATOR_EXECUTION_EPOCH"));
     }
 
     private static List<WorkerEndpoint> parseWorkers(String value) {
@@ -90,6 +105,22 @@ public record CoordinatorConfiguration(
         }
         try {
             return Integer.parseInt(value);
+        } catch (NumberFormatException exception) {
+            throw new IllegalArgumentException("environment variable " + name + " must be an integer", exception);
+        }
+    }
+
+    private static long optionalPositiveLong(Map<String, String> environment, String name) {
+        String value = environment.get(name);
+        if (value == null) {
+            return 0;
+        }
+        try {
+            long parsed = Long.parseLong(value);
+            if (parsed <= 0) {
+                throw new IllegalArgumentException("environment variable " + name + " must be positive");
+            }
+            return parsed;
         } catch (NumberFormatException exception) {
             throw new IllegalArgumentException("environment variable " + name + " must be an integer", exception);
         }

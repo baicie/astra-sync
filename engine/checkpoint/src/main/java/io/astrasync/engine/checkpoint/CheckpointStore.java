@@ -6,6 +6,9 @@ import java.util.Optional;
 public interface CheckpointStore {
     long acquireEpoch(String jobId, SplitPlan plan);
 
+    /** Acquires an externally allocated epoch, returning it again for an idempotent retry. */
+    long acquireEpoch(String jobId, SplitPlan plan, long executionEpoch);
+
     Optional<CheckpointRecord> load(String jobId, String splitId);
 
     Optional<CheckpointCompletion> loadCompletion(String jobId, String splitId);

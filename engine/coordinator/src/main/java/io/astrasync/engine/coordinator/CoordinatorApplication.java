@@ -78,7 +78,7 @@ public final class CoordinatorApplication {
             CheckpointRunResult checkpointed = new CheckpointBatchCoordinator(
                             workers,
                             new io.astrasync.engine.checkpoint.FileCheckpointStore(checked.progressDirectory()))
-                    .run(jobId, splitSource, taskFactory);
+                    .run(jobId, splitSource, taskFactory, checked.executionEpoch());
             return new ResumableRunResult(
                     checkpointed.taskResults(),
                     checkpointed.metrics(),

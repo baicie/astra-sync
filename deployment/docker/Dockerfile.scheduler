@@ -1,0 +1,31 @@
+# AstraSync Scheduler
+FROM golang:1.22-alpine AS builder
+
+WORKDIR /app
+
+COPY control-plane/go.mod control-plane/go.sum ./control-plane/
+COPY control-plane/scheduler/go.mod control-plane/scheduler/go.sum ./control-plane/scheduler/
+WORKDIR /app/control-plane/scheduler
+RUN go mod download
+
+COPY control-plane/job ../job
+COPY control-plane/scheduler ./
+RUN CGO_ENABLED=0 GOOS=linux go build -o /app/scheduler ./cmd/scheduler
+
+FROM alpine:3.19
+
+WORKDIR /app
+RUN apk add --no-cache ca-certificates tzdata \
+    && addgroup -g 1000 astra \
+    && adduser -u 1000 -G astra -D astra
+
+COPY --from=builder /app/scheduler /app/scheduler
+RUN chown -R astra:astra /app
+
+USER astra
+EXPOSE 8082
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD wget -qO- http://localhost:8082/healthz || exit 1
+
+ENTRYPOINT ["/app/scheduler"]
