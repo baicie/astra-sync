@@ -22,7 +22,9 @@ class JdbcConnectorFactoryTest {
                         Capability.BATCH_READ,
                         Capability.BATCH_WRITE,
                         Capability.REPLAYABLE_OFFSET,
-                        Capability.IDEMPOTENT_WRITE);
+                        Capability.IDEMPOTENT_WRITE,
+                        Capability.UPSERT,
+                        Capability.DELETE);
     }
 
     @Test

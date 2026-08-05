@@ -33,6 +33,7 @@ This directory contains the Architecture Decision Records (ADRs) for AstraSync.
 | [ADR-025](adr-025-distributed-jdbc-operational-slice.md) | Distributed JDBC Operational Slice | Accepted | 2026-08-04 |
 | [ADR-026](adr-026-checkpoint-fencing-foundation.md) | Durable Checkpoint and Epoch Fencing Foundation | Accepted | 2026-08-04 |
 | [ADR-027](adr-027-transactional-idempotent-sink-commit.md) | Transactional or Idempotent Sink Commit | Accepted | 2026-08-04 |
+| [ADR-028](adr-028-native-cdc-and-checkpoint-coupled-offsets.md) | Native CDC and Checkpoint-coupled Offsets | Accepted | 2026-08-05 |
 
 ## Template
 

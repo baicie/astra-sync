@@ -73,6 +73,16 @@ class ConnectorDescriptorTest {
                 Set.of(ConnectorRole.SOURCE), Set.of(Capability.BATCH_READ, Capability.BATCH_WRITE), "BATCH_WRITE");
         assertInconsistent(
                 Set.of(ConnectorRole.SOURCE), Set.of(Capability.BATCH_READ, Capability.IDEMPOTENT_WRITE), "SINK");
+        assertThatThrownBy(() ->
+                        new ConnectorDescriptor("source", "1", Set.of(ConnectorRole.SOURCE), Set.of(Capability.UPSERT)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("UPSERT")
+                .hasMessageContaining("SINK");
+        assertThatThrownBy(() ->
+                        new ConnectorDescriptor("source", "1", Set.of(ConnectorRole.SOURCE), Set.of(Capability.DELETE)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("DELETE")
+                .hasMessageContaining("SINK");
     }
 
     @Test

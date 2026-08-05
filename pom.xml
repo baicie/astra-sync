@@ -29,6 +29,7 @@
 
         <!-- Connectors -->
         <module>connectors/connector-jdbc</module>
+        <module>connectors/connector-debezium</module>
         <module>connectors/connector-mysql-cdc</module>
         <module>connectors/connector-postgres-cdc</module>
         <module>connectors/connector-kafka</module>

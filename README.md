@@ -32,6 +32,7 @@ AstraSync is built on proven open-source patterns rather than reinventing fundam
 - **Control/Data Plane Separation**: Control plane (Go) and data plane (Java) operate independently
 - **Adaptive Parallelism**: Dynamic split and load balancing
 - **Full + Incremental Seamless Handoff**: Snapshot-to-CDC transition without long locks
+- **Native CDC**: Debezium-backed MySQL binlog and PostgreSQL logical replication sources
 - **Epoch Fencing**: Prevents split-brain during coordinator failover
 - **Multi-Format Support**: Row Binary for CDC, Arrow RecordBatch for bulk processing
 
@@ -176,33 +177,45 @@ docker compose -f deployment/docker/docker-compose.dev.yml run --rm --build coor
 apiVersion: sync.astrasync.io/v1
 kind: SyncJob
 metadata:
-  name: mysql-to-iceberg
+  name: mysql-to-jdbc-cdc
 spec:
   source:
     connector: mysql-cdc
-    connectionRef: production-mysql
-    tables:
-      include:
-        - shop.orders
-        - shop.customers
+    options:
+      hostname: source.example
+      port: "3306"
+      username: sync_reader
+      password: change-me
+      database: shop
+      tables: shop.orders
+      topicPrefix: shop-source
+      serverId: "5401"
+      schemaHistoryFile: ./state/mysql-schema-history.dat
   sink:
-    connector: iceberg
-    connectionRef: lakehouse
+    connector: jdbc
+    options:
+      url: jdbc:postgresql://target.example/shop
+      user: sync_writer
+      password: change-me
+      table: orders
+      keyColumns: id
   delivery:
     guarantee: exactly-once
-  parallelism:
-    initial: 16
-    min: 4
-    max: 128
-  checkpoint:
-    interval: 30s
-    timeout: 10m
+  runtime:
+    maxBatchRecords: 2048
 ```
+
+The current CDC runtime is a local checkpointed runner. A CDC JDBC sink must provide `table` and
+`keyColumns`; it applies inserts, updates, and deletes and stores idempotent commit markers in the
+target database. See the Phase 3 documentation for the PostgreSQL source options and operational
+constraints.
 
 ## Documentation
 
 - [Architecture Overview](./docs/architecture.md)
 - [ADR Index](./docs/adr/README.md)
+- [Phase 3 CDC](./docs/phase3/README.md)
+- [CDC Usage and Delivery Boundary](./docs/phase3/01-native-cdc/README.md)
 - [Connector Development Guide](./docs/connector-dev.md)
 - [Deployment Guide](./docs/deployment.md)
 
@@ -213,7 +226,7 @@ spec:
 | Phase 0 | Protocol & Single-node Kernel | Complete |
 | Phase 1 | Distributed Batch Sync | Complete |
 | Phase 2 | Checkpoint & Exactly-Once | Complete |
-| Phase 3 | CDC (MySQL, PostgreSQL) | Planning |
+| Phase 3 | CDC (MySQL, PostgreSQL) | Complete |
 | Phase 4 | Control Plane HA | Planning |
 | Phase 5 | Performance Optimization | Planning |
 | Phase 6 | Platform (Web Console, RBAC) | Planning |

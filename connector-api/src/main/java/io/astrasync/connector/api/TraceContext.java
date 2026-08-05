@@ -15,6 +15,6 @@ public interface TraceContext {
     TraceContext withTraceId(String traceId);
 
     static TraceContext root() {
-        throw new UnsupportedOperationException("Implement in subclass");
+        return ImmutableTraceContext.rootContext();
     }
 }

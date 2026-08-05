@@ -4,6 +4,9 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.astrasync.connector.file.CsvConnectorFactory;
 import io.astrasync.connector.jdbc.JdbcConnectorFactory;
+import io.astrasync.engine.checkpoint.FileCheckpointStore;
+import io.astrasync.engine.coordinator.CdcJobRunResult;
+import io.astrasync.engine.coordinator.LocalCdcJobRunner;
 import io.astrasync.engine.jobspec.JobSpec;
 import io.astrasync.engine.jobspec.JobSpecParser;
 import io.astrasync.engine.kernel.SyncJobException;
@@ -12,14 +15,19 @@ import io.astrasync.engine.kernel.SyncStage;
 import io.astrasync.engine.local.LocalJobRunner;
 import io.astrasync.engine.local.LocalRunResult;
 import io.astrasync.engine.plan.ConnectorRegistry;
+import io.astrasync.engine.worker.InProcessCdcWorker;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.Objects;
 import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
 import picocli.CommandLine;
 import picocli.CommandLine.Command;
@@ -63,6 +71,7 @@ public final class AstraSyncCli implements Callable<Integer> {
         Objects.requireNonNull(runner, "runner must not be null");
         CommandLine commandLine = new CommandLine(new AstraSyncCli());
         commandLine.addSubcommand("run", new RunCommand(runner));
+        commandLine.addSubcommand("cdc", new CdcCommand());
         commandLine.setOut(Objects.requireNonNull(out, "out must not be null"));
         commandLine.setErr(Objects.requireNonNull(err, "err must not be null"));
         commandLine.setParameterExceptionHandler(
@@ -248,6 +257,112 @@ public final class AstraSyncCli implements Callable<Integer> {
                 return "unspecified failure";
             }
             return message.replace('\r', ' ').replace('\n', ' ');
+        }
+    }
+
+    @Command(
+            name = "cdc",
+            description = "Run one checkpointed CDC JobSpec until stopped.",
+            mixinStandardHelpOptions = true,
+            version = AstraSyncCli.VERSION)
+    static final class CdcCommand implements Callable<Integer> {
+        @Spec
+        private CommandSpec commandSpec;
+
+        @Parameters(index = "0", paramLabel = "<job-spec>", description = "Path to a CDC JobSpec YAML or JSON file.")
+        private Path jobSpecPath;
+
+        @Option(
+                names = "--checkpoint-dir",
+                defaultValue = ".astrasync/checkpoints",
+                description = "Durable checkpoint directory (default: ${DEFAULT-VALUE}).")
+        private Path checkpointDirectory;
+
+        @Option(
+                names = "--poll-timeout-ms",
+                defaultValue = "1000",
+                description = "Source poll timeout in milliseconds (default: ${DEFAULT-VALUE}).")
+        private long pollTimeoutMillis;
+
+        @Option(
+                names = "--max-checkpoints",
+                defaultValue = "0",
+                description = "Stop after this many new checkpoints; zero runs continuously.")
+        private long maxCheckpoints;
+
+        @Override
+        public Integer call() {
+            if (pollTimeoutMillis <= 0 || maxCheckpoints < 0) {
+                commandSpec
+                        .commandLine()
+                        .getErr()
+                        .println(
+                                "FAILED category=input message=poll timeout must be positive and max checkpoints non-negative");
+                return EXIT_INPUT;
+            }
+            JobSpec jobSpec;
+            try {
+                jobSpec = new JobSpecParser().parse(Files.readString(jobSpecPath, StandardCharsets.UTF_8));
+            } catch (IOException | IllegalArgumentException exception) {
+                commandSpec
+                        .commandLine()
+                        .getErr()
+                        .println("FAILED category=input message=cannot read CDC JobSpec: " + exception.getMessage());
+                return EXIT_INPUT;
+            }
+
+            AtomicBoolean stop = new AtomicBoolean();
+            CountDownLatch finished = new CountDownLatch(1);
+            Thread shutdownHook = new Thread(
+                    () -> {
+                        stop.set(true);
+                        try {
+                            finished.await(30, TimeUnit.SECONDS);
+                        } catch (InterruptedException exception) {
+                            Thread.currentThread().interrupt();
+                        }
+                    },
+                    "astrasync-cdc-shutdown");
+            Runtime.getRuntime().addShutdownHook(shutdownHook);
+            try {
+                LocalCdcJobRunner runner = new LocalCdcJobRunner(
+                        ConnectorRegistry.discover(),
+                        new FileCheckpointStore(checkpointDirectory),
+                        new InProcessCdcWorker("local-cdc-worker"),
+                        Duration.ofMillis(pollTimeoutMillis));
+                CdcJobRunResult result = runner.run(jobSpec, stop::get, maxCheckpoints);
+                commandSpec
+                        .commandLine()
+                        .getOut()
+                        .printf(
+                                "STOPPED job=%s executionEpoch=%d checkpointSequence=%d recordsRead=%d recordsWritten=%d%n",
+                                result.plan().jobName(),
+                                result.runResult().executionEpoch(),
+                                result.runResult().checkpointSequence(),
+                                result.runResult().workerResult().metrics().readCount(),
+                                result.runResult().workerResult().metrics().writtenCount());
+                return EXIT_SUCCESS;
+            } catch (IllegalArgumentException exception) {
+                commandSpec
+                        .commandLine()
+                        .getErr()
+                        .println("FAILED category=validation message=" + exception.getMessage());
+                return EXIT_VALIDATION;
+            } catch (RuntimeException exception) {
+                commandSpec.commandLine().getErr().println("FAILED category=runtime message=" + safeMessage(exception));
+                return EXIT_RUNTIME;
+            } finally {
+                finished.countDown();
+                try {
+                    Runtime.getRuntime().removeShutdownHook(shutdownHook);
+                } catch (IllegalStateException ignored) {
+                    // The JVM is already executing the shutdown hook.
+                }
+            }
+        }
+
+        private static String safeMessage(RuntimeException exception) {
+            return exception.getMessage() == null ? exception.getClass().getSimpleName() : exception.getMessage();
         }
     }
 

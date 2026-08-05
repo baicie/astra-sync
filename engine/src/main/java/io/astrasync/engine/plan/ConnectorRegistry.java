@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.NavigableMap;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.ServiceLoader;
 import java.util.TreeMap;
 
 public final class ConnectorRegistry {
@@ -31,6 +32,18 @@ public final class ConnectorRegistry {
     public static ConnectorRegistry of(ConnectorFactory... factories) {
         Objects.requireNonNull(factories, "factories must not be null");
         return new ConnectorRegistry(Arrays.asList(factories));
+    }
+
+    public static ConnectorRegistry discover() {
+        return discover(Thread.currentThread().getContextClassLoader());
+    }
+
+    public static ConnectorRegistry discover(ClassLoader classLoader) {
+        Objects.requireNonNull(classLoader, "classLoader must not be null");
+        List<ConnectorFactory> factories = ServiceLoader.load(ConnectorFactory.class, classLoader).stream()
+                .map(ServiceLoader.Provider::get)
+                .toList();
+        return new ConnectorRegistry(factories);
     }
 
     public Optional<ConnectorDescriptor> findDescriptor(String name) {

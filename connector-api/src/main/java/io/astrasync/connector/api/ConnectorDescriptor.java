@@ -30,6 +30,12 @@ public record ConnectorDescriptor(String name, String version, Set<ConnectorRole
         }
         validateBatchCapability(roles, capabilities, ConnectorRole.SOURCE, Capability.BATCH_READ);
         validateBatchCapability(roles, capabilities, ConnectorRole.SINK, Capability.BATCH_WRITE);
+        validateBatchCapability(roles, capabilities, ConnectorRole.SOURCE, Capability.STREAM_READ);
+        validateBatchCapability(roles, capabilities, ConnectorRole.SOURCE, Capability.REPLAYABLE_OFFSET);
+        validateBatchCapability(roles, capabilities, ConnectorRole.SOURCE, Capability.CHANGE_DATA_CAPTURE);
+        validateCdcCapabilities(capabilities);
+        validateSinkCapability(roles, capabilities, Capability.UPSERT);
+        validateSinkCapability(roles, capabilities, Capability.DELETE);
         validateSinkCapability(roles, capabilities, Capability.TRANSACTIONAL_COMMIT);
         validateSinkCapability(roles, capabilities, Capability.IDEMPOTENT_WRITE);
     }
@@ -53,6 +59,19 @@ public record ConnectorDescriptor(String name, String version, Set<ConnectorRole
             Set<ConnectorRole> roles, Set<Capability> capabilities, Capability capability) {
         if (capabilities.contains(capability) && !roles.contains(ConnectorRole.SINK)) {
             throw new IllegalArgumentException(capability + " capability requires the SINK role");
+        }
+    }
+
+    private static void validateCdcCapabilities(Set<Capability> capabilities) {
+        if (capabilities.contains(Capability.CHANGE_DATA_CAPTURE)
+                && (!capabilities.contains(Capability.STREAM_READ)
+                        || !capabilities.contains(Capability.REPLAYABLE_OFFSET))) {
+            throw new IllegalArgumentException(
+                    "CHANGE_DATA_CAPTURE capability requires STREAM_READ and REPLAYABLE_OFFSET");
+        }
+        if (capabilities.contains(Capability.EXACTLY_ONCE_SOURCE)
+                && !capabilities.contains(Capability.REPLAYABLE_OFFSET)) {
+            throw new IllegalArgumentException("EXACTLY_ONCE_SOURCE capability requires REPLAYABLE_OFFSET");
         }
     }
 

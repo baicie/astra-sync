@@ -2,10 +2,14 @@ package io.astrasync.engine.plan;
 
 import static io.astrasync.connector.api.Capability.BATCH_READ;
 import static io.astrasync.connector.api.Capability.BATCH_WRITE;
+import static io.astrasync.connector.api.Capability.CHANGE_DATA_CAPTURE;
+import static io.astrasync.connector.api.Capability.DELETE;
+import static io.astrasync.connector.api.Capability.EXACTLY_ONCE_SOURCE;
 import static io.astrasync.connector.api.Capability.IDEMPOTENT_WRITE;
 import static io.astrasync.connector.api.Capability.REPLAYABLE_OFFSET;
 import static io.astrasync.connector.api.Capability.STREAM_READ;
 import static io.astrasync.connector.api.Capability.TRANSACTIONAL_COMMIT;
+import static io.astrasync.connector.api.Capability.UPSERT;
 import static io.astrasync.connector.api.ConnectorRole.SINK;
 import static io.astrasync.connector.api.ConnectorRole.SOURCE;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -168,6 +172,38 @@ class JobCompilerTest {
                         .compileCheckpointed(exactlyOnce)
                         .deliveryGuarantee())
                 .isEqualTo(DeliveryGuarantee.EXACTLY_ONCE);
+    }
+
+    @Test
+    void checkpointRuntimeCompilesExactlyOnceCdcWithoutABatchResumeColumn() {
+        ProbeFactory source = probe(
+                "mysql-cdc",
+                Set.of(SOURCE),
+                Set.of(STREAM_READ, REPLAYABLE_OFFSET, CHANGE_DATA_CAPTURE, EXACTLY_ONCE_SOURCE));
+        ProbeFactory sink = probe("cdc-sink", Set.of(SINK), Set.of(BATCH_WRITE, UPSERT, DELETE, IDEMPOTENT_WRITE));
+        JobSpec jobSpec = jobSpec("mysql-cdc", Map.of(), "cdc-sink", Map.of(), DeliveryGuarantee.EXACTLY_ONCE);
+        JobCompiler compiler = new JobCompiler(ConnectorRegistry.of(source, sink));
+
+        CompiledJobPlan plan = compiler.compileCheckpointed(jobSpec);
+
+        assertThat(plan.executionMode()).isEqualTo(ExecutionMode.CDC);
+        assertThat(plan.deliveryGuarantee()).isEqualTo(DeliveryGuarantee.EXACTLY_ONCE);
+        assertCompilationFailure(() -> compiler.compile(jobSpec), CompilationErrorCode.DELIVERY_UNSUPPORTED);
+    }
+
+    @Test
+    void rejectsCdcSinkWithoutDeleteSupport() {
+        ProbeFactory source = probe(
+                "postgres-cdc",
+                Set.of(SOURCE),
+                Set.of(STREAM_READ, REPLAYABLE_OFFSET, CHANGE_DATA_CAPTURE, EXACTLY_ONCE_SOURCE));
+        ProbeFactory sink = probe("insert-only", Set.of(SINK), Set.of(BATCH_WRITE, UPSERT, IDEMPOTENT_WRITE));
+
+        assertCompilationFailure(
+                () -> new JobCompiler(ConnectorRegistry.of(source, sink))
+                        .compileCheckpointed(jobSpec(
+                                "postgres-cdc", Map.of(), "insert-only", Map.of(), DeliveryGuarantee.EXACTLY_ONCE)),
+                CompilationErrorCode.CAPABILITY_MISSING);
     }
 
     private static JobSpec jobSpec(

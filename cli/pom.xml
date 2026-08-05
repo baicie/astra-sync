@@ -33,6 +33,31 @@
             <version>${project.version}</version>
         </dependency>
         <dependency>
+            <groupId>io.astrasync</groupId>
+            <artifactId>connector-mysql-cdc</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.astrasync</groupId>
+            <artifactId>connector-postgres-cdc</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.astrasync</groupId>
+            <artifactId>checkpoint</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.astrasync</groupId>
+            <artifactId>coordinator</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.astrasync</groupId>
+            <artifactId>worker</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
             <groupId>info.picocli</groupId>
             <artifactId>picocli</artifactId>
         </dependency>
