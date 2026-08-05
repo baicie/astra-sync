@@ -47,6 +47,14 @@ public final class CheckpointBatchCoordinator {
     }
 
     public CheckpointRunResult run(String jobId, SplitEnumerator enumerator, BatchTaskFactory taskFactory) {
+        return run(jobId, enumerator, taskFactory, 0);
+    }
+
+    public CheckpointRunResult run(
+            String jobId, SplitEnumerator enumerator, BatchTaskFactory taskFactory, long executionEpoch) {
+        if (executionEpoch < 0) {
+            throw new IllegalArgumentException("executionEpoch must not be negative");
+        }
         Objects.requireNonNull(enumerator, "enumerator must not be null");
         Objects.requireNonNull(taskFactory, "taskFactory must not be null");
         List<SourceSplit> splits =
@@ -59,7 +67,9 @@ public final class CheckpointBatchCoordinator {
             }
         }
         SplitPlan plan = SplitPlan.from(splits);
-        long epoch = checkpointStore.acquireEpoch(jobId, plan);
+        long epoch = executionEpoch == 0
+                ? checkpointStore.acquireEpoch(jobId, plan)
+                : checkpointStore.acquireEpoch(jobId, plan, executionEpoch);
         List<WorkerResult> results = new ArrayList<>(splits.size());
         int resumed = 0;
         int executed = 0;

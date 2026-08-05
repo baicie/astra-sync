@@ -90,6 +90,17 @@ postgresql://{{ .Values.postgresql.auth.username }}:{{ .Values.postgresql.auth.p
 {{- end -}}
 
 {{/*
+Persistent claim used by dynamically dispatched Coordinators.
+*/}}
+{{- define "astrasync.schedulerProgressClaim" -}}
+{{- if .Values.scheduler.progress.existingClaim -}}
+{{- .Values.scheduler.progress.existingClaim -}}
+{{- else -}}
+{{- include "astrasync.componentFullname" (dict "context" . "component" "scheduler-progress") -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Create etcd endpoints
 */}}
 {{- define "astrasync.etcd.endpoints" -}}

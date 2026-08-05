@@ -59,6 +59,33 @@ public final class FileCheckpointStore implements CheckpointStore {
     }
 
     @Override
+    public synchronized long acquireEpoch(String jobId, SplitPlan plan, long executionEpoch) {
+        String checkedJobId = requireJobId(jobId);
+        SplitPlan checkedPlan = Objects.requireNonNull(plan, "plan must not be null");
+        if (executionEpoch <= 0) {
+            throw new IllegalArgumentException("executionEpoch must be positive");
+        }
+        return locked(checkedJobId, () -> {
+            Path manifest = manifest(checkedJobId);
+            CheckpointState state =
+                    Files.exists(manifest) ? read(manifest) : CheckpointState.empty(checkedJobId, checkedPlan);
+            if (!state.plan().equals(checkedPlan)) {
+                throw new SplitPlanMismatchException("split plan changed for job " + checkedJobId);
+            }
+            long activeEpoch = state.nextExecutionEpoch() - 1;
+            if (executionEpoch == activeEpoch) {
+                return executionEpoch;
+            }
+            if (executionEpoch != state.nextExecutionEpoch()) {
+                throw new StaleCheckpointException(
+                        "checkpoint epoch " + executionEpoch + " cannot advance active epoch " + activeEpoch);
+            }
+            write(manifest, state.withNextExecutionEpoch(Math.addExact(executionEpoch, 1)));
+            return executionEpoch;
+        });
+    }
+
+    @Override
     public synchronized Optional<CheckpointRecord> load(String jobId, String splitId) {
         String checkedJobId = requireJobId(jobId);
         String checkedSplitId = requireText(splitId, "splitId");

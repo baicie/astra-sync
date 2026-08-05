@@ -1,0 +1,158 @@
+{{- if .Values.scheduler.enabled }}
+{{- if .Values.coordinator.enabled }}
+{{- fail "coordinator.enabled must be false when scheduler.enabled=true; Scheduler creates Coordinator Jobs dynamically" }}
+{{- end }}
+{{- if .Values.worker.enabled }}
+{{- fail "worker.enabled must be false when scheduler.enabled=true; Scheduler creates execution-scoped Workers dynamically" }}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "astrasync.componentFullname" (dict "context" . "component" "scheduler") }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "astrasync.labels" . | nindent 4 }}
+    app.kubernetes.io/component: scheduler
+spec:
+  replicas: {{ .Values.scheduler.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "astrasync.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: scheduler
+  template:
+    metadata:
+      labels:
+        {{- include "astrasync.labels" . | nindent 8 }}
+        app.kubernetes.io/component: scheduler
+    spec:
+      serviceAccountName: {{ include "astrasync.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.securityContext | nindent 8 }}
+      containers:
+        - name: scheduler
+          image: "{{ .Values.image.scheduler.repository }}:{{ .Values.image.scheduler.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          ports:
+            - name: health
+              containerPort: 8082
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+          resources:
+            {{- toYaml .Values.scheduler.resources | nindent 12 }}
+          env:
+            - name: DATABASE_URL
+              value: {{ include "astrasync.postgresql.url" . | quote }}
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: SCHEDULER_DISPATCH_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: SCHEDULER_EXECUTION_SERVICE_ACCOUNT
+              value: {{ include "astrasync.serviceAccountName" . | quote }}
+            - name: SCHEDULER_MAX_CONCURRENT_JOBS
+              value: {{ .Values.scheduler.maxConcurrentJobs | quote }}
+            - name: SCHEDULER_LEASE_DURATION
+              value: {{ .Values.scheduler.leaseDuration | quote }}
+            - name: SCHEDULER_RECONCILE_INTERVAL
+              value: {{ .Values.scheduler.reconcileInterval | quote }}
+            - name: SCHEDULER_OPERATION_TIMEOUT
+              value: {{ .Values.scheduler.operationTimeout | quote }}
+            - name: SCHEDULER_PROGRESS_CLAIM
+              value: {{ include "astrasync.schedulerProgressClaim" . | quote }}
+            - name: SCHEDULER_COORDINATOR_IMAGE
+              value: "{{ .Values.image.coordinator.repository }}:{{ .Values.image.coordinator.tag | default .Chart.AppVersion }}"
+            - name: SCHEDULER_WORKER_IMAGE
+              value: "{{ .Values.image.worker.repository }}:{{ .Values.image.worker.tag | default .Chart.AppVersion }}"
+            - name: SCHEDULER_IMAGE_PULL_POLICY
+              value: {{ .Values.image.pullPolicy | quote }}
+            - name: SCHEDULER_WORKER_REPLICAS
+              value: {{ .Values.worker.replicaCount | quote }}
+            - name: SCHEDULER_WORKER_PORT
+              value: {{ .Values.worker.protocolPort | quote }}
+            - name: SCHEDULER_WORKER_TIMEOUT_MS
+              value: {{ .Values.coordinator.workerTimeoutMillis | quote }}
+            - name: SCHEDULER_MAX_IN_FLIGHT_TASKS
+              value: {{ .Values.coordinator.maxInFlightTasks | quote }}
+            - name: SCHEDULER_MAX_IN_FLIGHT_BATCHES
+              value: {{ .Values.worker.maxInFlightBatches | quote }}
+            - name: SCHEDULER_WORKER_MAX_CONCURRENT_TASKS
+              value: {{ .Values.worker.maxConcurrentTasks | quote }}
+            - name: SCHEDULER_WORKER_TASK_QUEUE_CAPACITY
+              value: {{ .Values.worker.taskQueueCapacity | quote }}
+            - name: SCHEDULER_WORKER_MAX_CONNECTIONS
+              value: {{ .Values.worker.maxConnections | quote }}
+            - name: SCHEDULER_COORDINATOR_BACKOFF_LIMIT
+              value: {{ .Values.coordinator.backoffLimit | quote }}
+            - name: SCHEDULER_COORDINATOR_TTL_SECONDS
+              value: {{ .Values.coordinator.ttlSecondsAfterFinished | quote }}
+            - name: SCHEDULER_COORDINATOR_CPU_REQUEST
+              value: {{ .Values.coordinator.resources.requests.cpu | quote }}
+            - name: SCHEDULER_COORDINATOR_MEMORY_REQUEST
+              value: {{ .Values.coordinator.resources.requests.memory | quote }}
+            - name: SCHEDULER_COORDINATOR_CPU_LIMIT
+              value: {{ .Values.coordinator.resources.limits.cpu | quote }}
+            - name: SCHEDULER_COORDINATOR_MEMORY_LIMIT
+              value: {{ .Values.coordinator.resources.limits.memory | quote }}
+            - name: SCHEDULER_WORKER_CPU_REQUEST
+              value: {{ .Values.worker.resources.requests.cpu | quote }}
+            - name: SCHEDULER_WORKER_MEMORY_REQUEST
+              value: {{ .Values.worker.resources.requests.memory | quote }}
+            - name: SCHEDULER_WORKER_CPU_LIMIT
+              value: {{ .Values.worker.resources.limits.cpu | quote }}
+            - name: SCHEDULER_WORKER_MEMORY_LIMIT
+              value: {{ .Values.worker.resources.limits.memory | quote }}
+            - name: SCHEDULER_COORDINATOR_JAVA_TOOL_OPTIONS
+              value: >-
+                -Xmx{{ .Values.coordinator.jvm.heapSize }}
+                -XX:+Use{{ .Values.coordinator.jvm.gc }}
+            - name: SCHEDULER_WORKER_JAVA_TOOL_OPTIONS
+              value: >-
+                -Xmx{{ .Values.worker.jvm.heapSize }}
+                -XX:+Use{{ .Values.worker.jvm.gc }}
+                -XX:MaxDirectMemorySize={{ .Values.worker.jvm.directMemory }}
+      {{- if .Values.podAntiAffinity.enabled }}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    {{- include "astrasync.selectorLabels" . | nindent 20 }}
+                    app.kubernetes.io/component: scheduler
+                topologyKey: {{ .Values.podAntiAffinity.topologyKey }}
+      {{- else }}
+      affinity:
+        {{- toYaml .Values.affinity | nindent 8 }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

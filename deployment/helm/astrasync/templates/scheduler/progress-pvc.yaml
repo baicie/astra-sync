@@ -1,0 +1,19 @@
+{{- if and .Values.scheduler.enabled (not .Values.scheduler.progress.existingClaim) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "astrasync.schedulerProgressClaim" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "astrasync.labels" . | nindent 4 }}
+    app.kubernetes.io/component: scheduler-progress
+spec:
+  accessModes:
+    - {{ .Values.scheduler.progress.accessMode }}
+  {{- if .Values.scheduler.progress.storageClass }}
+  storageClassName: {{ .Values.scheduler.progress.storageClass | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.scheduler.progress.size }}
+{{- end }}

@@ -1,0 +1,594 @@
+package kubernetes
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"strconv"
+	"strings"
+
+	"github.com/google/uuid"
+	appsv1 "k8s.io/api/apps/v1"
+	batchv1 "k8s.io/api/batch/v1"
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/client-go/kubernetes"
+
+	"io.astrasync/control-plane/job"
+	"io.astrasync/control-plane/scheduler/internal/dispatch"
+	"io.astrasync/control-plane/scheduler/internal/scheduler"
+)
+
+const (
+	jobSpecPath       = "/etc/astrasync/job/job.yaml"
+	progressMountPath = "/var/lib/astrasync/progress"
+	labelJobUID       = "sync.astrasync.io/job-uid"
+	labelEpoch        = "sync.astrasync.io/execution-epoch"
+	labelComponent    = "app.kubernetes.io/component"
+	annotationSpec    = "sync.astrasync.io/job-spec-sha256"
+)
+
+type Config struct {
+	Namespace                   string
+	ServiceAccount              string
+	CoordinatorImage            string
+	WorkerImage                 string
+	ImagePullPolicy             corev1.PullPolicy
+	ProgressClaim               string
+	WorkerReplicas              int32
+	WorkerPort                  int32
+	WorkerTimeoutMillis         int32
+	CoordinatorMaxInFlightTasks int32
+	WorkerMaxInFlightBatches    int32
+	WorkerMaxConcurrentTasks    int32
+	WorkerTaskQueueCapacity     int32
+	WorkerMaxConnections        int32
+	CoordinatorBackoffLimit     int32
+	TTLSecondsAfterFinished     *int32
+	CoordinatorResources        corev1.ResourceRequirements
+	WorkerResources             corev1.ResourceRequirements
+	CoordinatorJavaToolOptions  string
+	WorkerJavaToolOptions       string
+}
+
+type Dispatcher struct {
+	client kubernetes.Interface
+	config Config
+}
+
+func New(client kubernetes.Interface, config Config) (*Dispatcher, error) {
+	if client == nil {
+		return nil, fmt.Errorf("Kubernetes client must not be nil")
+	}
+	if config.Namespace == "" || config.ServiceAccount == "" || config.CoordinatorImage == "" ||
+		config.WorkerImage == "" || config.ProgressClaim == "" {
+		return nil, fmt.Errorf("Kubernetes dispatch identity, images, and progress claim are required")
+	}
+	if config.WorkerReplicas <= 0 || config.WorkerPort <= 0 || config.WorkerPort > 65535 ||
+		config.WorkerTimeoutMillis <= 0 || config.CoordinatorMaxInFlightTasks <= 0 ||
+		config.WorkerMaxInFlightBatches <= 0 || config.WorkerMaxConcurrentTasks <= 0 ||
+		config.WorkerTaskQueueCapacity < 0 || config.WorkerMaxConnections <= 0 ||
+		config.CoordinatorBackoffLimit < 0 {
+		return nil, fmt.Errorf("Kubernetes dispatch numeric configuration is invalid")
+	}
+	return &Dispatcher{client: client, config: config}, nil
+}
+
+func (d *Dispatcher) Reconcile(
+	ctx context.Context, candidate job.Job, epoch int64,
+) (scheduler.Observation, error) {
+	identity := dispatch.Identity{JobUID: candidate.UID, Epoch: epoch}
+	base, err := resourceBase(identity)
+	if err != nil {
+		return scheduler.Observation{}, scheduler.Permanent(err)
+	}
+	document, fingerprint, err := jobDocument(candidate)
+	if err != nil {
+		return scheduler.Observation{}, scheduler.Permanent(err)
+	}
+
+	coordinatorName := base + "-coordinator"
+	existing, err := d.client.BatchV1().Jobs(d.config.Namespace).Get(ctx, coordinatorName, metav1.GetOptions{})
+	if err == nil {
+		if err := verifyManaged(existing.Labels, existing.Annotations, identity, fingerprint); err != nil {
+			return scheduler.Observation{}, scheduler.Permanent(err)
+		}
+		if observation, terminal := observeJob(existing); terminal {
+			if cleanupErr := d.cleanupAuxiliary(ctx, base); cleanupErr != nil {
+				return scheduler.Observation{}, cleanupErr
+			}
+			return observation, nil
+		}
+	} else if !apierrors.IsNotFound(err) {
+		return scheduler.Observation{}, fmt.Errorf("get Coordinator Job: %w", err)
+	} else {
+		existing = nil
+	}
+
+	if err := d.ensureSecret(ctx, base, identity, fingerprint, document); err != nil {
+		return scheduler.Observation{}, err
+	}
+	if err := d.ensureService(ctx, base, identity, fingerprint); err != nil {
+		return scheduler.Observation{}, err
+	}
+	workers, err := d.ensureWorkers(ctx, base, identity, fingerprint)
+	if err != nil {
+		return scheduler.Observation{}, err
+	}
+	if workers.Status.ReadyReplicas < d.config.WorkerReplicas {
+		return scheduler.Observation{State: scheduler.ObservationPending}, nil
+	}
+	if existing == nil {
+		created, createErr := d.client.BatchV1().Jobs(d.config.Namespace).Create(
+			ctx,
+			d.coordinatorJob(base, identity, fingerprint),
+			metav1.CreateOptions{},
+		)
+		if apierrors.IsAlreadyExists(createErr) {
+			existing, err = d.client.BatchV1().Jobs(d.config.Namespace).Get(
+				ctx, coordinatorName, metav1.GetOptions{})
+			if err != nil {
+				return scheduler.Observation{}, fmt.Errorf("get concurrently created Coordinator Job: %w", err)
+			}
+			if err := verifyManaged(existing.Labels, existing.Annotations, identity, fingerprint); err != nil {
+				return scheduler.Observation{}, scheduler.Permanent(err)
+			}
+		} else if createErr != nil {
+			return scheduler.Observation{}, fmt.Errorf("create Coordinator Job: %w", createErr)
+		} else {
+			existing = created
+		}
+	}
+	if existing != nil && existing.Status.Active > 0 {
+		return scheduler.Observation{State: scheduler.ObservationRunning}, nil
+	}
+	return scheduler.Observation{State: scheduler.ObservationPending}, nil
+}
+
+func (d *Dispatcher) Stop(ctx context.Context, identity dispatch.Identity) (bool, error) {
+	base, err := resourceBase(identity)
+	if err != nil {
+		return false, err
+	}
+	deletePolicy := metav1.DeletePropagationForeground
+	var failures []error
+	if err := d.client.BatchV1().Jobs(d.config.Namespace).Delete(
+		ctx, base+"-coordinator", metav1.DeleteOptions{PropagationPolicy: &deletePolicy}); err != nil && !apierrors.IsNotFound(err) {
+		failures = append(failures, fmt.Errorf("delete Coordinator Job: %w", err))
+	}
+	if err := d.deleteAuxiliary(ctx, base, deletePolicy); err != nil {
+		failures = append(failures, err)
+	}
+	if len(failures) > 0 {
+		return false, errors.Join(failures...)
+	}
+	return d.resourcesGone(ctx, base)
+}
+
+// Cleanup removes the Secret and Worker resources while retaining the terminal
+// Coordinator Job until its Kubernetes TTL expires for post-mortem inspection.
+func (d *Dispatcher) Cleanup(ctx context.Context, identity dispatch.Identity) error {
+	base, err := resourceBase(identity)
+	if err != nil {
+		return err
+	}
+	return d.cleanupAuxiliary(ctx, base)
+}
+
+func (d *Dispatcher) ensureSecret(
+	ctx context.Context, base string, identity dispatch.Identity, fingerprint string, document []byte,
+) error {
+	name := base + "-spec"
+	existing, err := d.client.CoreV1().Secrets(d.config.Namespace).Get(ctx, name, metav1.GetOptions{})
+	if err == nil {
+		if err := verifyManaged(existing.Labels, existing.Annotations, identity, fingerprint); err != nil {
+			return scheduler.Permanent(err)
+		}
+		return nil
+	}
+	if !apierrors.IsNotFound(err) {
+		return fmt.Errorf("get JobSpec Secret: %w", err)
+	}
+	immutable := true
+	_, err = d.client.CoreV1().Secrets(d.config.Namespace).Create(ctx, &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: name, Namespace: d.config.Namespace,
+			Labels: labels(identity, "job-spec"), Annotations: annotations(fingerprint),
+		},
+		Immutable: &immutable,
+		Type:      corev1.SecretTypeOpaque,
+		Data:      map[string][]byte{"job.yaml": document},
+	}, metav1.CreateOptions{})
+	if apierrors.IsAlreadyExists(err) {
+		existing, err = d.client.CoreV1().Secrets(d.config.Namespace).Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			return fmt.Errorf("get concurrently created JobSpec Secret: %w", err)
+		}
+		if err := verifyManaged(existing.Labels, existing.Annotations, identity, fingerprint); err != nil {
+			return scheduler.Permanent(err)
+		}
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("create JobSpec Secret: %w", err)
+	}
+	return nil
+}
+
+func (d *Dispatcher) ensureService(
+	ctx context.Context, base string, identity dispatch.Identity, fingerprint string,
+) error {
+	name := base + "-worker"
+	existing, err := d.client.CoreV1().Services(d.config.Namespace).Get(ctx, name, metav1.GetOptions{})
+	if err == nil {
+		if err := verifyManaged(existing.Labels, existing.Annotations, identity, fingerprint); err != nil {
+			return scheduler.Permanent(err)
+		}
+		return nil
+	}
+	if !apierrors.IsNotFound(err) {
+		return fmt.Errorf("get Worker Service: %w", err)
+	}
+	workerLabels := labels(identity, "execution-worker")
+	_, err = d.client.CoreV1().Services(d.config.Namespace).Create(ctx, &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: name, Namespace: d.config.Namespace,
+			Labels: labels(identity, "worker-service"), Annotations: annotations(fingerprint),
+		},
+		Spec: corev1.ServiceSpec{
+			ClusterIP:                corev1.ClusterIPNone,
+			PublishNotReadyAddresses: true,
+			Selector:                 workerLabels,
+			Ports: []corev1.ServicePort{{
+				Name: "worker", Port: d.config.WorkerPort, TargetPort: intstr.FromString("worker"),
+			}},
+		},
+	}, metav1.CreateOptions{})
+	if apierrors.IsAlreadyExists(err) {
+		existing, err = d.client.CoreV1().Services(d.config.Namespace).Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			return fmt.Errorf("get concurrently created Worker Service: %w", err)
+		}
+		if err := verifyManaged(existing.Labels, existing.Annotations, identity, fingerprint); err != nil {
+			return scheduler.Permanent(err)
+		}
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("create Worker Service: %w", err)
+	}
+	return nil
+}
+
+func (d *Dispatcher) ensureWorkers(
+	ctx context.Context, base string, identity dispatch.Identity, fingerprint string,
+) (*appsv1.StatefulSet, error) {
+	name := base + "-worker"
+	existing, err := d.client.AppsV1().StatefulSets(d.config.Namespace).Get(ctx, name, metav1.GetOptions{})
+	if err == nil {
+		if err := verifyManaged(existing.Labels, existing.Annotations, identity, fingerprint); err != nil {
+			return nil, scheduler.Permanent(err)
+		}
+		return existing, nil
+	}
+	if !apierrors.IsNotFound(err) {
+		return nil, fmt.Errorf("get Worker StatefulSet: %w", err)
+	}
+	created, err := d.client.AppsV1().StatefulSets(d.config.Namespace).Create(
+		ctx, d.workerStatefulSet(base, identity, fingerprint), metav1.CreateOptions{})
+	if err != nil {
+		if apierrors.IsAlreadyExists(err) {
+			existing, err = d.client.AppsV1().StatefulSets(d.config.Namespace).Get(
+				ctx, name, metav1.GetOptions{})
+			if err != nil {
+				return nil, fmt.Errorf("get concurrently created Worker StatefulSet: %w", err)
+			}
+			if err := verifyManaged(existing.Labels, existing.Annotations, identity, fingerprint); err != nil {
+				return nil, scheduler.Permanent(err)
+			}
+			return existing, nil
+		}
+		return nil, fmt.Errorf("create Worker StatefulSet: %w", err)
+	}
+	return created, nil
+}
+
+func (d *Dispatcher) workerStatefulSet(
+	base string, identity dispatch.Identity, fingerprint string,
+) *appsv1.StatefulSet {
+	name := base + "-worker"
+	podLabels := labels(identity, "execution-worker")
+	return &appsv1.StatefulSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: name, Namespace: d.config.Namespace,
+			Labels: labels(identity, "worker"), Annotations: annotations(fingerprint),
+		},
+		Spec: appsv1.StatefulSetSpec{
+			ServiceName:         name,
+			PodManagementPolicy: appsv1.ParallelPodManagement,
+			Replicas:            ptr(d.config.WorkerReplicas),
+			Selector:            &metav1.LabelSelector{MatchLabels: podLabels},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{Labels: podLabels, Annotations: annotations(fingerprint)},
+				Spec: corev1.PodSpec{
+					ServiceAccountName: d.config.ServiceAccount,
+					SecurityContext:    podSecurityContext(),
+					Containers: []corev1.Container{{
+						Name:            "worker",
+						Image:           d.config.WorkerImage,
+						ImagePullPolicy: d.config.ImagePullPolicy,
+						SecurityContext: containerSecurityContext(),
+						Resources:       d.config.WorkerResources,
+						Ports: []corev1.ContainerPort{{
+							Name: "worker", ContainerPort: d.config.WorkerPort, Protocol: corev1.ProtocolTCP,
+						}},
+						ReadinessProbe: &corev1.Probe{
+							ProbeHandler: corev1.ProbeHandler{TCPSocket: &corev1.TCPSocketAction{
+								Port: intstr.FromString("worker"),
+							}},
+							InitialDelaySeconds: 3, PeriodSeconds: 3, TimeoutSeconds: 2,
+						},
+						Env: []corev1.EnvVar{
+							{Name: "ASTRASYNC_WORKER_ID", ValueFrom: &corev1.EnvVarSource{
+								FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.name"},
+							}},
+							{Name: "ASTRASYNC_WORKER_PORT", Value: strconv.Itoa(int(d.config.WorkerPort))},
+							{Name: "ASTRASYNC_TASK_FACTORY_PROVIDER", Value: "io.astrasync.engine.worker.JdbcWorkerTaskFactoryProvider"},
+							{Name: "ASTRASYNC_WORKER_JOB_SPEC", Value: jobSpecPath},
+							{Name: "ASTRASYNC_WORKER_MAX_IN_FLIGHT_BATCHES", Value: strconv.Itoa(int(d.config.WorkerMaxInFlightBatches))},
+							{Name: "ASTRASYNC_MAX_CONCURRENT_TASKS", Value: strconv.Itoa(int(d.config.WorkerMaxConcurrentTasks))},
+							{Name: "ASTRASYNC_TASK_QUEUE_CAPACITY", Value: strconv.Itoa(int(d.config.WorkerTaskQueueCapacity))},
+							{Name: "ASTRASYNC_MAX_CONNECTIONS", Value: strconv.Itoa(int(d.config.WorkerMaxConnections))},
+							{Name: "JAVA_TOOL_OPTIONS", Value: d.config.WorkerJavaToolOptions},
+						},
+						VolumeMounts: []corev1.VolumeMount{
+							{Name: "scratch", MountPath: "/tmp"},
+							{Name: "job-spec", MountPath: "/etc/astrasync/job", ReadOnly: true},
+						},
+					}},
+					Volumes: []corev1.Volume{
+						{Name: "scratch", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
+						{Name: "job-spec", VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{
+							SecretName: base + "-spec", Items: []corev1.KeyToPath{{Key: "job.yaml", Path: "job.yaml"}},
+						}}},
+					},
+				},
+			},
+		},
+	}
+}
+
+func (d *Dispatcher) coordinatorJob(
+	base string, identity dispatch.Identity, fingerprint string,
+) *batchv1.Job {
+	workerName := base + "-worker"
+	workerEndpoints := make([]string, d.config.WorkerReplicas)
+	for index := int32(0); index < d.config.WorkerReplicas; index++ {
+		podName := workerName + "-" + strconv.Itoa(int(index))
+		workerEndpoints[index] = fmt.Sprintf(
+			"%s@%s.%s:%d", podName, podName, workerName, d.config.WorkerPort)
+	}
+	jobLabels := labels(identity, "coordinator")
+	return &batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: base + "-coordinator", Namespace: d.config.Namespace,
+			Labels: jobLabels, Annotations: annotations(fingerprint),
+		},
+		Spec: batchv1.JobSpec{
+			BackoffLimit:            ptr(d.config.CoordinatorBackoffLimit),
+			TTLSecondsAfterFinished: d.config.TTLSecondsAfterFinished,
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{Labels: jobLabels, Annotations: annotations(fingerprint)},
+				Spec: corev1.PodSpec{
+					RestartPolicy:      corev1.RestartPolicyNever,
+					ServiceAccountName: d.config.ServiceAccount,
+					SecurityContext:    podSecurityContext(),
+					Containers: []corev1.Container{{
+						Name:            "coordinator",
+						Image:           d.config.CoordinatorImage,
+						ImagePullPolicy: d.config.ImagePullPolicy,
+						SecurityContext: containerSecurityContext(),
+						Resources:       d.config.CoordinatorResources,
+						Env: []corev1.EnvVar{
+							{Name: "ASTRASYNC_COORDINATOR_JOB_SPEC", Value: jobSpecPath},
+							{Name: "ASTRASYNC_COORDINATOR_PROGRESS_DIR", Value: progressMountPath + "/" + runtimeID(identity.JobUID)},
+							{Name: "ASTRASYNC_COORDINATOR_WORKERS", Value: strings.Join(workerEndpoints, ",")},
+							{Name: "ASTRASYNC_COORDINATOR_WORKER_TIMEOUT_MS", Value: strconv.Itoa(int(d.config.WorkerTimeoutMillis))},
+							{Name: "ASTRASYNC_COORDINATOR_MAX_IN_FLIGHT_TASKS", Value: strconv.Itoa(int(d.config.CoordinatorMaxInFlightTasks))},
+							{Name: "ASTRASYNC_COORDINATOR_MAX_IN_FLIGHT_BATCHES", Value: strconv.Itoa(int(d.config.WorkerMaxInFlightBatches))},
+							{Name: "ASTRASYNC_COORDINATOR_EXECUTION_EPOCH", Value: strconv.FormatInt(identity.Epoch, 10)},
+							{Name: "JAVA_TOOL_OPTIONS", Value: d.config.CoordinatorJavaToolOptions},
+						},
+						VolumeMounts: []corev1.VolumeMount{
+							{Name: "scratch", MountPath: "/tmp"},
+							{Name: "job-spec", MountPath: "/etc/astrasync/job", ReadOnly: true},
+							{Name: "progress", MountPath: progressMountPath},
+						},
+					}},
+					Volumes: []corev1.Volume{
+						{Name: "scratch", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
+						{Name: "job-spec", VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{
+							SecretName: base + "-spec", Items: []corev1.KeyToPath{{Key: "job.yaml", Path: "job.yaml"}},
+						}}},
+						{Name: "progress", VolumeSource: corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+							ClaimName: d.config.ProgressClaim,
+						}}},
+					},
+				},
+			},
+		},
+	}
+}
+
+func observeJob(execution *batchv1.Job) (scheduler.Observation, bool) {
+	for _, condition := range execution.Status.Conditions {
+		if condition.Status != corev1.ConditionTrue {
+			continue
+		}
+		switch condition.Type {
+		case batchv1.JobComplete:
+			return scheduler.Observation{State: scheduler.ObservationSucceeded}, true
+		case batchv1.JobFailed:
+			return scheduler.Observation{
+				State: scheduler.ObservationFailed, Reason: condition.Reason, Message: condition.Message,
+			}, true
+		}
+	}
+	if execution.Status.Succeeded > 0 {
+		return scheduler.Observation{State: scheduler.ObservationSucceeded}, true
+	}
+	if execution.Status.Active > 0 {
+		return scheduler.Observation{State: scheduler.ObservationRunning}, false
+	}
+	return scheduler.Observation{State: scheduler.ObservationPending}, false
+}
+
+func (d *Dispatcher) cleanupAuxiliary(ctx context.Context, base string) error {
+	return d.deleteAuxiliary(ctx, base, metav1.DeletePropagationBackground)
+}
+
+func (d *Dispatcher) deleteAuxiliary(
+	ctx context.Context, base string, deletePolicy metav1.DeletionPropagation,
+) error {
+	var failures []error
+	if err := d.client.AppsV1().StatefulSets(d.config.Namespace).Delete(
+		ctx, base+"-worker", metav1.DeleteOptions{PropagationPolicy: &deletePolicy}); err != nil && !apierrors.IsNotFound(err) {
+		failures = append(failures, fmt.Errorf("delete Worker StatefulSet: %w", err))
+	}
+	if err := d.client.CoreV1().Services(d.config.Namespace).Delete(
+		ctx, base+"-worker", metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
+		failures = append(failures, fmt.Errorf("delete Worker Service: %w", err))
+	}
+	if err := d.client.CoreV1().Secrets(d.config.Namespace).Delete(
+		ctx, base+"-spec", metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
+		failures = append(failures, fmt.Errorf("delete JobSpec Secret: %w", err))
+	}
+	return errors.Join(failures...)
+}
+
+func (d *Dispatcher) resourcesGone(ctx context.Context, base string) (bool, error) {
+	checks := []func() error{
+		func() error {
+			_, err := d.client.BatchV1().Jobs(d.config.Namespace).Get(ctx, base+"-coordinator", metav1.GetOptions{})
+			return err
+		},
+		func() error {
+			_, err := d.client.AppsV1().StatefulSets(d.config.Namespace).Get(ctx, base+"-worker", metav1.GetOptions{})
+			return err
+		},
+		func() error {
+			_, err := d.client.CoreV1().Services(d.config.Namespace).Get(ctx, base+"-worker", metav1.GetOptions{})
+			return err
+		},
+		func() error {
+			_, err := d.client.CoreV1().Secrets(d.config.Namespace).Get(ctx, base+"-spec", metav1.GetOptions{})
+			return err
+		},
+	}
+	for _, check := range checks {
+		err := check()
+		if err == nil {
+			return false, nil
+		}
+		if !apierrors.IsNotFound(err) {
+			return false, err
+		}
+	}
+	return true, nil
+}
+
+func jobDocument(candidate job.Job) ([]byte, string, error) {
+	if candidate.Spec.Source.ConnectionRef != "" || candidate.Spec.Sink.ConnectionRef != "" {
+		return nil, "", fmt.Errorf("connectionRef resolution is not available for Coordinator dispatch")
+	}
+	if err := candidate.Spec.Validate(); err != nil {
+		return nil, "", err
+	}
+	document := struct {
+		APIVersion string      `json:"apiVersion"`
+		Kind       string      `json:"kind"`
+		Metadata   interface{} `json:"metadata"`
+		Spec       job.Spec    `json:"spec"`
+	}{
+		APIVersion: "sync.astrasync.io/v1",
+		Kind:       "SyncJob",
+		Metadata: struct {
+			Name string `json:"name"`
+		}{Name: runtimeID(candidate.UID)},
+		Spec: candidate.Spec.Clone(),
+	}
+	encoded, err := json.MarshalIndent(document, "", "  ")
+	if err != nil {
+		return nil, "", fmt.Errorf("encode Coordinator JobSpec: %w", err)
+	}
+	encoded = append(encoded, '\n')
+	digest := sha256.Sum256(encoded)
+	return encoded, hex.EncodeToString(digest[:]), nil
+}
+
+func resourceBase(identity dispatch.Identity) (string, error) {
+	if err := identity.Validate(); err != nil {
+		return "", err
+	}
+	if _, err := uuid.Parse(identity.JobUID); err != nil {
+		return "", fmt.Errorf("job UID must be a UUID")
+	}
+	return runtimeID(identity.JobUID) + "-e" + strconv.FormatInt(identity.Epoch, 36), nil
+}
+
+func runtimeID(jobUID string) string {
+	return "job-" + strings.ReplaceAll(strings.ToLower(jobUID), "-", "")
+}
+
+func labels(identity dispatch.Identity, component string) map[string]string {
+	return map[string]string{
+		labelJobUID:                    identity.JobUID,
+		labelEpoch:                     strconv.FormatInt(identity.Epoch, 10),
+		labelComponent:                 component,
+		"app.kubernetes.io/managed-by": "astrasync-scheduler",
+	}
+}
+
+func annotations(fingerprint string) map[string]string {
+	return map[string]string{annotationSpec: fingerprint}
+}
+
+func verifyManaged(
+	labels map[string]string,
+	annotations map[string]string,
+	identity dispatch.Identity,
+	fingerprint string,
+) error {
+	if labels[labelJobUID] != identity.JobUID || labels[labelEpoch] != strconv.FormatInt(identity.Epoch, 10) {
+		return fmt.Errorf("Kubernetes resource name collides with another execution")
+	}
+	if annotations[annotationSpec] != fingerprint {
+		return fmt.Errorf("Kubernetes execution JobSpec fingerprint changed")
+	}
+	return nil
+}
+
+func podSecurityContext() *corev1.PodSecurityContext {
+	user := int64(1000)
+	nonRoot := true
+	return &corev1.PodSecurityContext{RunAsUser: &user, RunAsNonRoot: &nonRoot, FSGroup: &user}
+}
+
+func containerSecurityContext() *corev1.SecurityContext {
+	allowPrivilegeEscalation := false
+	readOnlyRootFilesystem := true
+	return &corev1.SecurityContext{
+		AllowPrivilegeEscalation: &allowPrivilegeEscalation,
+		ReadOnlyRootFilesystem:   &readOnlyRootFilesystem,
+		Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
+	}
+}
+
+func ptr[T any](value T) *T {
+	return &value
+}

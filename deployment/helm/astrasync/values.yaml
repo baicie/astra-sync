@@ -16,6 +16,10 @@ image:
     repository: astrasync/controller
     tag: "latest"
 
+  scheduler:
+    repository: astrasync/scheduler
+    tag: "latest"
+
   worker:
     repository: astrasync/worker
     tag: "latest"
@@ -129,6 +133,15 @@ controller:
 scheduler:
   enabled: true
   replicaCount: 3
+  maxConcurrentJobs: 1
+  leaseDuration: 30s
+  reconcileInterval: 5s
+  operationTimeout: 10s
+  progress:
+    existingClaim: ""
+    storageClass: ""
+    accessMode: ReadWriteOnce
+    size: 10Gi
   resources:
     limits:
       cpu: 1000m

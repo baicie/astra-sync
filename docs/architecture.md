@@ -118,4 +118,5 @@ ADR-021 through ADR-025 define the completed Phase 1 distributed batch runtime, 
 Worker protocol, resumable progress, and operational JDBC deployment.
 ADR-026 through ADR-028 define the checkpoint, sink-commit, and native CDC consistency boundaries.
 ADR-029 defines the durable desired-state Job lifecycle and epoch-fenced Phase 4 control-plane
-foundation.
+foundation. ADR-030 defines durable Scheduler capacity, lease takeover, deterministic Kubernetes
+Coordinator/Worker dispatch, and control-plane epoch propagation into checkpoint execution.

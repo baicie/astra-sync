@@ -35,6 +35,7 @@ This directory contains the Architecture Decision Records (ADRs) for AstraSync.
 | [ADR-027](adr-027-transactional-idempotent-sink-commit.md) | Transactional or Idempotent Sink Commit | Accepted | 2026-08-04 |
 | [ADR-028](adr-028-native-cdc-and-checkpoint-coupled-offsets.md) | Native CDC and Checkpoint-coupled Offsets | Accepted | 2026-08-05 |
 | [ADR-029](adr-029-durable-desired-state-job-lifecycle.md) | Durable Desired-state Job Lifecycle | Accepted | 2026-08-05 |
+| [ADR-030](adr-030-lease-fenced-scheduler-dispatch.md) | Lease-fenced Scheduler Dispatch | Accepted | 2026-08-05 |
 
 ## Template
 

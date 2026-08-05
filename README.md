@@ -228,7 +228,7 @@ constraints.
 | Phase 1 | Distributed Batch Sync | Complete |
 | Phase 2 | Checkpoint & Exactly-Once | Complete |
 | Phase 3 | CDC (MySQL, PostgreSQL) | Complete |
-| Phase 4 | Control Plane HA | In Progress (Slice 11 complete) |
+| Phase 4 | Control Plane HA | In Progress (Slices 11-12 complete) |
 | Phase 5 | Performance Optimization | Planning |
 | Phase 6 | Platform (Web Console, RBAC) | Planning |
 

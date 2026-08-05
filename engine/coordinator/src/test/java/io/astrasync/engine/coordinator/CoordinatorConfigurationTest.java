@@ -35,6 +35,7 @@ class CoordinatorConfigurationTest {
         assertThat(configuration.workerTimeout()).isEqualTo(Duration.ofSeconds(30));
         assertThat(configuration.maxInFlightTasks()).isEqualTo(1);
         assertThat(configuration.maxInFlightBatches()).isEqualTo(1);
+        assertThat(configuration.executionEpoch()).isZero();
     }
 
     @Test
@@ -43,12 +44,14 @@ class CoordinatorConfigurationTest {
         environment.put("ASTRASYNC_COORDINATOR_WORKER_TIMEOUT_MS", "2500");
         environment.put("ASTRASYNC_COORDINATOR_MAX_IN_FLIGHT_TASKS", "2");
         environment.put("ASTRASYNC_COORDINATOR_MAX_IN_FLIGHT_BATCHES", "4");
+        environment.put("ASTRASYNC_COORDINATOR_EXECUTION_EPOCH", "17");
 
         CoordinatorConfiguration configuration = CoordinatorConfiguration.fromEnvironment(environment);
 
         assertThat(configuration.workerTimeout()).isEqualTo(Duration.ofMillis(2500));
         assertThat(configuration.maxInFlightTasks()).isEqualTo(2);
         assertThat(configuration.maxInFlightBatches()).isEqualTo(4);
+        assertThat(configuration.executionEpoch()).isEqualTo(17);
     }
 
     @Test
@@ -98,6 +101,12 @@ class CoordinatorConfigurationTest {
         assertThatThrownBy(() -> CoordinatorConfiguration.fromEnvironment(invalidTimeout))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("workerTimeout must be positive and fit in milliseconds");
+
+        Map<String, String> invalidEpoch = requiredEnvironment();
+        invalidEpoch.put("ASTRASYNC_COORDINATOR_EXECUTION_EPOCH", "0");
+        assertThatThrownBy(() -> CoordinatorConfiguration.fromEnvironment(invalidEpoch))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("environment variable ASTRASYNC_COORDINATOR_EXECUTION_EPOCH must be positive");
     }
 
     private Map<String, String> requiredEnvironment() {
