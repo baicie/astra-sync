@@ -3,16 +3,17 @@ FROM golang:1.22-alpine AS builder
 
 WORKDIR /app
 
-# Copy go mod files
-COPY control-plane/go.mod control-plane/go.sum ./
+# Download the controller module and its replaced shared module independently.
+COPY control-plane/go.mod control-plane/go.sum ./control-plane/
+COPY control-plane/controller/go.mod control-plane/controller/go.sum ./control-plane/controller/
+WORKDIR /app/control-plane/controller
 RUN go mod download
 
 # Copy source code
-COPY api ./api
-COPY control-plane/controller ./control-plane/controller
+COPY control-plane/job ../job
+COPY control-plane/controller ./
 
 # Build
-WORKDIR /app/control-plane/controller
 RUN CGO_ENABLED=0 GOOS=linux go build -o /app/controller ./cmd/controller
 
 # Runtime image
@@ -25,13 +26,12 @@ RUN apk add --no-cache ca-certificates tzdata && \
     adduser -u 1000 -G astra -D astra
 
 COPY --from=builder /app/controller /app/controller
-COPY config ./config
 
 RUN chown -R astra:astra /app
 USER astra
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
-    CMD wget -qO- http://localhost:8081/health || exit 1
+    CMD wget -qO- http://localhost:8081/healthz || exit 1
 
 EXPOSE 8081
 

@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -10,65 +11,86 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	syncv1 "io.astrasync/control-plane/controller/api/v1"
+	"io.astrasync/control-plane/job"
 )
 
 type SyncJobReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
+	Clock  func() time.Time
 }
 
-func (r *SyncJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	fmt.Printf("Reconciling SyncJob: %s\n", req.NamespacedName)
-
-	// Fetch the SyncJob instance
-	job := &syncv1.SyncJob{}
-	if err := r.Get(ctx, req.NamespacedName, job); err != nil {
+func (r *SyncJobReconciler) Reconcile(ctx context.Context, request ctrl.Request) (ctrl.Result, error) {
+	resource := &syncv1.SyncJob{}
+	if err := r.Get(ctx, request.NamespacedName, resource); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
-
-	// Reconcile logic
-	if job.Spec.State == "RUNNING" {
-		return r.reconcileRunning(ctx, job)
-	}
-
-	return ctrl.Result{}, nil
-}
-
-func (r *SyncJobReconciler) reconcileRunning(ctx context.Context, job *syncv1.SyncJob) (ctrl.Result, error) {
-	// Check if job is scheduled
-	if job.Status.Phase == "" {
-		return r.scheduleJob(ctx, job)
-	}
-
-	// Check for failures
-	if job.Status.Failed {
-		return r.handleFailure(ctx, job)
-	}
-
-	// Ensure coordinator is running
-	return r.ensureCoordinator(ctx, job)
-}
-
-func (r *SyncJobReconciler) scheduleJob(ctx context.Context, job *syncv1.SyncJob) (ctrl.Result, error) {
-	job.Status.Phase = "Pending"
-	if err := r.Status().Update(ctx, job); err != nil {
+	changed, err := reconcileStatus(resource, r.now())
+	if err != nil {
 		return ctrl.Result{}, err
 	}
-	return ctrl.Result{Requeue: true}, nil
-}
-
-func (r *SyncJobReconciler) handleFailure(ctx context.Context, job *syncv1.SyncJob) (ctrl.Result, error) {
-	// Implement failure handling
+	if !changed {
+		return ctrl.Result{}, nil
+	}
+	if err := r.Status().Update(ctx, resource); err != nil {
+		return ctrl.Result{}, err
+	}
 	return ctrl.Result{}, nil
 }
 
-func (r *SyncJobReconciler) ensureCoordinator(ctx context.Context, job *syncv1.SyncJob) (ctrl.Result, error) {
-	// Implement coordinator management
-	return ctrl.Result{}, nil
+func reconcileStatus(resource *syncv1.SyncJob, now time.Time) (bool, error) {
+	desired := resource.Spec.State
+	if desired == "" {
+		desired = job.DesiredStopped
+	}
+	if desired != job.DesiredStopped && desired != job.DesiredRunning {
+		return false, fmt.Errorf("unsupported desired state %q", desired)
+	}
+	changed := false
+	if resource.Status.State == "" {
+		resource.Status.State = job.StateCreated
+		changed = true
+	}
+	if resource.Status.Desired != desired {
+		resource.Status.Desired = desired
+		changed = true
+	}
+
+	switch {
+	case desired == job.DesiredRunning && restartable(resource.Status.State):
+		if resource.Status.Epoch > 0 {
+			resource.Status.RestartCount++
+		}
+		resource.Status.Epoch++
+		resource.Status.State = job.StateInitializing
+		started := metav1Time(now)
+		resource.Status.StartTime = &started
+		resource.Status.EndTime = nil
+		resource.Status.Failure = nil
+		changed = true
+	case desired == job.DesiredStopped &&
+		(resource.Status.State == job.StateInitializing || resource.Status.State == job.StateRunning):
+		resource.Status.State = job.StateCanceling
+		changed = true
+	}
+	return changed, nil
 }
 
-func (r *SyncJobReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewControllerManagedBy(mgr).
-		For(&syncv1.SyncJob{}).
-		Complete(r)
+func restartable(state job.State) bool {
+	return state == job.StateCreated || state == job.StateCanceled || state == job.StateFinished || state == job.StateFailed
+}
+
+func metav1Time(value time.Time) metav1.Time {
+	return metav1.NewTime(value.UTC())
+}
+
+func (r *SyncJobReconciler) now() time.Time {
+	if r.Clock == nil {
+		return time.Now()
+	}
+	return r.Clock()
+}
+
+func (r *SyncJobReconciler) SetupWithManager(manager ctrl.Manager) error {
+	return ctrl.NewControllerManagedBy(manager).For(&syncv1.SyncJob{}).Complete(r)
 }

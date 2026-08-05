@@ -1,15 +1,15 @@
 syntax = "proto3";
 
-package astra.v1;
+package astra.control.v1;
 
-import "google/protobuf/timestamp.proto";
 import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
 
+option go_package = "io.astrasync/control-plane/api-server/gen/go/v1;jobv1";
 option java_multiple_files = true;
-option java_package = "io.astrasync.api.v1";
-option java_outer_classname = "JobProto";
+option java_package = "io.astrasync.control.v1";
+option java_outer_classname = "ControlPlaneJobProto";
 
-// Job Service
 service JobService {
   rpc CreateJob(CreateJobRequest) returns (Job);
   rpc GetJob(GetJobRequest) returns (Job);
@@ -18,10 +18,7 @@ service JobService {
   rpc DeleteJob(DeleteJobRequest) returns (google.protobuf.Empty);
   rpc StartJob(StartJobRequest) returns (Job);
   rpc StopJob(StopJobRequest) returns (Job);
-  rpc PauseJob(PauseJobRequest) returns (Job);
-  rpc ResumeJob(ResumeJobRequest) returns (Job);
   rpc GetJobStatus(GetJobStatusRequest) returns (JobStatus);
-  rpc CreateSavepoint(CreateSavepointRequest) returns (SavepointResponse);
 }
 
 message CreateJobRequest {
@@ -49,49 +46,31 @@ message ListJobsResponse {
 message UpdateJobRequest {
   string name = 1;
   string namespace = 2;
-  JobSpec spec = 3;
+  int64 expected_version = 3;
+  JobSpec spec = 4;
 }
 
 message DeleteJobRequest {
   string name = 1;
   string namespace = 2;
+  int64 expected_version = 3;
 }
 
 message StartJobRequest {
   string name = 1;
   string namespace = 2;
-  optional string savepoint = 3;
+  int64 expected_version = 3;
 }
 
 message StopJobRequest {
   string name = 1;
   string namespace = 2;
-  bool savepoint = 3;
-}
-
-message PauseJobRequest {
-  string name = 1;
-  string namespace = 2;
-}
-
-message ResumeJobRequest {
-  string name = 1;
-  string namespace = 2;
+  int64 expected_version = 3;
 }
 
 message GetJobStatusRequest {
   string name = 1;
   string namespace = 2;
-}
-
-message CreateSavepointRequest {
-  string name = 1;
-  string namespace = 2;
-}
-
-message SavepointResponse {
-  string path = 1;
-  int64 checkpoint_id = 2;
 }
 
 message Job {
@@ -100,29 +79,23 @@ message Job {
   string uid = 3;
   int64 version = 4;
   google.protobuf.Timestamp created_at = 5;
-  JobSpec spec = 6;
-  JobStatus status = 7;
+  google.protobuf.Timestamp updated_at = 6;
+  JobSpec spec = 7;
+  JobStatus status = 8;
 }
 
 message JobSpec {
-  SourceConfig source = 1;
-  SinkConfig sink = 2;
+  ConnectorConfig source = 1;
+  ConnectorConfig sink = 2;
   repeated TransformConfig transforms = 3;
   DeliveryConfig delivery = 4;
-  ParallelismConfig parallelism = 5;
-  CheckpointConfig checkpoint = 6;
+  RuntimeConfig runtime = 5;
 }
 
-message SourceConfig {
+message ConnectorConfig {
   string connector = 1;
   string connection_ref = 2;
-  TableSelector tables = 3;
-}
-
-message SinkConfig {
-  string connector = 1;
-  string connection_ref = 2;
-  string target_table = 3;
+  map<string, string> options = 3;
 }
 
 message TransformConfig {
@@ -136,49 +109,41 @@ message DeliveryConfig {
 
 enum DeliveryGuarantee {
   DELIVERY_GUARANTEE_UNSPECIFIED = 0;
-  EXACTLY_ONCE = 1;
-  AT_LEAST_ONCE = 2;
-  AT_MOST_ONCE = 3;
+  DELIVERY_GUARANTEE_EXACTLY_ONCE = 1;
+  DELIVERY_GUARANTEE_AT_LEAST_ONCE = 2;
+  DELIVERY_GUARANTEE_AT_MOST_ONCE = 3;
 }
 
-message ParallelismConfig {
-  int32 initial = 1;
-  int32 min = 2;
-  int32 max = 3;
-}
-
-message CheckpointConfig {
-  string interval = 1;
-  string timeout = 2;
-  int32 max_retained = 3;
-}
-
-message TableSelector {
-  repeated string include = 1;
-  repeated string exclude = 2;
+message RuntimeConfig {
+  int32 max_batch_records = 1;
 }
 
 message JobStatus {
-  JobState state = 1;
-  string job_id = 2;
+  DesiredState desired_state = 1;
+  JobState state = 2;
   int64 epoch = 3;
-  int64 restart_count = 4;
+  int32 restart_count = 4;
   google.protobuf.Timestamp start_time = 5;
   google.protobuf.Timestamp end_time = 6;
   CheckpointInfo last_checkpoint = 7;
-  optional FailureInfo failure_info = 8;
+  FailureInfo failure = 8;
+}
+
+enum DesiredState {
+  DESIRED_STATE_UNSPECIFIED = 0;
+  DESIRED_STATE_STOPPED = 1;
+  DESIRED_STATE_RUNNING = 2;
 }
 
 enum JobState {
   JOB_STATE_UNSPECIFIED = 0;
-  INITIALIZING = 1;
-  RUNNING = 2;
-  PAUSED = 3;
-  FAILING = 4;
-  FAILED = 5;
-  CANCELING = 6;
-  CANCELED = 7;
-  FINISHED = 8;
+  JOB_STATE_CREATED = 1;
+  JOB_STATE_INITIALIZING = 2;
+  JOB_STATE_RUNNING = 3;
+  JOB_STATE_CANCELING = 4;
+  JOB_STATE_CANCELED = 5;
+  JOB_STATE_FINISHED = 6;
+  JOB_STATE_FAILED = 7;
 }
 
 message CheckpointInfo {
@@ -191,98 +156,6 @@ message CheckpointInfo {
 message FailureInfo {
   string reason = 1;
   string root_cause = 2;
-  string stack_trace = 3;
-  google.protobuf.Timestamp timestamp = 4;
-  string host = 5;
-}
-
-// Connection Service
-service ConnectionService {
-  rpc CreateConnection(CreateConnectionRequest) returns (Connection);
-  rpc GetConnection(GetConnectionRequest) returns (Connection);
-  rpc ListConnections(ListConnectionsRequest) returns (ListConnectionsResponse);
-  rpc TestConnection(TestConnectionRequest) returns (TestConnectionResponse);
-  rpc DeleteConnection(DeleteConnectionRequest) returns (google.protobuf.Empty);
-}
-
-message CreateConnectionRequest {
-  string name = 1;
-  string namespace = 2;
-  ConnectionSpec spec = 3;
-}
-
-message GetConnectionRequest {
-  string name = 1;
-  string namespace = 2;
-}
-
-message ListConnectionsRequest {
-  string namespace = 1;
-  int32 page = 2;
-  int32 page_size = 3;
-}
-
-message ListConnectionsResponse {
-  repeated Connection items = 1;
-  int32 total = 2;
-}
-
-message TestConnectionRequest {
-  string name = 1;
-  string namespace = 2;
-}
-
-message TestConnectionResponse {
-  bool success = 1;
-  optional string error_message = 2;
-}
-
-message DeleteConnectionRequest {
-  string name = 1;
-  string namespace = 2;
-}
-
-message Connection {
-  string name = 1;
-  string namespace = 2;
-  string uid = 3;
-  google.protobuf.Timestamp created_at = 4;
-  ConnectionSpec spec = 5;
-  ConnectionStatus status = 6;
-}
-
-message ConnectionSpec {
-  ConnectionType type = 1;
-  string host = 2;
-  int32 port = 3;
-  string database = 4;
-  string username = 5;
-  string secret_ref = 6;
-  map<string, string> properties = 7;
-}
-
-enum ConnectionType {
-  CONNECTION_TYPE_UNSPECIFIED = 0;
-  MYSQL = 1;
-  POSTGRESQL = 2;
-  ORACLE = 3;
-  SQLSERVER = 4;
-  MONGODB = 5;
-  KAFKA = 6;
-  PULSAR = 7;
-  S3 = 8;
-  GCS = 9;
-  AZURE_BLOB = 10;
-  HDFS = 11;
-  JDBC = 12;
-  ELASTICSEARCH = 13;
-  CLICKHOUSE = 14;
-  DORIS = 15;
-  ICEBERG = 16;
-}
-
-message ConnectionStatus {
-  bool available = 1;
-  google.protobuf.Timestamp last_tested = 2;
-  optional string last_error = 3;
+  google.protobuf.Timestamp timestamp = 3;
+  string host = 4;
 }

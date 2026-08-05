@@ -34,6 +34,7 @@ This directory contains the Architecture Decision Records (ADRs) for AstraSync.
 | [ADR-026](adr-026-checkpoint-fencing-foundation.md) | Durable Checkpoint and Epoch Fencing Foundation | Accepted | 2026-08-04 |
 | [ADR-027](adr-027-transactional-idempotent-sink-commit.md) | Transactional or Idempotent Sink Commit | Accepted | 2026-08-04 |
 | [ADR-028](adr-028-native-cdc-and-checkpoint-coupled-offsets.md) | Native CDC and Checkpoint-coupled Offsets | Accepted | 2026-08-05 |
+| [ADR-029](adr-029-durable-desired-state-job-lifecycle.md) | Durable Desired-state Job Lifecycle | Accepted | 2026-08-05 |
 
 ## Template
 

@@ -11,11 +11,11 @@ type ResourceManager interface {
 }
 
 type SlotRequirement struct {
-	CPUCores       float64
-	HeapMemoryMB   int64
+	CPUCores        float64
+	HeapMemoryMB    int64
 	OffHeapMemoryMB int64
-	NetworkMB      int64
-	Labels         map[string]string
+	NetworkMB       int64
+	Labels          map[string]string
 }
 
 type WorkerAllocation struct {
