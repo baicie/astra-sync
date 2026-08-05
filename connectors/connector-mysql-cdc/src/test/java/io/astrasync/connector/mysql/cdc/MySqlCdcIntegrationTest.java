@@ -39,6 +39,7 @@ class MySqlCdcIntegrationTest {
                             "--server-id=1", "--log-bin=mysql-bin", "--binlog-format=ROW", "--binlog-row-image=FULL")
                     .start();
 
+            grantCdcPrivileges(database);
             execute(
                     database.getJdbcUrl(),
                     database.getUsername(),
@@ -115,6 +116,20 @@ class MySqlCdcIntegrationTest {
             }
         }
         throw new AssertionError("timed out waiting for MySQL CDC changes: " + operations);
+    }
+
+    private static void grantCdcPrivileges(MySQLContainer<?> database) throws Exception {
+        var result = database.execInContainer(
+                "mysql",
+                "--user=root",
+                "--password=" + database.getPassword(),
+                "--execute=GRANT SELECT, RELOAD, SHOW DATABASES, REPLICATION SLAVE, REPLICATION CLIENT "
+                        + "ON *.* TO '"
+                        + database.getUsername()
+                        + "'@'%'");
+        assertThat(result.getExitCode())
+                .as("failed to grant MySQL CDC privileges:%n%s%n%s", result.getStdout(), result.getStderr())
+                .isZero();
     }
 
     private ConnectorConfiguration configuration(MySQLContainer<?> database) {
