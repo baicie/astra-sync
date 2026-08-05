@@ -3,19 +3,20 @@ FROM golang:1.22-alpine AS builder
 
 WORKDIR /app
 
-# Install protobuf dependencies
-RUN apk add --no-cache protobuf git
+# Install source dependency support
+RUN apk add --no-cache git ca-certificates
 
-# Copy go mod files
-COPY control-plane/go.mod control-plane/go.sum ./
+# Download the API module and its replaced shared module independently.
+COPY control-plane/go.mod control-plane/go.sum ./control-plane/
+COPY control-plane/api-server/go.mod control-plane/api-server/go.sum ./control-plane/api-server/
+WORKDIR /app/control-plane/api-server
 RUN go mod download
 
 # Copy source code
-COPY api ./api
-COPY control-plane/api-server ./control-plane/api-server
+COPY control-plane/job ../job
+COPY control-plane/api-server ./
 
 # Build
-WORKDIR /app/control-plane/api-server
 RUN CGO_ENABLED=0 GOOS=linux go build -o /app/server ./cmd/server
 
 # Runtime image
@@ -32,9 +33,6 @@ RUN addgroup -g 1000 astra && \
 
 # Copy binary
 COPY --from=builder /app/server /app/server
-
-# Copy configuration
-COPY config ./config
 
 # Set ownership
 RUN chown -R astra:astra /app

@@ -215,6 +215,7 @@ constraints.
 - [Architecture Overview](./docs/architecture.md)
 - [ADR Index](./docs/adr/README.md)
 - [Phase 3 CDC](./docs/phase3/README.md)
+- [Phase 4 Control Plane](./docs/phase4/README.md)
 - [CDC Usage and Delivery Boundary](./docs/phase3/01-native-cdc/README.md)
 - [Connector Development Guide](./docs/connector-dev.md)
 - [Deployment Guide](./docs/deployment.md)
@@ -227,7 +228,7 @@ constraints.
 | Phase 1 | Distributed Batch Sync | Complete |
 | Phase 2 | Checkpoint & Exactly-Once | Complete |
 | Phase 3 | CDC (MySQL, PostgreSQL) | Complete |
-| Phase 4 | Control Plane HA | Planning |
+| Phase 4 | Control Plane HA | In Progress (Slice 11 complete) |
 | Phase 5 | Performance Optimization | Planning |
 | Phase 6 | Platform (Web Console, RBAC) | Planning |
 

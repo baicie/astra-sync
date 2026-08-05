@@ -2,101 +2,64 @@ package v1
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"io.astrasync/control-plane/job"
 )
 
 type SyncJobSpec struct {
-	Source      SourceSpec       `json:"source"`
-	Sink        SinkSpec         `json:"sink"`
-	Transforms  []TransformSpec  `json:"transforms,omitempty"`
-	Delivery    DeliverySpec     `json:"delivery"`
-	Parallelism ParallelismSpec  `json:"parallelism"`
-	Checkpoint  CheckpointSpec   `json:"checkpoint"`
-}
-
-type SourceSpec struct {
-	Connector      string        `json:"connector"`
-	ConnectionRef  string        `json:"connectionRef"`
-	Tables         TableSelector `json:"tables"`
-}
-
-type SinkSpec struct {
-	Connector     string `json:"connector"`
-	ConnectionRef string `json:"connectionRef"`
-	TargetTable   string `json:"targetTable"`
-}
-
-type TransformSpec struct {
-	Type    string            `json:"type"`
-	Options map[string]string `json:"options,omitempty"`
-}
-
-type DeliverySpec struct {
-	Guarantee string `json:"guarantee"`
-}
-
-type ParallelismSpec struct {
-	Initial int `json:"initial"`
-	Min     int `json:"min"`
-	Max     int `json:"max"`
-}
-
-type CheckpointSpec struct {
-	Interval string `json:"interval"`
-	Timeout  string `json:"timeout"`
-}
-
-type TableSelector struct {
-	Include []string `json:"include"`
-	Exclude []string `json:"exclude,omitempty"`
+	Source     job.ConnectorSpec   `json:"source"`
+	Sink       job.ConnectorSpec   `json:"sink"`
+	Transforms []job.TransformSpec `json:"transforms,omitempty"`
+	Delivery   job.DeliverySpec    `json:"delivery"`
+	Runtime    job.RuntimeSpec     `json:"runtime"`
+	// +kubebuilder:default=STOPPED
+	State job.DesiredState `json:"state,omitempty"`
 }
 
 type SyncJobStatus struct {
-	Phase       string         `json:"phase"`
-	JobID       string         `json:"jobId,omitempty"`
-	Epoch       int64          `json:"epoch,omitempty"`
-	Failed      bool           `json:"failed"`
-	FailureInfo *FailureInfo   `json:"failureInfo,omitempty"`
+	Desired        job.DesiredState `json:"desiredState,omitempty"`
+	State          job.State        `json:"state,omitempty"`
+	Epoch          int64            `json:"epoch,omitempty"`
+	RestartCount   int32            `json:"restartCount,omitempty"`
+	StartTime      *metav1.Time     `json:"startTime,omitempty"`
+	EndTime        *metav1.Time     `json:"endTime,omitempty"`
+	LastCheckpoint *CheckpointInfo  `json:"lastCheckpoint,omitempty"`
+	Failure        *FailureInfo     `json:"failure,omitempty"`
+}
+
+type CheckpointInfo struct {
+	ID         int64       `json:"id"`
+	Timestamp  metav1.Time `json:"timestamp"`
+	StateSize  int64       `json:"stateSize"`
+	DurationMS int32       `json:"durationMs"`
 }
 
 type FailureInfo struct {
-	Reason    string `json:"reason"`
-	Timestamp int64  `json:"timestamp"`
+	Reason    string      `json:"reason"`
+	RootCause string      `json:"rootCause,omitempty"`
+	Timestamp metav1.Time `json:"timestamp"`
+	Host      string      `json:"host,omitempty"`
 }
 
 // +kubebuilder:object:root=true
-// +kubebuilder:resource:scope=Namespaced
-// +kubebuilder:printcolumn:name="State",type="string",JSONPath=".spec.state"
-// +kubebuilder:printcolumn:name="Phase",type="string",JSONPath=".status.phase"
+// +kubebuilder:subresource:status
+// +kubebuilder:resource:scope=Namespaced,singular=syncjob,shortName=sj
+// +kubebuilder:printcolumn:name="Desired",type="string",JSONPath=".spec.state"
+// +kubebuilder:printcolumn:name="State",type="string",JSONPath=".status.state"
+// +kubebuilder:printcolumn:name="Epoch",type="integer",JSONPath=".status.epoch"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 
 type SyncJob struct {
 	metav1.TypeMeta   `json:",inline"`
-	metav1.ObjectMeta `json:"metadata"`
-
-	Spec   SyncJobSpec   `json:"spec"`
-	Status SyncJobStatus `json:"status"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+	Spec              SyncJobSpec   `json:"spec"`
+	Status            SyncJobStatus `json:"status,omitempty"`
 }
 
-type ConnectionSpec struct {
-	Type     string            `json:"type"`
-	Host     string            `json:"host"`
-	Port     int               `json:"port"`
-	Database string            `json:"database"`
-	Username string            `json:"username"`
-	SecretRef string           `json:"secretRef"`
-	Properties map[string]string `json:"properties,omitempty"`
-}
+// +kubebuilder:object:root=true
 
-type ConnectionStatus struct {
-	Available    bool   `json:"available"`
-	LastTested   int64  `json:"lastTested,omitempty"`
-	LastError    string `json:"lastError,omitempty"`
-}
-
-type Connection struct {
-	metav1.TypeMeta   `json:",inline"`
-	metav1.ObjectMeta `json:"metadata"`
-
-	Spec   ConnectionSpec   `json:"spec"`
-	Status ConnectionStatus `json:"status"`
+type SyncJobList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata,omitempty"`
+	Items           []SyncJob `json:"items"`
 }

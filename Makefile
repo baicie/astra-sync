@@ -1,6 +1,9 @@
 # Makefile for AstraSync
 
-.PHONY: all build build-java build-go build-connectors test test-java test-go clean install format check verify docker-build docker-push proto-generate crd-generate install-hooks
+.PHONY: all build build-java build-go build-connectors test test-java test-go vet-go clean install format check verify docker-build docker-push proto-generate proto-go-generate proto-lint crd-generate install-hooks
+
+GO_MODULES := control-plane control-plane/api-server control-plane/controller control-plane/scheduler control-plane/catalog control-plane/auth
+CONTROLLER_GEN_VERSION := v0.15.0
 
 # Default target
 all: build
@@ -20,9 +23,10 @@ build-java:
 # Build Go control plane
 build-go:
 	@echo "Building Go control plane..."
-	cd control-plane/api-server && go build -o bin/api-server ./cmd/server
-	cd control-plane/controller && go build -o bin/controller ./cmd/controller
-	cd control-plane/scheduler && go build -o bin/scheduler ./cmd/scheduler
+	@set -e; for module in $(GO_MODULES); do \
+		echo "Building $$module..."; \
+		(cd "$$module" && go build ./...); \
+	done
 
 # Build connectors
 build-connectors:
@@ -38,7 +42,17 @@ test-java:
 
 test-go:
 	@echo "Running Go tests..."
-	cd control-plane && go test ./...
+	@set -e; for module in $(GO_MODULES); do \
+		echo "Testing $$module..."; \
+		(cd "$$module" && go test ./...); \
+	done
+
+vet-go:
+	@echo "Running Go static analysis..."
+	@set -e; for module in $(GO_MODULES); do \
+		echo "Vetting $$module..."; \
+		(cd "$$module" && go vet ./...); \
+	done
 
 # Integration tests
 test-integration:
@@ -54,13 +68,12 @@ test-e2e:
 format:
 	@echo "Formatting code..."
 	mvn spotless:apply
-	cd control-plane && go fmt ./...
+	@set -e; for module in $(GO_MODULES); do (cd "$$module" && go fmt ./...); done
 
 # Code style check
-check:
+check: vet-go
 	@echo "Checking code style..."
 	mvn spotless:check
-	cd control-plane && go vet ./...
 
 # Clean build artifacts
 clean:
@@ -93,11 +106,18 @@ docker-push:
 proto-generate:
 	@echo "Generating protobuf code..."
 	mvn protobuf:compile protobuf:compile-custom
+	$(MAKE) proto-go-generate
+
+proto-go-generate:
+	buf generate api/protobuf --template buf.gen.yaml
+
+proto-lint:
+	buf lint api/protobuf
 
 # Generate CRD manifests
 crd-generate:
 	@echo "Generating CRD manifests..."
-	cd deployment/operator && go generate ./...
+	cd control-plane/controller && GOTOOLCHAIN=go1.22.12 go run sigs.k8s.io/controller-tools/cmd/controller-gen@$(CONTROLLER_GEN_VERSION) crd paths=./api/v1 output:crd:artifacts:config=../../deployment/operator/config/crd/bases
 
 # Create a new connector
 new-connector:

@@ -1,0 +1,16 @@
+version: v1
+
+plugins:
+  - plugin: go
+    out: control-plane/api-server/gen/go
+    opt:
+      - paths=source_relative
+  - plugin: go-grpc
+    out: control-plane/api-server/gen/go
+    opt:
+      - paths=source_relative
+  - plugin: grpc-gateway
+    out: control-plane/api-server/gen/go
+    opt:
+      - paths=source_relative
+      - generate_unbound_methods=true

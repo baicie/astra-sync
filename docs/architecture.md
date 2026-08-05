@@ -116,3 +116,6 @@ single-node execution model used to enter Phase 0. ADR-012 fixes the strict JobS
 and ADR-013 keeps planning descriptor-only until every validation and capability gate passes.
 ADR-021 through ADR-025 define the completed Phase 1 distributed batch runtime, split enumeration,
 Worker protocol, resumable progress, and operational JDBC deployment.
+ADR-026 through ADR-028 define the checkpoint, sink-commit, and native CDC consistency boundaries.
+ADR-029 defines the durable desired-state Job lifecycle and epoch-fenced Phase 4 control-plane
+foundation.
