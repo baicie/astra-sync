@@ -40,6 +40,9 @@
         <!-- Local Applications -->
         <module>cli</module>
 
+        <!-- Performance Benchmarks -->
+        <module>tests/benchmark</module>
+
         <!-- Transforms -->
         <module>transforms</module>
     </modules>
@@ -82,6 +85,7 @@
         <mockito.version>5.12.0</mockito.version>
         <assertj.version>3.25.3</assertj.version>
         <picocli.version>4.7.6</picocli.version>
+        <jmh.version>1.37</jmh.version>
 
         <!-- Build Plugins -->
         <maven-compiler-plugin.version>3.13.0</maven-compiler-plugin.version>
