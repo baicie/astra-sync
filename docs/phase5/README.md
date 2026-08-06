@@ -10,7 +10,7 @@ backpressure, checkpoint correctness, and epoch fencing.
 | Slice | Scope | Status |
 |---:|---|---|
 | 14 | Bounded Arrow batches, deterministic Row conversion, IPC framing, and benchmark baseline | Complete |
-| 15 | Adaptive batch sizing and parallelism based on measured workload signals | In Progress |
+| 15 | Adaptive batch sizing and parallelism based on measured workload signals | Complete |
 | 16 | Spillable exchange and checkpoint persistence optimization | Planned |
 
 ## Slice 14 Boundary
