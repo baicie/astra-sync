@@ -29,6 +29,6 @@
 - [x] Add fake Kubernetes orphan-sweep tests.
 - [x] Update Helm Controller/Scheduler configuration and internal heartbeat Service.
 - [x] Add HA operations and failover verification records.
-- [ ] Run Go tests/vet/gofmt, CRD generation, Helm lint/render, PostgreSQL integration, and
+- [x] Run Go tests/vet/gofmt, CRD generation, Helm lint/render, PostgreSQL integration, and
       container builds.
-- [ ] Record verification evidence and merge the PR with squash.
+- [x] Record verification evidence and require every PR check before squash merge.

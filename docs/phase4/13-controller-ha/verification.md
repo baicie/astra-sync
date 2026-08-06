@@ -23,18 +23,22 @@ The Windows checkout retains pre-existing CRLF files that local `gofmt -l .` rep
 Git objects are formatted. Every changed Go file was formatted directly; Linux CI performs the
 authoritative clean-checkout format gate.
 
-## Pull-request-only gates
+## Pull-request CI
 
-The following require services unavailable in the local environment and remain required before
-merge:
+Pull request [#24](https://github.com/baicie/astra-sync/pull/24) run
+[`31085432239`](https://github.com/baicie/astra-sync/actions/runs/31085432239) passed every job on
+2026-08-06.
 
-| Check | Required evidence |
+| Check | Result |
 |---|---|
-| PostgreSQL lifecycle repository integration | PostgreSQL 16 CI service, test not skipped |
-| Scheduler two-pool capacity, lease/heartbeat takeover, token rejection, and atomic timeout fence | PostgreSQL 16 CI service, test not skipped |
-| Controller real-PostgreSQL convergence and replacement status projection | PostgreSQL 16 CI service, test not skipped |
-| API, Controller, Scheduler, Coordinator, and Worker images | All five Buildx matrix jobs pass |
-| Repository secret and policy checks | Required repository job passes |
+| PostgreSQL lifecycle repository integration | PASS; PostgreSQL 16, not skipped |
+| Scheduler two-pool capacity, lease/heartbeat takeover, token rejection, and atomic timeout fence | PASS; PostgreSQL 16, not skipped |
+| Controller real-PostgreSQL convergence and replacement status projection | PASS; PostgreSQL 16, not skipped |
+| Linux clean-checkout formatting, vet, and tests for all six Go modules | PASS |
+| Java 21 Maven verify and Spotless | PASS |
+| Protocol, generated Go/CRD drift, and both Helm modes | PASS |
+| API, Controller, Scheduler, Coordinator, and Worker Buildx images | PASS; all five matrix jobs |
+| Repository secret and policy checks | PASS |
 
 ## Acceptance evidence
 
