@@ -75,6 +75,12 @@ spec:
               value: {{ .Values.scheduler.maxConcurrentJobs | quote }}
             - name: SCHEDULER_LEASE_DURATION
               value: {{ .Values.scheduler.leaseDuration | quote }}
+            - name: SCHEDULER_HEARTBEAT_TIMEOUT
+              value: {{ .Values.scheduler.heartbeatTimeout | quote }}
+            - name: SCHEDULER_HEARTBEAT_URL
+              value: "http://{{ include "astrasync.componentFullname" (dict "context" . "component" "scheduler") }}:{{ .Values.scheduler.service.port }}"
+            - name: SCHEDULER_HEARTBEAT_INTERVAL_MS
+              value: {{ .Values.scheduler.heartbeatIntervalMillis | quote }}
             - name: SCHEDULER_RECONCILE_INTERVAL
               value: {{ .Values.scheduler.reconcileInterval | quote }}
             - name: SCHEDULER_OPERATION_TIMEOUT

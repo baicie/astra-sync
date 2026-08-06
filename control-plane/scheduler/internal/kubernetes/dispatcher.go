@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -27,6 +28,7 @@ import (
 const (
 	jobSpecPath       = "/etc/astrasync/job/job.yaml"
 	progressMountPath = "/var/lib/astrasync/progress"
+	heartbeatTokenKey = "heartbeat-token"
 	labelJobUID       = "sync.astrasync.io/job-uid"
 	labelEpoch        = "sync.astrasync.io/execution-epoch"
 	labelComponent    = "app.kubernetes.io/component"
@@ -38,6 +40,8 @@ type Config struct {
 	ServiceAccount              string
 	CoordinatorImage            string
 	WorkerImage                 string
+	HeartbeatURL                string
+	HeartbeatIntervalMillis     int32
 	ImagePullPolicy             corev1.PullPolicy
 	ProgressClaim               string
 	WorkerReplicas              int32
@@ -66,23 +70,36 @@ func New(client kubernetes.Interface, config Config) (*Dispatcher, error) {
 		return nil, fmt.Errorf("Kubernetes client must not be nil")
 	}
 	if config.Namespace == "" || config.ServiceAccount == "" || config.CoordinatorImage == "" ||
-		config.WorkerImage == "" || config.ProgressClaim == "" {
+		config.WorkerImage == "" || config.ProgressClaim == "" || config.HeartbeatURL == "" {
 		return nil, fmt.Errorf("Kubernetes dispatch identity, images, and progress claim are required")
 	}
 	if config.WorkerReplicas <= 0 || config.WorkerPort <= 0 || config.WorkerPort > 65535 ||
 		config.WorkerTimeoutMillis <= 0 || config.CoordinatorMaxInFlightTasks <= 0 ||
 		config.WorkerMaxInFlightBatches <= 0 || config.WorkerMaxConcurrentTasks <= 0 ||
 		config.WorkerTaskQueueCapacity < 0 || config.WorkerMaxConnections <= 0 ||
-		config.CoordinatorBackoffLimit < 0 {
+		config.CoordinatorBackoffLimit < 0 || config.HeartbeatIntervalMillis <= 0 {
 		return nil, fmt.Errorf("Kubernetes dispatch numeric configuration is invalid")
 	}
+	heartbeatURL, err := url.Parse(config.HeartbeatURL)
+	if err != nil || heartbeatURL.Host == "" ||
+		(heartbeatURL.Scheme != "http" && heartbeatURL.Scheme != "https") ||
+		heartbeatURL.RawQuery != "" || heartbeatURL.Fragment != "" {
+		return nil, fmt.Errorf("Kubernetes dispatch heartbeat URL must use HTTP or HTTPS")
+	}
+	config.HeartbeatURL = strings.TrimRight(config.HeartbeatURL, "/")
 	return &Dispatcher{client: client, config: config}, nil
 }
 
 func (d *Dispatcher) Reconcile(
-	ctx context.Context, candidate job.Job, epoch int64,
+	ctx context.Context, candidate job.Job, record dispatch.Record,
 ) (scheduler.Observation, error) {
-	identity := dispatch.Identity{JobUID: candidate.UID, Epoch: epoch}
+	identity := record.Identity
+	if candidate.UID != identity.JobUID {
+		return scheduler.Observation{}, scheduler.Permanent(fmt.Errorf("dispatch record does not match the Job execution"))
+	}
+	if _, err := uuid.Parse(record.HeartbeatToken); err != nil {
+		return scheduler.Observation{}, scheduler.Permanent(fmt.Errorf("dispatch heartbeat token must be a UUID"))
+	}
 	base, err := resourceBase(identity)
 	if err != nil {
 		return scheduler.Observation{}, scheduler.Permanent(err)
@@ -110,7 +127,7 @@ func (d *Dispatcher) Reconcile(
 		existing = nil
 	}
 
-	if err := d.ensureSecret(ctx, base, identity, fingerprint, document); err != nil {
+	if err := d.ensureSecret(ctx, base, identity, fingerprint, document, record.HeartbeatToken); err != nil {
 		return scheduler.Observation{}, err
 	}
 	if err := d.ensureService(ctx, base, identity, fingerprint); err != nil {
@@ -180,14 +197,120 @@ func (d *Dispatcher) Cleanup(ctx context.Context, identity dispatch.Identity) er
 	return d.cleanupAuxiliary(ctx, base)
 }
 
+// SweepOrphans removes auxiliary resources for non-active executions and Coordinator Jobs that no
+// longer have any dispatch record. Known terminal Coordinator Jobs remain available for their TTL.
+func (d *Dispatcher) SweepOrphans(ctx context.Context, records []dispatch.Record) error {
+	active := make(map[dispatch.Identity]struct{})
+	known := make(map[dispatch.Identity]struct{}, len(records))
+	for _, record := range records {
+		known[record.Identity] = struct{}{}
+		if dispatch.Active(record.Phase) {
+			active[record.Identity] = struct{}{}
+		}
+	}
+	selector := labelComponent + "!=coordinator,app.kubernetes.io/managed-by=astrasync-scheduler"
+	var failures []error
+	secrets, err := d.client.CoreV1().Secrets(d.config.Namespace).List(ctx, metav1.ListOptions{LabelSelector: selector})
+	if err != nil {
+		failures = append(failures, fmt.Errorf("list orphan JobSpec Secrets: %w", err))
+	} else {
+		for index := range secrets.Items {
+			resource := &secrets.Items[index]
+			if orphan, _ := orphanResource(resource.Labels, active); orphan {
+				if deleteErr := d.client.CoreV1().Secrets(d.config.Namespace).Delete(
+					ctx, resource.Name, metav1.DeleteOptions{}); deleteErr != nil && !apierrors.IsNotFound(deleteErr) {
+					failures = append(failures, fmt.Errorf("delete orphan Secret %s: %w", resource.Name, deleteErr))
+				}
+			}
+		}
+	}
+
+	services, err := d.client.CoreV1().Services(d.config.Namespace).List(ctx, metav1.ListOptions{LabelSelector: selector})
+	if err != nil {
+		failures = append(failures, fmt.Errorf("list orphan Worker Services: %w", err))
+	} else {
+		for index := range services.Items {
+			resource := &services.Items[index]
+			if orphan, _ := orphanResource(resource.Labels, active); orphan {
+				if deleteErr := d.client.CoreV1().Services(d.config.Namespace).Delete(
+					ctx, resource.Name, metav1.DeleteOptions{}); deleteErr != nil && !apierrors.IsNotFound(deleteErr) {
+					failures = append(failures, fmt.Errorf("delete orphan Service %s: %w", resource.Name, deleteErr))
+				}
+			}
+		}
+	}
+
+	statefulSets, err := d.client.AppsV1().StatefulSets(d.config.Namespace).List(ctx, metav1.ListOptions{LabelSelector: selector})
+	if err != nil {
+		failures = append(failures, fmt.Errorf("list orphan Worker StatefulSets: %w", err))
+	} else {
+		for index := range statefulSets.Items {
+			resource := &statefulSets.Items[index]
+			if orphan, _ := orphanResource(resource.Labels, active); orphan {
+				policy := metav1.DeletePropagationForeground
+				if deleteErr := d.client.AppsV1().StatefulSets(d.config.Namespace).Delete(
+					ctx, resource.Name, metav1.DeleteOptions{PropagationPolicy: &policy}); deleteErr != nil && !apierrors.IsNotFound(deleteErr) {
+					failures = append(failures, fmt.Errorf("delete orphan StatefulSet %s: %w", resource.Name, deleteErr))
+				}
+			}
+		}
+	}
+
+	coordinators, err := d.client.BatchV1().Jobs(d.config.Namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: labelComponent + "=coordinator,app.kubernetes.io/managed-by=astrasync-scheduler",
+	})
+	if err != nil {
+		failures = append(failures, fmt.Errorf("list orphan Coordinator Jobs: %w", err))
+	} else {
+		for index := range coordinators.Items {
+			resource := &coordinators.Items[index]
+			if orphan, _ := orphanResource(resource.Labels, known); orphan {
+				policy := metav1.DeletePropagationForeground
+				if deleteErr := d.client.BatchV1().Jobs(d.config.Namespace).Delete(
+					ctx, resource.Name, metav1.DeleteOptions{PropagationPolicy: &policy}); deleteErr != nil && !apierrors.IsNotFound(deleteErr) {
+					failures = append(failures, fmt.Errorf("delete orphan Coordinator Job %s: %w", resource.Name, deleteErr))
+				}
+			}
+		}
+	}
+	return errors.Join(failures...)
+}
+
+func orphanResource(resourceLabels map[string]string, active map[dispatch.Identity]struct{}) (bool, dispatch.Identity) {
+	identity := dispatch.Identity{JobUID: resourceLabels[labelJobUID]}
+	epoch, err := strconv.ParseInt(resourceLabels[labelEpoch], 10, 64)
+	if err != nil {
+		return false, dispatch.Identity{}
+	}
+	identity.Epoch = epoch
+	if err := identity.Validate(); err != nil {
+		return false, dispatch.Identity{}
+	}
+	if _, err := uuid.Parse(identity.JobUID); err != nil {
+		return false, dispatch.Identity{}
+	}
+	if _, exists := active[identity]; exists {
+		return false, identity
+	}
+	return true, identity
+}
+
 func (d *Dispatcher) ensureSecret(
-	ctx context.Context, base string, identity dispatch.Identity, fingerprint string, document []byte,
+	ctx context.Context,
+	base string,
+	identity dispatch.Identity,
+	fingerprint string,
+	document []byte,
+	heartbeatToken string,
 ) error {
 	name := base + "-spec"
 	existing, err := d.client.CoreV1().Secrets(d.config.Namespace).Get(ctx, name, metav1.GetOptions{})
 	if err == nil {
 		if err := verifyManaged(existing.Labels, existing.Annotations, identity, fingerprint); err != nil {
 			return scheduler.Permanent(err)
+		}
+		if string(existing.Data[heartbeatTokenKey]) != heartbeatToken {
+			return scheduler.Permanent(fmt.Errorf("Kubernetes execution heartbeat token changed"))
 		}
 		return nil
 	}
@@ -202,7 +325,9 @@ func (d *Dispatcher) ensureSecret(
 		},
 		Immutable: &immutable,
 		Type:      corev1.SecretTypeOpaque,
-		Data:      map[string][]byte{"job.yaml": document},
+		Data: map[string][]byte{
+			"job.yaml": document, heartbeatTokenKey: []byte(heartbeatToken),
+		},
 	}, metav1.CreateOptions{})
 	if apierrors.IsAlreadyExists(err) {
 		existing, err = d.client.CoreV1().Secrets(d.config.Namespace).Get(ctx, name, metav1.GetOptions{})
@@ -211,6 +336,9 @@ func (d *Dispatcher) ensureSecret(
 		}
 		if err := verifyManaged(existing.Labels, existing.Annotations, identity, fingerprint); err != nil {
 			return scheduler.Permanent(err)
+		}
+		if string(existing.Data[heartbeatTokenKey]) != heartbeatToken {
+			return scheduler.Permanent(fmt.Errorf("Kubernetes execution heartbeat token changed"))
 		}
 		return nil
 	}
@@ -402,6 +530,15 @@ func (d *Dispatcher) coordinatorJob(
 							{Name: "ASTRASYNC_COORDINATOR_MAX_IN_FLIGHT_TASKS", Value: strconv.Itoa(int(d.config.CoordinatorMaxInFlightTasks))},
 							{Name: "ASTRASYNC_COORDINATOR_MAX_IN_FLIGHT_BATCHES", Value: strconv.Itoa(int(d.config.WorkerMaxInFlightBatches))},
 							{Name: "ASTRASYNC_COORDINATOR_EXECUTION_EPOCH", Value: strconv.FormatInt(identity.Epoch, 10)},
+							{Name: "ASTRASYNC_COORDINATOR_HEARTBEAT_URL", Value: fmt.Sprintf(
+								"%s/v1/executions/%s/%d/heartbeat", d.config.HeartbeatURL, identity.JobUID, identity.Epoch,
+							)},
+							{Name: "ASTRASYNC_COORDINATOR_HEARTBEAT_TOKEN", ValueFrom: &corev1.EnvVarSource{
+								SecretKeyRef: &corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{
+									Name: base + "-spec",
+								}, Key: heartbeatTokenKey},
+							}},
+							{Name: "ASTRASYNC_COORDINATOR_HEARTBEAT_INTERVAL_MS", Value: strconv.Itoa(int(d.config.HeartbeatIntervalMillis))},
 							{Name: "JAVA_TOOL_OPTIONS", Value: d.config.CoordinatorJavaToolOptions},
 						},
 						VolumeMounts: []corev1.VolumeMount{

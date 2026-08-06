@@ -193,6 +193,115 @@ func TestReconcilerKeepsStoppingPhaseWhenStopFailsTransiently(t *testing.T) {
 	}
 }
 
+func TestReconcilerFailsExecutionAfterHeartbeatTimeout(t *testing.T) {
+	clock := time.Date(2026, 8, 5, 12, 0, 0, 0, time.UTC)
+	repository := memory.New()
+	created := createRunningJob(t, repository, clock)
+	store := newFakeStore(dispatch.Record{
+		Identity: dispatch.Identity{JobUID: created.UID, Epoch: 1},
+		Key:      created.Key, OwnerID: "scheduler-a", Phase: dispatch.PhaseRunning,
+		LastHeartbeatAt: clock.Add(-3 * time.Minute),
+	})
+	dispatcher := &fakeDispatcher{observation: Observation{State: ObservationPending}, stopResult: true}
+	reconciler := newTestReconciler(t, store, repository, dispatcher, clock)
+
+	if err := reconciler.Tick(context.Background()); err != nil {
+		t.Fatalf("heartbeat timeout reconciliation: %v", err)
+	}
+	stored, err := repository.Get(context.Background(), created.Key)
+	if err != nil {
+		t.Fatalf("get failed job: %v", err)
+	}
+	if stored.Status.State != job.StateFailed || stored.Status.Failure == nil ||
+		stored.Status.Failure.Reason != "HeartbeatTimeout" {
+		t.Fatalf("unexpected heartbeat failure: %+v", stored.Status)
+	}
+	if dispatcher.stopCalls != 1 || store.completed.Phase != dispatch.PhaseFailed {
+		t.Fatalf("stale execution was not fenced and completed: stops=%d dispatch=%+v", dispatcher.stopCalls, store.completed)
+	}
+}
+
+func TestReconcilerDoesNotFailExecutionWhenHeartbeatWinsFenceRace(t *testing.T) {
+	clock := time.Date(2026, 8, 5, 12, 0, 0, 0, time.UTC)
+	repository := memory.New()
+	created := createRunningJob(t, repository, clock)
+	store := newFakeStore(dispatch.Record{
+		Identity: dispatch.Identity{JobUID: created.UID, Epoch: 1},
+		Key:      created.Key, OwnerID: "scheduler-a", Phase: dispatch.PhaseRunning,
+		LastHeartbeatAt: clock.Add(-3 * time.Minute),
+	})
+	dispatcher := &fakeDispatcher{
+		observation: Observation{State: ObservationRunning},
+		reconcileHook: func() {
+			store.mu.Lock()
+			defer store.mu.Unlock()
+			store.record.LastHeartbeatAt = clock
+		},
+	}
+	reconciler := newTestReconciler(t, store, repository, dispatcher, clock)
+
+	if err := reconciler.Tick(context.Background()); err != nil {
+		t.Fatalf("heartbeat race reconciliation: %v", err)
+	}
+	stored, err := repository.Get(context.Background(), created.Key)
+	if err != nil {
+		t.Fatalf("get running job: %v", err)
+	}
+	if stored.Status.State == job.StateFailed || dispatcher.stopCalls != 0 ||
+		store.record.Phase == dispatch.PhaseStopping {
+		t.Fatalf("fresh heartbeat lost fencing race: job=%+v dispatch=%+v stops=%d",
+			stored.Status, store.record, dispatcher.stopCalls)
+	}
+}
+
+func TestReconcilerResumesHeartbeatFailureAfterFenceOwnerCrashes(t *testing.T) {
+	clock := time.Date(2026, 8, 5, 12, 0, 0, 0, time.UTC)
+	repository := memory.New()
+	created := createRunningJob(t, repository, clock)
+	store := newFakeStore(dispatch.Record{
+		Identity: dispatch.Identity{JobUID: created.UID, Epoch: 1},
+		Key:      created.Key, OwnerID: "scheduler-a", Phase: dispatch.PhaseStopping,
+		LastError: "Coordinator remained active without a heartbeat", UpdatedAt: clock.Add(-time.Minute),
+	})
+	dispatcher := &fakeDispatcher{stopResult: true}
+	reconciler := newTestReconciler(t, store, repository, dispatcher, clock)
+
+	if err := reconciler.Tick(context.Background()); err != nil {
+		t.Fatalf("resume fenced heartbeat failure: %v", err)
+	}
+	stored, err := repository.Get(context.Background(), created.Key)
+	if err != nil {
+		t.Fatalf("get failed job: %v", err)
+	}
+	if stored.Status.State != job.StateFailed || stored.Status.Failure == nil ||
+		stored.Status.Failure.Reason != "HeartbeatTimeout" || dispatcher.reconcileCalls != 0 ||
+		dispatcher.stopCalls != 1 || store.completed.Phase != dispatch.PhaseFailed {
+		t.Fatalf("fenced failure was not resumed: job=%+v dispatch=%+v reconciles=%d stops=%d",
+			stored.Status, store.completed, dispatcher.reconcileCalls, dispatcher.stopCalls)
+	}
+}
+
+func TestReconcilerDoesNotForgeHeartbeatFromKubernetesObservation(t *testing.T) {
+	clock := time.Date(2026, 8, 5, 12, 0, 0, 0, time.UTC)
+	heartbeat := clock.Add(-time.Minute)
+	repository := memory.New()
+	created := createRunningJob(t, repository, clock)
+	store := newFakeStore(dispatch.Record{
+		Identity: dispatch.Identity{JobUID: created.UID, Epoch: 1},
+		Key:      created.Key, OwnerID: "scheduler-a", Phase: dispatch.PhaseClaimed,
+		LastHeartbeatAt: heartbeat,
+	})
+	dispatcher := &fakeDispatcher{observation: Observation{State: ObservationRunning}}
+	reconciler := newTestReconciler(t, store, repository, dispatcher, clock)
+
+	if err := reconciler.Tick(context.Background()); err != nil {
+		t.Fatalf("running reconciliation: %v", err)
+	}
+	if !store.record.LastHeartbeatAt.Equal(heartbeat) || store.record.Phase != dispatch.PhaseRunning {
+		t.Fatalf("Kubernetes observation changed execution heartbeat: %+v", store.record)
+	}
+}
+
 func createRunningJob(t *testing.T, repository *memory.Repository, now time.Time) job.Job {
 	t.Helper()
 	spec := job.Spec{
@@ -234,7 +343,8 @@ func newTestReconciler(
 	reconciler, err := New(
 		Config{
 			OwnerID: "scheduler-a", MaximumActive: 2,
-			LeaseDuration: 10 * time.Minute, ReconcileEvery: time.Minute, OperationTimeout: time.Second,
+			LeaseDuration: 10 * time.Minute, HeartbeatTimeout: 2 * time.Minute,
+			ReconcileEvery: time.Minute, OperationTimeout: time.Second,
 		},
 		store,
 		repository,
@@ -262,11 +372,17 @@ func newFakeStore(record dispatch.Record) *fakeStore {
 func (s *fakeStore) Migrate(context.Context) error { return nil }
 
 func (s *fakeStore) Claim(
-	_ context.Context, owner string, _ int, _ time.Duration, _ time.Time,
+	_ context.Context, owner string, _ int, _ time.Duration, _ time.Duration, _ time.Time,
 ) ([]dispatch.Record, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.record.OwnerID = owner
+	return []dispatch.Record{s.record}, nil
+}
+
+func (s *fakeStore) List(context.Context) ([]dispatch.Record, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return []dispatch.Record{s.record}, nil
 }
 
@@ -283,6 +399,49 @@ func (s *fakeStore) Update(
 	s.record.LastError = lastError
 	s.record.LeaseExpiresAt = now.Add(time.Hour)
 	return nil
+}
+
+func (s *fakeStore) RecordHeartbeat(
+	_ context.Context, identity dispatch.Identity, token string, now time.Time,
+) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.record.Identity != identity || s.record.HeartbeatToken != token {
+		return dispatch.ErrLeaseLost
+	}
+	s.record.LastHeartbeatAt = now
+	return nil
+}
+
+func (s *fakeStore) FenceExpiredHeartbeat(
+	_ context.Context,
+	identity dispatch.Identity,
+	owner string,
+	lastError string,
+	timeout time.Duration,
+	leaseDuration time.Duration,
+	now time.Time,
+) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.record.Identity != identity || s.record.OwnerID != owner ||
+		!s.record.LeaseExpiresAt.After(now) || !heartbeatFenceable(s.record.Phase) {
+		return false, nil
+	}
+	if !s.record.LastHeartbeatAt.IsZero() && s.record.LastHeartbeatAt.After(now.Add(-timeout)) {
+		return false, nil
+	}
+	s.record.Phase = dispatch.PhaseStopping
+	s.record.LastError = lastError
+	s.record.LeaseExpiresAt = now.Add(leaseDuration)
+	s.record.UpdatedAt = now
+	return true, nil
+}
+
+func heartbeatFenceable(phase dispatch.Phase) bool {
+	return phase == dispatch.PhaseClaimed ||
+		phase == dispatch.PhaseStarting ||
+		phase == dispatch.PhaseRunning
 }
 
 func (s *fakeStore) Complete(
@@ -306,12 +465,16 @@ type fakeDispatcher struct {
 	err            error
 	stopResult     bool
 	stopErr        error
+	reconcileHook  func()
 	reconcileCalls int
 	stopCalls      int
 }
 
-func (d *fakeDispatcher) Reconcile(context.Context, job.Job, int64) (Observation, error) {
+func (d *fakeDispatcher) Reconcile(context.Context, job.Job, dispatch.Record) (Observation, error) {
 	d.reconcileCalls++
+	if d.reconcileHook != nil {
+		d.reconcileHook()
+	}
 	return d.observation, d.err
 }
 
@@ -321,5 +484,9 @@ func (d *fakeDispatcher) Stop(context.Context, dispatch.Identity) (bool, error) 
 }
 
 func (d *fakeDispatcher) Cleanup(context.Context, dispatch.Identity) error {
+	return nil
+}
+
+func (d *fakeDispatcher) SweepOrphans(context.Context, []dispatch.Record) error {
 	return nil
 }

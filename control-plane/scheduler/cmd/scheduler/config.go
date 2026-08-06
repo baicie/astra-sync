@@ -48,6 +48,10 @@ func loadConfig(getenv func(string) string) (applicationConfig, error) {
 	if err != nil {
 		return applicationConfig{}, err
 	}
+	heartbeatTimeout, err := duration(getenv, "SCHEDULER_HEARTBEAT_TIMEOUT", 2*time.Minute)
+	if err != nil {
+		return applicationConfig{}, err
+	}
 	reconcileEvery, err := duration(getenv, "SCHEDULER_RECONCILE_INTERVAL", 5*time.Second)
 	if err != nil {
 		return applicationConfig{}, err
@@ -67,6 +71,17 @@ func loadConfig(getenv func(string) string) (applicationConfig, error) {
 	workerImage, err := required(getenv, "SCHEDULER_WORKER_IMAGE")
 	if err != nil {
 		return applicationConfig{}, err
+	}
+	heartbeatURL, err := required(getenv, "SCHEDULER_HEARTBEAT_URL")
+	if err != nil {
+		return applicationConfig{}, err
+	}
+	heartbeatInterval, err := positiveInt32(getenv, "SCHEDULER_HEARTBEAT_INTERVAL_MS", 10000)
+	if err != nil {
+		return applicationConfig{}, err
+	}
+	if heartbeatTimeout <= 2*time.Duration(heartbeatInterval)*time.Millisecond {
+		return applicationConfig{}, fmt.Errorf("SCHEDULER_HEARTBEAT_TIMEOUT must exceed two heartbeat intervals")
 	}
 	pullPolicy, err := imagePullPolicy(valueOrDefault(getenv("SCHEDULER_IMAGE_PULL_POLICY"), "IfNotPresent"))
 	if err != nil {
@@ -145,13 +160,15 @@ func loadConfig(getenv func(string) string) (applicationConfig, error) {
 		healthAddress: valueOrDefault(getenv("HEALTH_LISTEN_ADDRESS"), ":8082"),
 		scheduler: schedulerinternal.Config{
 			OwnerID: ownerID, MaximumActive: maximumActive, LeaseDuration: leaseDuration,
-			ReconcileEvery: reconcileEvery, OperationTimeout: operationTimeout,
+			HeartbeatTimeout: heartbeatTimeout, ReconcileEvery: reconcileEvery, OperationTimeout: operationTimeout,
 		},
 		dispatcher: dispatchkube.Config{
 			Namespace:                   namespace,
 			ServiceAccount:              valueOrDefault(getenv("SCHEDULER_EXECUTION_SERVICE_ACCOUNT"), "default"),
 			CoordinatorImage:            coordinatorImage,
 			WorkerImage:                 workerImage,
+			HeartbeatURL:                heartbeatURL,
+			HeartbeatIntervalMillis:     heartbeatInterval,
 			ImagePullPolicy:             pullPolicy,
 			ProgressClaim:               progressClaim,
 			WorkerReplicas:              workerReplicas,

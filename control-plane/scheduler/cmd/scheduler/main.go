@@ -9,15 +9,19 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
+	"github.com/google/uuid"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 
 	jobpostgres "io.astrasync/control-plane/job/postgres"
+	"io.astrasync/control-plane/scheduler/internal/dispatch"
 	dispatchpostgres "io.astrasync/control-plane/scheduler/internal/dispatch/postgres"
 	dispatchkube "io.astrasync/control-plane/scheduler/internal/kubernetes"
 	schedulerinternal "io.astrasync/control-plane/scheduler/internal/scheduler"
@@ -81,7 +85,7 @@ func run(ctx context.Context, configuration applicationConfig, logger *slog.Logg
 
 	healthServer := &http.Server{
 		Addr:              configuration.healthAddress,
-		Handler:           healthHandler(db, kubernetesClient),
+		Handler:           applicationHandler(db, kubernetesClient, dispatches, time.Now),
 		ReadHeaderTimeout: 5 * time.Second,
 		IdleTimeout:       30 * time.Second,
 	}
@@ -130,7 +134,16 @@ type databasePinger interface {
 	PingContext(context.Context) error
 }
 
-func healthHandler(database databasePinger, client kubernetes.Interface) http.Handler {
+type heartbeatRecorder interface {
+	RecordHeartbeat(context.Context, dispatch.Identity, string, time.Time) error
+}
+
+func applicationHandler(
+	database databasePinger,
+	client kubernetes.Interface,
+	heartbeats heartbeatRecorder,
+	clock func() time.Time,
+) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(response http.ResponseWriter, _ *http.Request) {
 		response.Header().Set("Content-Type", "text/plain; charset=utf-8")
@@ -149,6 +162,41 @@ func healthHandler(database databasePinger, client kubernetes.Interface) http.Ha
 		}
 		response.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		_, _ = response.Write([]byte("ready\n"))
+	})
+	mux.HandleFunc("POST /v1/executions/{jobUID}/{epoch}/heartbeat", func(
+		response http.ResponseWriter, request *http.Request,
+	) {
+		jobUID := request.PathValue("jobUID")
+		if _, err := uuid.Parse(jobUID); err != nil {
+			http.Error(response, "invalid execution identity", http.StatusBadRequest)
+			return
+		}
+		epoch, err := strconv.ParseInt(request.PathValue("epoch"), 10, 64)
+		identity := dispatch.Identity{JobUID: jobUID, Epoch: epoch}
+		if err != nil || identity.Validate() != nil {
+			http.Error(response, "invalid execution identity", http.StatusBadRequest)
+			return
+		}
+		token, found := strings.CutPrefix(request.Header.Get("Authorization"), "Bearer ")
+		if !found || token == "" {
+			http.Error(response, "heartbeat token is required", http.StatusUnauthorized)
+			return
+		}
+		if _, err := uuid.Parse(token); err != nil {
+			http.Error(response, "heartbeat token is invalid", http.StatusUnauthorized)
+			return
+		}
+		heartbeatContext, cancel := context.WithTimeout(request.Context(), 2*time.Second)
+		defer cancel()
+		if err := heartbeats.RecordHeartbeat(heartbeatContext, identity, token, clock().UTC()); err != nil {
+			if errors.Is(err, dispatch.ErrLeaseLost) {
+				http.Error(response, "execution heartbeat was rejected", http.StatusNotFound)
+				return
+			}
+			http.Error(response, "heartbeat persistence is unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		response.WriteHeader(http.StatusNoContent)
 	})
 	return mux
 }

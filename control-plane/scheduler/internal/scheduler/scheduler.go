@@ -28,9 +28,10 @@ type Observation struct {
 }
 
 type ExecutionDispatcher interface {
-	Reconcile(context.Context, job.Job, int64) (Observation, error)
+	Reconcile(context.Context, job.Job, dispatch.Record) (Observation, error)
 	Stop(context.Context, dispatch.Identity) (bool, error)
 	Cleanup(context.Context, dispatch.Identity) error
+	SweepOrphans(context.Context, []dispatch.Record) error
 }
 
 type JobRepository interface {
@@ -64,6 +65,7 @@ type Reconciler struct {
 	ownerID          string
 	maximumActive    int
 	leaseDuration    time.Duration
+	heartbeatTimeout time.Duration
 	reconcileEvery   time.Duration
 	operationTimeout time.Duration
 	clock            func() time.Time
@@ -74,6 +76,7 @@ type Config struct {
 	OwnerID          string
 	MaximumActive    int
 	LeaseDuration    time.Duration
+	HeartbeatTimeout time.Duration
 	ReconcileEvery   time.Duration
 	OperationTimeout time.Duration
 }
@@ -92,7 +95,8 @@ func New(
 	if config.MaximumActive <= 0 {
 		return nil, fmt.Errorf("scheduler maximum active jobs must be positive")
 	}
-	if config.LeaseDuration <= 0 || config.ReconcileEvery <= 0 || config.ReconcileEvery >= config.LeaseDuration {
+	if config.LeaseDuration <= 0 || config.HeartbeatTimeout <= 0 || config.ReconcileEvery <= 0 ||
+		config.ReconcileEvery >= config.LeaseDuration || config.HeartbeatTimeout <= config.ReconcileEvery {
 		return nil, fmt.Errorf("scheduler intervals must be positive and reconciliation must be shorter than the lease")
 	}
 	if config.OperationTimeout <= 0 || config.OperationTimeout >= config.LeaseDuration {
@@ -111,6 +115,7 @@ func New(
 		ownerID:          config.OwnerID,
 		maximumActive:    config.MaximumActive,
 		leaseDuration:    config.LeaseDuration,
+		heartbeatTimeout: config.HeartbeatTimeout,
 		reconcileEvery:   config.ReconcileEvery,
 		operationTimeout: config.OperationTimeout,
 		clock:            clock,
@@ -140,7 +145,7 @@ func (r *Reconciler) Tick(ctx context.Context) error {
 	claimContext, cancelClaim := context.WithTimeout(ctx, r.operationTimeout)
 	defer cancelClaim()
 	records, err := r.dispatches.Claim(
-		claimContext, r.ownerID, r.maximumActive, r.leaseDuration, r.clock().UTC())
+		claimContext, r.ownerID, r.maximumActive, r.leaseDuration, r.heartbeatTimeout, r.clock().UTC())
 	if err != nil {
 		return err
 	}
@@ -170,6 +175,16 @@ func (r *Reconciler) Tick(ctx context.Context) error {
 	for reconcileErr := range errorsChannel {
 		failures = append(failures, reconcileErr)
 	}
+	known, listErr := r.dispatches.List(ctx)
+	if listErr != nil {
+		failures = append(failures, listErr)
+	} else {
+		sweepContext, cancelSweep := context.WithTimeout(ctx, r.operationTimeout)
+		if sweepErr := r.dispatcher.SweepOrphans(sweepContext, known); sweepErr != nil {
+			failures = append(failures, fmt.Errorf("sweep execution orphans: %w", sweepErr))
+		}
+		cancelSweep()
+	}
 	return errors.Join(failures...)
 }
 
@@ -191,7 +206,15 @@ func (r *Reconciler) reconcile(ctx context.Context, record dispatch.Record) erro
 	}
 
 	if terminalPhase, terminal := phaseForTerminalState(current.Status.State); terminal {
-		if cleanupErr := r.dispatcher.Cleanup(ctx, record.Identity); cleanupErr != nil {
+		if record.Phase == dispatch.PhaseStopping {
+			stopped, stopErr := r.dispatcher.Stop(ctx, record.Identity)
+			if stopErr != nil {
+				return r.recordTransientError(ctx, record, stopErr)
+			}
+			if !stopped {
+				return r.keepAlive(ctx, record, dispatch.PhaseStopping, "")
+			}
+		} else if cleanupErr := r.dispatcher.Cleanup(ctx, record.Identity); cleanupErr != nil {
 			return r.recordTransientError(ctx, record, cleanupErr)
 		}
 		return r.dispatches.Complete(
@@ -208,13 +231,23 @@ func (r *Reconciler) reconcile(ctx context.Context, record dispatch.Record) erro
 			current.Status.State,
 		))
 	}
+	if record.Phase == dispatch.PhaseStopping {
+		return r.finishHeartbeatFailure(ctx, record)
+	}
 
-	if err := r.keepAlive(ctx, record, dispatch.PhaseStarting, ""); err != nil {
+	workingPhase := record.Phase
+	if workingPhase == dispatch.PhaseClaimed {
+		workingPhase = dispatch.PhaseStarting
+	}
+	if err := r.keepAlive(ctx, record, workingPhase, ""); err != nil {
 		return err
 	}
-	record.Phase = dispatch.PhaseStarting
-	observation, err := r.dispatcher.Reconcile(ctx, current, record.Identity.Epoch)
+	record.Phase = workingPhase
+	observation, err := r.dispatcher.Reconcile(ctx, current, record)
 	if err != nil {
+		if r.heartbeatExpired(record) {
+			return r.failHeartbeat(ctx, record, err.Error())
+		}
 		var permanent *PermanentError
 		if errors.As(err, &permanent) {
 			return r.failPermanently(ctx, record, "DispatchRejected", permanent.Error())
@@ -223,8 +256,14 @@ func (r *Reconciler) reconcile(ctx context.Context, record dispatch.Record) erro
 	}
 	switch observation.State {
 	case ObservationPending:
-		return r.keepAlive(ctx, record, dispatch.PhaseStarting, "")
+		if r.heartbeatExpired(record) {
+			return r.failHeartbeat(ctx, record, "execution did not report a healthy Coordinator")
+		}
+		return r.keepAlive(ctx, record, record.Phase, "")
 	case ObservationRunning:
+		if r.heartbeatExpired(record) {
+			return r.failHeartbeat(ctx, record, "Coordinator remained active without a heartbeat")
+		}
 		if err := r.transition(ctx, record, job.StateRunning, nil); err != nil {
 			return err
 		}
@@ -244,6 +283,63 @@ func (r *Reconciler) reconcile(ctx context.Context, record dispatch.Record) erro
 	default:
 		return r.recordTransientError(ctx, record, fmt.Errorf("unknown dispatch observation %q", observation.State))
 	}
+}
+
+func (r *Reconciler) heartbeatExpired(record dispatch.Record) bool {
+	return !record.LastHeartbeatAt.IsZero() &&
+		!record.LastHeartbeatAt.After(r.clock().UTC().Add(-r.heartbeatTimeout))
+}
+
+func (r *Reconciler) failHeartbeat(
+	ctx context.Context, record dispatch.Record, rootCause string,
+) error {
+	now := r.clock().UTC()
+	fenced, err := r.dispatches.FenceExpiredHeartbeat(
+		ctx,
+		record.Identity,
+		r.ownerID,
+		rootCause,
+		r.heartbeatTimeout,
+		r.leaseDuration,
+		now,
+	)
+	if err != nil {
+		return err
+	}
+	if !fenced {
+		return nil
+	}
+	record.Phase = dispatch.PhaseStopping
+	record.LastError = rootCause
+	record.UpdatedAt = now
+	return r.finishHeartbeatFailure(ctx, record)
+}
+
+func (r *Reconciler) finishHeartbeatFailure(ctx context.Context, record dispatch.Record) error {
+	rootCause := record.LastError
+	if rootCause == "" {
+		rootCause = "execution heartbeat timed out before failure cleanup completed"
+	}
+	timestamp := record.UpdatedAt
+	if timestamp.IsZero() {
+		timestamp = r.clock().UTC()
+	}
+	failure := &job.Failure{
+		Reason: "HeartbeatTimeout", RootCause: rootCause,
+		Timestamp: timestamp, Host: r.ownerID,
+	}
+	if err := r.transition(ctx, record, job.StateFailed, failure); err != nil {
+		return err
+	}
+	stopped, err := r.dispatcher.Stop(ctx, record.Identity)
+	if err != nil {
+		return r.recordTransientError(ctx, record, err)
+	}
+	if !stopped {
+		return r.keepAlive(ctx, record, dispatch.PhaseStopping, rootCause)
+	}
+	return r.dispatches.Complete(
+		ctx, record.Identity, r.ownerID, dispatch.PhaseFailed, rootCause, r.clock().UTC())
 }
 
 func (r *Reconciler) cancel(ctx context.Context, record dispatch.Record) error {

@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
+
 	"io.astrasync/control-plane/scheduler/internal/dispatch"
 )
 
@@ -38,6 +40,7 @@ func (s *Store) Claim(
 	ownerID string,
 	maxActive int,
 	leaseDuration time.Duration,
+	heartbeatTimeout time.Duration,
 	now time.Time,
 ) (_ []dispatch.Record, resultErr error) {
 	if ownerID == "" {
@@ -48,6 +51,9 @@ func (s *Store) Claim(
 	}
 	if leaseDuration <= 0 {
 		return nil, fmt.Errorf("lease duration must be positive")
+	}
+	if heartbeatTimeout <= 0 {
+		return nil, fmt.Errorf("heartbeat timeout must be positive")
 	}
 	now = now.UTC()
 	leaseExpiresAt := now.Add(leaseDuration)
@@ -68,6 +74,7 @@ func (s *Store) Claim(
 		`UPDATE astrasync_scheduler_dispatches
             SET lease_expires_at = $2, updated_at = $3
           WHERE owner_id = $1
+		    AND lease_expires_at > $3
             AND phase IN ('CLAIMED', 'STARTING', 'RUNNING', 'STOPPING')`,
 		ownerID,
 		leaseExpiresAt,
@@ -82,11 +89,16 @@ func (s *Store) Claim(
                 lease_expires_at = $2,
                 attempt = attempt + 1,
                 updated_at = $3
-          WHERE phase IN ('CLAIMED', 'STARTING', 'RUNNING', 'STOPPING')
-            AND lease_expires_at <= $3`,
+		  WHERE phase IN ('CLAIMED', 'STARTING', 'RUNNING', 'STOPPING')
+			AND (lease_expires_at <= $3
+				 OR (owner_id <> $1
+				     AND phase IN ('CLAIMED', 'STARTING', 'RUNNING')
+				     AND last_heartbeat_at IS NOT NULL
+				     AND last_heartbeat_at <= $4))`,
 		ownerID,
 		leaseExpiresAt,
 		now,
+		now.Add(-heartbeatTimeout),
 	); err != nil {
 		return nil, fmt.Errorf("take over expired dispatch leases: %w", err)
 	}
@@ -104,16 +116,17 @@ func (s *Store) Claim(
 		if _, err := tx.ExecContext(
 			ctx,
 			`INSERT INTO astrasync_scheduler_dispatches
-                (job_uid, execution_epoch, namespace, name, owner_id, phase,
-                 lease_expires_at, attempt, last_error, created_at, updated_at)
+				 (job_uid, execution_epoch, namespace, name, owner_id, phase,
+				  lease_expires_at, last_heartbeat_at, attempt, last_error, created_at, updated_at)
              SELECT jobs.uid,
                     (jobs.status->>'epoch')::bigint,
                     jobs.namespace,
                     jobs.name,
-                    $1,
-                    'CLAIMED',
-                    $2,
-                    1,
+					 $1,
+					 'CLAIMED',
+					 $2,
+					 $3,
+					 1,
                     '',
                     $3,
                     $3
@@ -141,7 +154,8 @@ func (s *Store) Claim(
 	rows, err := tx.QueryContext(
 		ctx,
 		`SELECT job_uid::text, execution_epoch, namespace, name, owner_id, phase,
-                lease_expires_at, attempt, last_error, created_at, updated_at
+				lease_expires_at, last_heartbeat_at, heartbeat_token::text,
+				attempt, last_error, created_at, updated_at
            FROM astrasync_scheduler_dispatches
           WHERE owner_id = $1
             AND phase IN ('CLAIMED', 'STARTING', 'RUNNING', 'STOPPING')
@@ -167,6 +181,33 @@ func (s *Store) Claim(
 		return nil, fmt.Errorf("commit dispatch claim: %w", err)
 	}
 	return claimed, nil
+}
+
+func (s *Store) List(ctx context.Context) ([]dispatch.Record, error) {
+	rows, err := s.db.QueryContext(
+		ctx,
+		`SELECT job_uid::text, execution_epoch, namespace, name, owner_id, phase,
+		        lease_expires_at, last_heartbeat_at, heartbeat_token::text,
+		        attempt, last_error, created_at, updated_at
+		   FROM astrasync_scheduler_dispatches
+		  ORDER BY created_at, namespace, name, execution_epoch`,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list dispatches: %w", err)
+	}
+	defer rows.Close()
+	result := make([]dispatch.Record, 0)
+	for rows.Next() {
+		record, scanErr := scanAnyRecord(rows)
+		if scanErr != nil {
+			return nil, fmt.Errorf("scan listed dispatch: %w", scanErr)
+		}
+		result = append(result, record)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate listed dispatches: %w", err)
+	}
+	return result, nil
 }
 
 func (s *Store) Update(
@@ -206,6 +247,85 @@ func (s *Store) Update(
 		return fmt.Errorf("update dispatch: %w", err)
 	}
 	return requireAffected(result)
+}
+
+func (s *Store) RecordHeartbeat(
+	ctx context.Context,
+	identity dispatch.Identity,
+	token string,
+	now time.Time,
+) error {
+	if err := identity.Validate(); err != nil {
+		return err
+	}
+	if token == "" {
+		return fmt.Errorf("heartbeat update is invalid")
+	}
+	if _, err := uuid.Parse(token); err != nil {
+		return fmt.Errorf("heartbeat token must be a UUID")
+	}
+	now = now.UTC()
+	result, err := s.db.ExecContext(
+		ctx,
+		`UPDATE astrasync_scheduler_dispatches
+		    SET last_heartbeat_at = $4
+		  WHERE job_uid = $1::uuid
+		    AND execution_epoch = $2
+		    AND heartbeat_token = $3::uuid
+		    AND phase IN ('CLAIMED', 'STARTING', 'RUNNING')`,
+		identity.JobUID,
+		identity.Epoch,
+		token,
+		now,
+	)
+	if err != nil {
+		return fmt.Errorf("record dispatch heartbeat: %w", err)
+	}
+	return requireAffected(result)
+}
+
+func (s *Store) FenceExpiredHeartbeat(
+	ctx context.Context,
+	identity dispatch.Identity,
+	ownerID string,
+	lastError string,
+	heartbeatTimeout time.Duration,
+	leaseDuration time.Duration,
+	now time.Time,
+) (bool, error) {
+	if err := identity.Validate(); err != nil {
+		return false, err
+	}
+	if ownerID == "" || heartbeatTimeout <= 0 || leaseDuration <= 0 {
+		return false, fmt.Errorf("heartbeat timeout fence is invalid")
+	}
+	now = now.UTC()
+	result, err := s.db.ExecContext(
+		ctx,
+		`UPDATE astrasync_scheduler_dispatches
+		    SET phase = 'STOPPING', last_error = $4, lease_expires_at = $5, updated_at = $6
+		  WHERE job_uid = $1::uuid
+		    AND execution_epoch = $2
+		    AND owner_id = $3
+		    AND lease_expires_at > $6
+		    AND phase IN ('CLAIMED', 'STARTING', 'RUNNING')
+		    AND COALESCE(last_heartbeat_at <= $7, TRUE)`,
+		identity.JobUID,
+		identity.Epoch,
+		ownerID,
+		lastError,
+		now.Add(leaseDuration),
+		now,
+		now.Add(-heartbeatTimeout),
+	)
+	if err != nil {
+		return false, fmt.Errorf("fence expired dispatch heartbeat: %w", err)
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("read heartbeat fence update count: %w", err)
+	}
+	return count == 1, nil
 }
 
 func (s *Store) Complete(
@@ -261,7 +381,19 @@ type scanner interface {
 }
 
 func scanRecord(source scanner) (dispatch.Record, error) {
+	record, err := scanAnyRecord(source)
+	if err != nil {
+		return dispatch.Record{}, err
+	}
+	if !dispatch.Active(record.Phase) {
+		return dispatch.Record{}, fmt.Errorf("claimed dispatch has invalid phase %q", record.Phase)
+	}
+	return record, nil
+}
+
+func scanAnyRecord(source scanner) (dispatch.Record, error) {
 	var record dispatch.Record
+	var heartbeat sql.NullTime
 	err := source.Scan(
 		&record.Identity.JobUID,
 		&record.Identity.Epoch,
@@ -270,6 +402,8 @@ func scanRecord(source scanner) (dispatch.Record, error) {
 		&record.OwnerID,
 		&record.Phase,
 		&record.LeaseExpiresAt,
+		&heartbeat,
+		&record.HeartbeatToken,
 		&record.Attempt,
 		&record.LastError,
 		&record.CreatedAt,
@@ -284,8 +418,11 @@ func scanRecord(source scanner) (dispatch.Record, error) {
 	if err := record.Key.Validate(); err != nil {
 		return dispatch.Record{}, err
 	}
-	if !dispatch.Active(record.Phase) {
-		return dispatch.Record{}, fmt.Errorf("claimed dispatch has invalid phase %q", record.Phase)
+	if _, err := uuid.Parse(record.HeartbeatToken); err != nil {
+		return dispatch.Record{}, fmt.Errorf("dispatch heartbeat token must be a UUID")
+	}
+	if heartbeat.Valid {
+		record.LastHeartbeatAt = heartbeat.Time
 	}
 	return record, nil
 }
