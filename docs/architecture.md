@@ -120,3 +120,5 @@ ADR-026 through ADR-028 define the checkpoint, sink-commit, and native CDC consi
 ADR-029 defines the durable desired-state Job lifecycle and epoch-fenced Phase 4 control-plane
 foundation. ADR-030 defines durable Scheduler capacity, lease takeover, deterministic Kubernetes
 Coordinator/Worker dispatch, and control-plane epoch propagation into checkpoint execution.
+ADR-031 completes Controller convergence and execution liveness. ADR-032 establishes the bounded
+Arrow batch ownership, scalar mapping, IPC, and benchmark contracts that begin Phase 5.

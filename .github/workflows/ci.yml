@@ -71,6 +71,12 @@ jobs:
       - name: Check Java formatting
         run: mvn -B -ntp spotless:check
 
+      - name: Run Arrow benchmark smoke
+        run: >-
+          java --add-opens=java.base/java.nio=ALL-UNNAMED
+          -jar tests/benchmark/target/astrasync-benchmarks.jar
+          ArrowBatchBenchmark -wi 0 -i 1 -f 1 -r 100ms -p rowCount=128
+
   go:
     name: Go checks
     needs: changes
