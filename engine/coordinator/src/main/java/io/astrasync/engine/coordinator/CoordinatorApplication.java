@@ -50,8 +50,15 @@ public final class CoordinatorApplication {
         }
     }
 
+    @SuppressWarnings("try")
     public static ResumableRunResult run(CoordinatorConfiguration configuration) {
         CoordinatorConfiguration checked = Objects.requireNonNull(configuration, "configuration must not be null");
+        try (ExecutionHeartbeat ignored = ExecutionHeartbeat.start(checked.heartbeat())) {
+            return runChecked(checked);
+        }
+    }
+
+    private static ResumableRunResult runChecked(CoordinatorConfiguration checked) {
         JobSpec jobSpec = readJobSpec(checked);
         CompiledJobPlan plan =
                 new JobCompiler(ConnectorRegistry.of(new JdbcConnectorFactory())).compileCheckpointed(jobSpec);

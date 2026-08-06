@@ -151,6 +151,7 @@ jobs:
           go-version: '1.22.x'
           cache-dependency-path: |
             control-plane/go.sum
+            control-plane/controller/go.sum
             control-plane/scheduler/go.sum
 
       - name: Run PostgreSQL lifecycle integration
@@ -163,7 +164,13 @@ jobs:
         working-directory: control-plane/scheduler
         env:
           ASTRASYNC_TEST_POSTGRES_URL: postgres://astra:astra@127.0.0.1:5432/astrasync?sslmode=disable
-        run: go test -v -count=1 ./internal/dispatch/postgres -run '^TestStoreSerializesCapacityAndTakesOverOnlyTheExpiredEpoch$'
+        run: go test -v -count=1 ./internal/dispatch/postgres -run '^TestStoreSerializesCapacityAndFencesLeaseAndHeartbeatTakeover$'
+
+      - name: Run PostgreSQL Controller convergence integration
+        working-directory: control-plane/controller
+        env:
+          ASTRASYNC_TEST_POSTGRES_URL: postgres://astra:astra@127.0.0.1:5432/astrasync?sslmode=disable
+        run: go test -v -count=1 ./internal/controller -run '^TestReconcilerConvergesSyncJobWithPostgres$'
 
   protocols:
     name: Protocol and YAML validation

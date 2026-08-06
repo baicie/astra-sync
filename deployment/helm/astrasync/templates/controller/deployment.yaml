@@ -48,6 +48,8 @@ spec:
           resources:
             {{- toYaml .Values.controller.resources | nindent 12 }}
           env:
+            - name: DATABASE_URL
+              value: {{ include "astrasync.postgresql.url" . | quote }}
             - name: ETCD_ENDPOINTS
               value: {{ include "astrasync.etcd.endpoints" . }}
             - name: POD_NAME
@@ -63,4 +65,5 @@ spec:
             - --leader-elect-lease-duration={{ .Values.controller.leaderElection.leaseDuration }}
             - --leader-elect-renew-deadline={{ .Values.controller.leaderElection.renewDeadline }}
             - --leader-elect-retry-period={{ .Values.controller.leaderElection.retryPeriod }}
+            - --status-refresh-interval={{ .Values.controller.config.statusRefreshInterval }}
 {{- end }}

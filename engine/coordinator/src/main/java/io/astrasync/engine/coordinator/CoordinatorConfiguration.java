@@ -1,5 +1,6 @@
 package io.astrasync.engine.coordinator;
 
+import java.net.URI;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -7,6 +8,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 
 /** Validated process configuration for the operational Coordinator entry point. */
@@ -17,7 +19,8 @@ public record CoordinatorConfiguration(
         Duration workerTimeout,
         int maxInFlightTasks,
         int maxInFlightBatches,
-        long executionEpoch) {
+        long executionEpoch,
+        Optional<ExecutionHeartbeatConfiguration> heartbeat) {
     public static final int DEFAULT_WORKER_TIMEOUT_MILLIS = 30_000;
     public static final int DEFAULT_MAX_IN_FLIGHT_TASKS = 1;
     public static final int DEFAULT_MAX_IN_FLIGHT_BATCHES = 1;
@@ -29,7 +32,34 @@ public record CoordinatorConfiguration(
             Duration workerTimeout,
             int maxInFlightTasks,
             int maxInFlightBatches) {
-        this(jobSpecPath, progressDirectory, workers, workerTimeout, maxInFlightTasks, maxInFlightBatches, 0);
+        this(
+                jobSpecPath,
+                progressDirectory,
+                workers,
+                workerTimeout,
+                maxInFlightTasks,
+                maxInFlightBatches,
+                0,
+                Optional.empty());
+    }
+
+    public CoordinatorConfiguration(
+            Path jobSpecPath,
+            Path progressDirectory,
+            List<WorkerEndpoint> workers,
+            Duration workerTimeout,
+            int maxInFlightTasks,
+            int maxInFlightBatches,
+            long executionEpoch) {
+        this(
+                jobSpecPath,
+                progressDirectory,
+                workers,
+                workerTimeout,
+                maxInFlightTasks,
+                maxInFlightBatches,
+                executionEpoch,
+                Optional.empty());
     }
 
     public CoordinatorConfiguration {
@@ -63,6 +93,7 @@ public record CoordinatorConfiguration(
         if (executionEpoch < 0) {
             throw new IllegalArgumentException("executionEpoch must not be negative");
         }
+        heartbeat = Objects.requireNonNull(heartbeat, "heartbeat must not be null");
     }
 
     public static CoordinatorConfiguration fromEnvironment(Map<String, String> environment) {
@@ -75,7 +106,22 @@ public record CoordinatorConfiguration(
                         integer(environment, "ASTRASYNC_COORDINATOR_WORKER_TIMEOUT_MS", DEFAULT_WORKER_TIMEOUT_MILLIS)),
                 integer(environment, "ASTRASYNC_COORDINATOR_MAX_IN_FLIGHT_TASKS", DEFAULT_MAX_IN_FLIGHT_TASKS),
                 integer(environment, "ASTRASYNC_COORDINATOR_MAX_IN_FLIGHT_BATCHES", DEFAULT_MAX_IN_FLIGHT_BATCHES),
-                optionalPositiveLong(environment, "ASTRASYNC_COORDINATOR_EXECUTION_EPOCH"));
+                optionalPositiveLong(environment, "ASTRASYNC_COORDINATOR_EXECUTION_EPOCH"),
+                heartbeat(environment));
+    }
+
+    private static Optional<ExecutionHeartbeatConfiguration> heartbeat(Map<String, String> environment) {
+        String endpoint = environment.get("ASTRASYNC_COORDINATOR_HEARTBEAT_URL");
+        String token = environment.get("ASTRASYNC_COORDINATOR_HEARTBEAT_TOKEN");
+        if (endpoint == null && token == null) {
+            return Optional.empty();
+        }
+        if (endpoint == null || endpoint.isBlank() || token == null || token.isBlank()) {
+            throw new IllegalArgumentException("heartbeat URL and token must be configured together");
+        }
+        int intervalMillis = integer(environment, "ASTRASYNC_COORDINATOR_HEARTBEAT_INTERVAL_MS", 10_000);
+        return Optional.of(
+                new ExecutionHeartbeatConfiguration(URI.create(endpoint), token, Duration.ofMillis(intervalMillis)));
     }
 
     private static List<WorkerEndpoint> parseWorkers(String value) {

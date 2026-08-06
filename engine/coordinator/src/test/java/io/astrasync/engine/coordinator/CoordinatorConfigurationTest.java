@@ -7,6 +7,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -36,6 +37,24 @@ class CoordinatorConfigurationTest {
         assertThat(configuration.maxInFlightTasks()).isEqualTo(1);
         assertThat(configuration.maxInFlightBatches()).isEqualTo(1);
         assertThat(configuration.executionEpoch()).isZero();
+        assertThat(configuration.heartbeat()).isEmpty();
+    }
+
+    @Test
+    void parsesAuthenticatedExecutionHeartbeat() {
+        Map<String, String> environment = requiredEnvironment();
+        String token = UUID.randomUUID().toString();
+        environment.put("ASTRASYNC_COORDINATOR_HEARTBEAT_URL", "http://scheduler:8082/v1/heartbeat");
+        environment.put("ASTRASYNC_COORDINATOR_HEARTBEAT_TOKEN", token);
+        environment.put("ASTRASYNC_COORDINATOR_HEARTBEAT_INTERVAL_MS", "2500");
+
+        ExecutionHeartbeatConfiguration heartbeat = CoordinatorConfiguration.fromEnvironment(environment)
+                .heartbeat()
+                .orElseThrow();
+
+        assertThat(heartbeat.endpoint()).hasToString("http://scheduler:8082/v1/heartbeat");
+        assertThat(heartbeat.token()).isEqualTo(token);
+        assertThat(heartbeat.interval()).isEqualTo(Duration.ofMillis(2500));
     }
 
     @Test
@@ -107,6 +126,19 @@ class CoordinatorConfigurationTest {
         assertThatThrownBy(() -> CoordinatorConfiguration.fromEnvironment(invalidEpoch))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("environment variable ASTRASYNC_COORDINATOR_EXECUTION_EPOCH must be positive");
+
+        Map<String, String> incompleteHeartbeat = requiredEnvironment();
+        incompleteHeartbeat.put("ASTRASYNC_COORDINATOR_HEARTBEAT_URL", "http://scheduler:8082/v1/heartbeat");
+        assertThatThrownBy(() -> CoordinatorConfiguration.fromEnvironment(incompleteHeartbeat))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("heartbeat URL and token must be configured together");
+
+        Map<String, String> invalidHeartbeatToken = requiredEnvironment();
+        invalidHeartbeatToken.put("ASTRASYNC_COORDINATOR_HEARTBEAT_URL", "http://scheduler:8082/v1/heartbeat");
+        invalidHeartbeatToken.put("ASTRASYNC_COORDINATOR_HEARTBEAT_TOKEN", "not-a-uuid");
+        assertThatThrownBy(() -> CoordinatorConfiguration.fromEnvironment(invalidHeartbeatToken))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("heartbeat token must be a UUID");
     }
 
     private Map<String, String> requiredEnvironment() {

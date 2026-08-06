@@ -1,0 +1,20 @@
+{{- if .Values.scheduler.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "astrasync.componentFullname" (dict "context" . "component" "scheduler") }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "astrasync.labels" . | nindent 4 }}
+    app.kubernetes.io/component: scheduler
+spec:
+  type: ClusterIP
+  ports:
+    - name: heartbeat
+      port: {{ .Values.scheduler.service.port }}
+      targetPort: health
+      protocol: TCP
+  selector:
+    {{- include "astrasync.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: scheduler
+{{- end }}

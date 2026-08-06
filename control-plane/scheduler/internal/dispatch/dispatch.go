@@ -39,21 +39,26 @@ func (i Identity) Validate() error {
 }
 
 type Record struct {
-	Identity       Identity
-	Key            job.Key
-	OwnerID        string
-	Phase          Phase
-	LeaseExpiresAt time.Time
-	Attempt        int32
-	LastError      string
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	Identity        Identity
+	Key             job.Key
+	OwnerID         string
+	Phase           Phase
+	LeaseExpiresAt  time.Time
+	LastHeartbeatAt time.Time
+	HeartbeatToken  string
+	Attempt         int32
+	LastError       string
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
 }
 
 type Store interface {
 	Migrate(context.Context) error
-	Claim(context.Context, string, int, time.Duration, time.Time) ([]Record, error)
+	Claim(context.Context, string, int, time.Duration, time.Duration, time.Time) ([]Record, error)
+	List(context.Context) ([]Record, error)
 	Update(context.Context, Identity, string, Phase, string, time.Duration, time.Time) error
+	RecordHeartbeat(context.Context, Identity, string, time.Time) error
+	FenceExpiredHeartbeat(context.Context, Identity, string, string, time.Duration, time.Duration, time.Time) (bool, error)
 	Complete(context.Context, Identity, string, Phase, string, time.Time) error
 }
 
