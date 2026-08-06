@@ -88,7 +88,9 @@ public final class JobCompiler {
                 connectorPlan(ConnectorRole.SINK, sinkDescriptor, jobSpec.spec().sink()),
                 cdc ? ExecutionMode.CDC : ExecutionMode.BATCH,
                 requested,
-                jobSpec.spec().runtime().maxBatchRecords());
+                jobSpec.spec().runtime().maxBatchRecords(),
+                jobSpec.spec().runtime().adaptiveBatch(),
+                jobSpec.spec().runtime().adaptiveParallelism());
     }
 
     private ConnectorDescriptor resolve(ConnectorSpec connectorSpec, ConnectorRole role) {

@@ -1,5 +1,7 @@
 package io.astrasync.engine.plan;
 
+import io.astrasync.engine.jobspec.AdaptiveBatchSpec;
+import io.astrasync.engine.jobspec.AdaptiveParallelismSpec;
 import io.astrasync.engine.jobspec.DeliveryGuarantee;
 import java.util.Objects;
 
@@ -10,7 +12,29 @@ public record CompiledJobPlan(
         ConnectorPlan sink,
         ExecutionMode executionMode,
         DeliveryGuarantee deliveryGuarantee,
-        int maxBatchRecords) {
+        int maxBatchRecords,
+        AdaptiveBatchSpec adaptiveBatch,
+        AdaptiveParallelismSpec adaptiveParallelism) {
+    public CompiledJobPlan(
+            String apiVersion,
+            String jobName,
+            ConnectorPlan source,
+            ConnectorPlan sink,
+            ExecutionMode executionMode,
+            DeliveryGuarantee deliveryGuarantee,
+            int maxBatchRecords) {
+        this(
+                apiVersion,
+                jobName,
+                source,
+                sink,
+                executionMode,
+                deliveryGuarantee,
+                maxBatchRecords,
+                AdaptiveBatchSpec.disabled(maxBatchRecords),
+                AdaptiveParallelismSpec.disabled());
+    }
+
     public CompiledJobPlan {
         apiVersion = requireText(apiVersion, "apiVersion");
         jobName = requireText(jobName, "jobName");
@@ -21,6 +45,12 @@ public record CompiledJobPlan(
         if (maxBatchRecords <= 0) {
             throw new IllegalArgumentException("maxBatchRecords must be positive");
         }
+        adaptiveBatch = Objects.requireNonNull(adaptiveBatch, "adaptiveBatch must not be null");
+        if (adaptiveBatch.minBatchRecords() > maxBatchRecords
+                || adaptiveBatch.initialBatchRecords() > maxBatchRecords) {
+            throw new IllegalArgumentException("adaptive batch bounds must not exceed maxBatchRecords");
+        }
+        adaptiveParallelism = Objects.requireNonNull(adaptiveParallelism, "adaptiveParallelism must not be null");
     }
 
     private static String requireText(String value, String name) {

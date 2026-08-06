@@ -121,4 +121,5 @@ ADR-029 defines the durable desired-state Job lifecycle and epoch-fenced Phase 4
 foundation. ADR-030 defines durable Scheduler capacity, lease takeover, deterministic Kubernetes
 Coordinator/Worker dispatch, and control-plane epoch propagation into checkpoint execution.
 ADR-031 completes Controller convergence and execution liveness. ADR-032 establishes the bounded
-Arrow batch ownership, scalar mapping, IPC, and benchmark contracts that begin Phase 5.
+Arrow batch ownership, scalar mapping, IPC, and benchmark contracts that begin Phase 5. ADR-033
+defines bounded adaptive batch sizing and non-checkpoint split parallelism from measured signals.

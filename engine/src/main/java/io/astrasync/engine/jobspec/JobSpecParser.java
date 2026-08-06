@@ -31,7 +31,11 @@ public final class JobSpecParser {
     private static final Set<String> CONNECTOR_FIELDS = Set.of("connector", "options");
     private static final Set<String> TRANSFORM_FIELDS = Set.of("type", "options");
     private static final Set<String> DELIVERY_FIELDS = Set.of("guarantee");
-    private static final Set<String> RUNTIME_FIELDS = Set.of("maxBatchRecords");
+    private static final Set<String> RUNTIME_FIELDS = Set.of("maxBatchRecords", "adaptiveBatch", "adaptiveParallelism");
+    private static final Set<String> ADAPTIVE_BATCH_FIELDS =
+            Set.of("minBatchRecords", "initialBatchRecords", "targetBatchNanos", "adjustmentCooldownSamples");
+    private static final Set<String> ADAPTIVE_PARALLELISM_FIELDS = Set.of(
+            "minParallelism", "initialParallelism", "maxParallelism", "targetTaskNanos", "adjustmentCooldownSamples");
 
     public JobSpec parse(String document) {
         if (document == null) {
@@ -148,18 +152,87 @@ public final class JobSpecParser {
         String path = "$.spec.runtime";
         requireObject(node, path);
         rejectUnknownFields(node, RUNTIME_FIELDS, path);
-        JsonNode maxBatchRecordsNode = node.get("maxBatchRecords");
-        if (maxBatchRecordsNode == null) {
-            return RuntimeSpec.defaults();
-        }
-        if (!maxBatchRecordsNode.isIntegralNumber() || !maxBatchRecordsNode.canConvertToInt()) {
-            throw failure(child(path, "maxBatchRecords"), "must be a 32-bit integer");
-        }
-        int maxBatchRecords = maxBatchRecordsNode.intValue();
+        int maxBatchRecords = optionalInt(node, "maxBatchRecords", path, RuntimeSpec.DEFAULT_MAX_BATCH_RECORDS);
         if (maxBatchRecords <= 0) {
             throw failure(child(path, "maxBatchRecords"), "must be positive");
         }
-        return new RuntimeSpec(maxBatchRecords);
+        AdaptiveBatchSpec adaptiveBatch =
+                parseAdaptiveBatch(node.get("adaptiveBatch"), child(path, "adaptiveBatch"), maxBatchRecords);
+        AdaptiveParallelismSpec adaptiveParallelism =
+                parseAdaptiveParallelism(node.get("adaptiveParallelism"), child(path, "adaptiveParallelism"));
+        if (adaptiveBatch.minBatchRecords() > maxBatchRecords
+                || adaptiveBatch.initialBatchRecords() > maxBatchRecords) {
+            throw failure(
+                    child(path, "adaptiveBatch"),
+                    "batch bounds must not exceed maxBatchRecords (" + maxBatchRecords + ")");
+        }
+        return new RuntimeSpec(maxBatchRecords, adaptiveBatch, adaptiveParallelism);
+    }
+
+    private static AdaptiveBatchSpec parseAdaptiveBatch(JsonNode node, String path, int maxBatchRecords) {
+        if (node == null) {
+            return AdaptiveBatchSpec.disabled(maxBatchRecords);
+        }
+        requireObject(node, path);
+        rejectUnknownFields(node, ADAPTIVE_BATCH_FIELDS, path);
+        try {
+            return new AdaptiveBatchSpec(
+                    requiredInt(node, "minBatchRecords", path),
+                    requiredInt(node, "initialBatchRecords", path),
+                    requiredLong(node, "targetBatchNanos", path),
+                    requiredInt(node, "adjustmentCooldownSamples", path));
+        } catch (IllegalArgumentException exception) {
+            throw failure(path, exception.getMessage(), exception);
+        }
+    }
+
+    private static AdaptiveParallelismSpec parseAdaptiveParallelism(JsonNode node, String path) {
+        if (node == null) {
+            return AdaptiveParallelismSpec.disabled();
+        }
+        requireObject(node, path);
+        rejectUnknownFields(node, ADAPTIVE_PARALLELISM_FIELDS, path);
+        try {
+            return new AdaptiveParallelismSpec(
+                    requiredInt(node, "minParallelism", path),
+                    requiredInt(node, "initialParallelism", path),
+                    requiredInt(node, "maxParallelism", path),
+                    requiredLong(node, "targetTaskNanos", path),
+                    requiredInt(node, "adjustmentCooldownSamples", path));
+        } catch (IllegalArgumentException exception) {
+            throw failure(path, exception.getMessage(), exception);
+        }
+    }
+
+    private static int optionalInt(JsonNode parent, String field, String path, int defaultValue) {
+        JsonNode node = parent.get(field);
+        return node == null ? defaultValue : integerValue(node, child(path, field));
+    }
+
+    private static int requiredInt(JsonNode parent, String field, String path) {
+        JsonNode node = parent.get(field);
+        if (node == null) {
+            throw failure(child(path, field), "is required");
+        }
+        return integerValue(node, child(path, field));
+    }
+
+    private static int integerValue(JsonNode node, String path) {
+        if (!node.isIntegralNumber() || !node.canConvertToInt()) {
+            throw failure(path, "must be a 32-bit integer");
+        }
+        return node.intValue();
+    }
+
+    private static long requiredLong(JsonNode parent, String field, String path) {
+        JsonNode node = parent.get(field);
+        if (node == null) {
+            throw failure(child(path, field), "is required");
+        }
+        if (!node.isIntegralNumber() || !node.canConvertToLong()) {
+            throw failure(child(path, field), "must be a 64-bit integer");
+        }
+        return node.longValue();
     }
 
     private static Map<String, String> parseOptions(JsonNode node, String path) {

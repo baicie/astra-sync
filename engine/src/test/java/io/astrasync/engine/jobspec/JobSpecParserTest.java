@@ -68,7 +68,92 @@ class JobSpecParserTest {
 
         assertThat(jobSpec.spec().transforms()).isEmpty();
         assertThat(jobSpec.spec().runtime().maxBatchRecords()).isEqualTo(RuntimeSpec.DEFAULT_MAX_BATCH_RECORDS);
+        assertThat(jobSpec.spec().runtime().adaptiveBatch().enabled()).isFalse();
+        assertThat(jobSpec.spec().runtime().adaptiveParallelism().enabled()).isFalse();
         assertThat(jobSpec.spec().source().options()).isEmpty();
+    }
+
+    @Test
+    void parsesAdaptiveBatchAndParallelismSettings() {
+        JobSpec jobSpec = parser.parse(minimalSpec("at-most-once")
+                .replace(
+                        "    guarantee: at-most-once",
+                        "    guarantee: at-most-once\n"
+                                + "  runtime:\n"
+                                + "    maxBatchRecords: 128\n"
+                                + "    adaptiveBatch:\n"
+                                + "      minBatchRecords: 8\n"
+                                + "      initialBatchRecords: 32\n"
+                                + "      targetBatchNanos: 1000000\n"
+                                + "      adjustmentCooldownSamples: 2\n"
+                                + "    adaptiveParallelism:\n"
+                                + "      minParallelism: 1\n"
+                                + "      initialParallelism: 2\n"
+                                + "      maxParallelism: 4\n"
+                                + "      targetTaskNanos: 2000000\n"
+                                + "      adjustmentCooldownSamples: 3"));
+
+        assertThat(jobSpec.spec().runtime().adaptiveBatch())
+                .extracting(
+                        AdaptiveBatchSpec::minBatchRecords,
+                        AdaptiveBatchSpec::initialBatchRecords,
+                        AdaptiveBatchSpec::targetBatchNanos,
+                        AdaptiveBatchSpec::adjustmentCooldownSamples)
+                .containsExactly(8, 32, 1_000_000L, 2);
+        assertThat(jobSpec.spec().runtime().adaptiveParallelism())
+                .extracting(
+                        AdaptiveParallelismSpec::minParallelism,
+                        AdaptiveParallelismSpec::initialParallelism,
+                        AdaptiveParallelismSpec::maxParallelism,
+                        AdaptiveParallelismSpec::targetTaskNanos,
+                        AdaptiveParallelismSpec::adjustmentCooldownSamples)
+                .containsExactly(1, 2, 4, 2_000_000L, 3);
+    }
+
+    @Test
+    void rejectsMalformedAdaptiveSettings() {
+        assertFailure(
+                minimalSpec("at-most-once")
+                        .replace(
+                                "    guarantee: at-most-once",
+                                "    guarantee: at-most-once\n"
+                                        + "  runtime:\n"
+                                        + "    maxBatchRecords: 4\n"
+                                        + "    adaptiveBatch:\n"
+                                        + "      minBatchRecords: 8\n"
+                                        + "      initialBatchRecords: 8\n"
+                                        + "      targetBatchNanos: 1\n"
+                                        + "      adjustmentCooldownSamples: 0"),
+                "$.spec.runtime.adaptiveBatch",
+                "maxBatchRecords");
+        assertFailure(
+                minimalSpec("at-most-once")
+                        .replace(
+                                "    guarantee: at-most-once",
+                                "    guarantee: at-most-once\n"
+                                        + "  runtime:\n"
+                                        + "    adaptiveParallelism:\n"
+                                        + "      minParallelism: 2\n"
+                                        + "      initialParallelism: 1\n"
+                                        + "      maxParallelism: 2\n"
+                                        + "      targetTaskNanos: 1\n"
+                                        + "      adjustmentCooldownSamples: 0"),
+                "$.spec.runtime.adaptiveParallelism",
+                "initialParallelism");
+        assertFailure(
+                minimalSpec("at-most-once")
+                        .replace(
+                                "    guarantee: at-most-once",
+                                "    guarantee: at-most-once\n"
+                                        + "  runtime:\n"
+                                        + "    adaptiveBatch:\n"
+                                        + "      minBatchRecords: 1\n"
+                                        + "      initialBatchRecords: 1\n"
+                                        + "      targetBatchNanos: 1\n"
+                                        + "      adjustmentCooldownSamples: 0\n"
+                                        + "      unexpected: true"),
+                "$.spec.runtime.adaptiveBatch.unexpected",
+                "unknown field");
     }
 
     @Test

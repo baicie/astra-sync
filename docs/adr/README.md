@@ -38,6 +38,7 @@ This directory contains the Architecture Decision Records (ADRs) for AstraSync.
 | [ADR-030](adr-030-lease-fenced-scheduler-dispatch.md) | Lease-fenced Scheduler Dispatch | Accepted | 2026-08-05 |
 | [ADR-031](adr-031-controller-convergence-and-ha.md) | PostgreSQL Lifecycle Convergence and Execution Liveness | Accepted | 2026-08-05 |
 | [ADR-032](adr-032-bounded-arrow-batch-foundation.md) | Bounded Arrow Batch Foundation | Accepted | 2026-08-06 |
+| [ADR-033](adr-033-adaptive-batch-and-parallelism-control.md) | Adaptive Batch and Parallelism Control | Accepted | 2026-08-06 |
 
 ## Template
 

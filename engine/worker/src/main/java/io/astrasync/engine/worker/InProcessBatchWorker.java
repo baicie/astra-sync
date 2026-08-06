@@ -12,6 +12,8 @@ import io.astrasync.connector.api.source.SplitPosition;
 import io.astrasync.engine.kernel.SyncJobException;
 import io.astrasync.engine.kernel.SyncResult;
 import io.astrasync.engine.kernel.SyncStage;
+import io.astrasync.engine.runtime.AdaptiveBatchController;
+import io.astrasync.engine.runtime.AdaptiveBatchSample;
 import io.astrasync.engine.runtime.BatchDigests;
 import io.astrasync.engine.runtime.BatchExchange;
 import io.astrasync.engine.runtime.BatchTask;
@@ -50,9 +52,13 @@ public final class InProcessBatchWorker implements BatchWorker, CheckpointBatchW
         Objects.requireNonNull(task, "task must not be null");
         long startedNanos = System.nanoTime();
         BatchExchange exchange = new BatchExchange(task.maxInFlightBatches());
+        AdaptiveBatchController batchController =
+                new AdaptiveBatchController(task.batchPolicy(), task.maxBatchRecords());
         ExecutorService executor = Executors.newFixedThreadPool(2, new WorkerThreadFactory(workerId, task.taskId()));
-        Future<ThreadOutcome> sourceFuture = executor.submit(() -> produce(task, exchange, startedNanos));
-        Future<ThreadOutcome> sinkFuture = executor.submit(() -> consume(task, exchange, startedNanos));
+        Future<ThreadOutcome> sourceFuture =
+                executor.submit(() -> produce(task, exchange, batchController, startedNanos));
+        Future<ThreadOutcome> sinkFuture =
+                executor.submit(() -> consume(task, exchange, batchController, startedNanos));
 
         ThreadOutcome sourceOutcome = null;
         ThreadOutcome sinkOutcome = null;
@@ -113,6 +119,8 @@ public final class InProcessBatchWorker implements BatchWorker, CheckpointBatchW
         }
 
         long startedNanos = System.nanoTime();
+        AdaptiveBatchController batchController =
+                new AdaptiveBatchController(task.batchPolicy(), task.maxBatchRecords());
         long sequence = context.checkpointSequence();
         MutableMetrics metrics = new MutableMetrics();
         boolean sourceOpened = false;
@@ -128,11 +136,13 @@ public final class InProcessBatchWorker implements BatchWorker, CheckpointBatchW
 
             boolean endOfInput = false;
             while (!endOfInput) {
+                int requestedBatchRecords = batchController.currentBatchRecords();
+                long sourceReadStartedNanos = System.nanoTime();
                 RowBatch batch =
-                        Objects.requireNonNull(source.readBatch(task.maxBatchRecords()), "source returned null batch");
-                if (batch.size() > task.maxBatchRecords()) {
+                        Objects.requireNonNull(source.readBatch(requestedBatchRecords), "source returned null batch");
+                if (batch.size() > requestedBatchRecords) {
                     throw new IllegalStateException(
-                            "source returned " + batch.size() + " records, limit is " + task.maxBatchRecords());
+                            "source returned " + batch.size() + " records, limit is " + requestedBatchRecords);
                 }
                 metrics.observe(batch);
                 if (!batch.rows().isEmpty()) {
@@ -142,6 +152,7 @@ public final class InProcessBatchWorker implements BatchWorker, CheckpointBatchW
                     String batchDigest = BatchDigests.sha256(batch);
                     String commitToken =
                             CommitTokens.forBatch(context.jobId(), task.taskId(), nextSequence, batchDigest);
+                    long sinkWriteStartedNanos = System.nanoTime();
                     if (exactlyOnceSink != null) {
                         exactlyOnceSink.writeBatch(
                                 batch,
@@ -150,6 +161,12 @@ public final class InProcessBatchWorker implements BatchWorker, CheckpointBatchW
                     } else {
                         sink.writeBatch(batch);
                     }
+                    batchController.observe(new AdaptiveBatchSample(
+                            batch.size(),
+                            Math.max(0, System.nanoTime() - sinkWriteStartedNanos),
+                            Math.max(0, sinkWriteStartedNanos - sourceReadStartedNanos),
+                            0,
+                            1));
                     context.assertCurrent();
                     sequence = nextSequence;
                     SplitPosition position = Objects.requireNonNull(
@@ -209,7 +226,8 @@ public final class InProcessBatchWorker implements BatchWorker, CheckpointBatchW
         return new WorkerResult(workerId, task.taskId(), result);
     }
 
-    private ThreadOutcome produce(BatchTask task, BatchExchange exchange, long startedNanos) {
+    private ThreadOutcome produce(
+            BatchTask task, BatchExchange exchange, AdaptiveBatchController batchController, long startedNanos) {
         BatchSource source = task.source();
         MutableMetrics metrics = new MutableMetrics();
         SyncJobException failure = null;
@@ -229,14 +247,18 @@ public final class InProcessBatchWorker implements BatchWorker, CheckpointBatchW
             while (failure == null && !endOfInput) {
                 RowBatch batch;
                 try {
+                    int requestedBatchRecords = batchController.currentBatchRecords();
                     batch = Objects.requireNonNull(
-                            source.readBatch(task.maxBatchRecords()), "source returned null batch");
-                    if (batch.size() > task.maxBatchRecords()) {
+                            source.readBatch(requestedBatchRecords), "source returned null batch");
+                    if (batch.size() > requestedBatchRecords) {
                         throw new IllegalStateException(
-                                "source returned " + batch.size() + " records, limit is " + task.maxBatchRecords());
+                                "source returned " + batch.size() + " records, limit is " + requestedBatchRecords);
                     }
                     metrics.observe(batch);
-                    exchange.publish(batch);
+                    int queueDepthBeforePublish = exchange.size();
+                    long queueWaitNanos = exchange.publishMeasured(batch);
+                    batchController.observe(new AdaptiveBatchSample(
+                            batch.size(), 0, queueWaitNanos, queueDepthBeforePublish, exchange.capacity()));
                     endOfInput = batch.endOfInput();
                 } catch (RuntimeException exception) {
                     failure = failure(
@@ -258,7 +280,8 @@ public final class InProcessBatchWorker implements BatchWorker, CheckpointBatchW
         return new ThreadOutcome(metrics.snapshot(startedNanos), failure, directFailure);
     }
 
-    private ThreadOutcome consume(BatchTask task, BatchExchange exchange, long startedNanos) {
+    private ThreadOutcome consume(
+            BatchTask task, BatchExchange exchange, AdaptiveBatchController batchController, long startedNanos) {
         BatchSink sink = task.sink();
         MutableMetrics metrics = new MutableMetrics();
         SyncJobException failure = null;
@@ -281,8 +304,15 @@ public final class InProcessBatchWorker implements BatchWorker, CheckpointBatchW
                     RowBatch batch = exchange.receive();
                     metrics.observe(batch);
                     if (!batch.rows().isEmpty()) {
+                        long sinkWriteStartedNanos = System.nanoTime();
                         sink.writeBatch(batch);
                         metrics.writtenCount += batch.size();
+                        batchController.observe(new AdaptiveBatchSample(
+                                batch.size(),
+                                Math.max(0, System.nanoTime() - sinkWriteStartedNanos),
+                                0,
+                                exchange.size(),
+                                exchange.capacity()));
                     }
                     metrics.batchCount++;
                     endOfInput = batch.endOfInput();

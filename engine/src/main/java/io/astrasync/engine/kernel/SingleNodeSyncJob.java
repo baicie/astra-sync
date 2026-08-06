@@ -4,6 +4,9 @@ import io.astrasync.connector.api.data.Row;
 import io.astrasync.connector.api.data.RowBatch;
 import io.astrasync.connector.api.sink.BatchSink;
 import io.astrasync.connector.api.source.BatchSource;
+import io.astrasync.engine.runtime.AdaptiveBatchController;
+import io.astrasync.engine.runtime.AdaptiveBatchPolicy;
+import io.astrasync.engine.runtime.AdaptiveBatchSample;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -15,6 +18,7 @@ public final class SingleNodeSyncJob {
     private final List<RecordTransform> transforms;
     private final BatchSink sink;
     private final int maxBatchRecords;
+    private final AdaptiveBatchPolicy batchPolicy;
     private final CancellationToken cancellationToken;
 
     private SingleNodeSyncJob(Builder builder) {
@@ -22,6 +26,8 @@ public final class SingleNodeSyncJob {
         this.transforms = List.copyOf(builder.transforms);
         this.sink = builder.sink;
         this.maxBatchRecords = builder.maxBatchRecords;
+        this.batchPolicy =
+                builder.batchPolicy == null ? AdaptiveBatchPolicy.fixed(builder.maxBatchRecords) : builder.batchPolicy;
         this.cancellationToken = builder.cancellationToken;
     }
 
@@ -32,6 +38,7 @@ public final class SingleNodeSyncJob {
     public SyncResult run() {
         long startedNanos = System.nanoTime();
         MutableMetrics metrics = new MutableMetrics(startedNanos);
+        AdaptiveBatchController batchController = new AdaptiveBatchController(batchPolicy, maxBatchRecords);
         boolean sourceOpened = false;
         boolean sinkOpened = false;
         SyncJobException failure = null;
@@ -57,11 +64,14 @@ public final class SingleNodeSyncJob {
             while (!endOfInput) {
                 checkCancelled(metrics);
                 RowBatch batch;
+                int requestedBatchRecords = batchController.currentBatchRecords();
+                long sourceReadStartedNanos = System.nanoTime();
                 try {
-                    batch = Objects.requireNonNull(source.readBatch(maxBatchRecords), "source returned null batch");
-                    if (batch.size() > maxBatchRecords) {
+                    batch = Objects.requireNonNull(
+                            source.readBatch(requestedBatchRecords), "source returned null batch");
+                    if (batch.size() > requestedBatchRecords) {
                         throw new IllegalStateException(
-                                "source returned " + batch.size() + " records, limit is " + maxBatchRecords);
+                                "source returned " + batch.size() + " records, limit is " + requestedBatchRecords);
                     }
                     metrics.observeBatch(batch.size());
                 } catch (RuntimeException exception) {
@@ -88,8 +98,15 @@ public final class SingleNodeSyncJob {
                     RowBatch transformedBatch =
                             batch.endOfInput() ? RowBatch.last(transformedRows) : RowBatch.data(transformedRows);
                     try {
+                        long sinkWriteStartedNanos = System.nanoTime();
                         sink.writeBatch(transformedBatch);
                         metrics.recordsWritten(transformedBatch.size());
+                        batchController.observe(new AdaptiveBatchSample(
+                                transformedBatch.size(),
+                                Math.max(0, System.nanoTime() - sinkWriteStartedNanos),
+                                Math.max(0, sinkWriteStartedNanos - sourceReadStartedNanos),
+                                0,
+                                1));
                     } catch (RuntimeException exception) {
                         throw metrics.failure(SyncStage.SINK_WRITE, "failed to write batch", exception);
                     }
@@ -150,6 +167,7 @@ public final class SingleNodeSyncJob {
         private final List<RecordTransform> transforms = new ArrayList<>();
         private BatchSink sink;
         private int maxBatchRecords = DEFAULT_MAX_BATCH_RECORDS;
+        private AdaptiveBatchPolicy batchPolicy;
         private CancellationToken cancellationToken = CancellationToken.neverCancelled();
 
         public Builder source(BatchSource source) {
@@ -172,6 +190,11 @@ public final class SingleNodeSyncJob {
                 throw new IllegalArgumentException("maxBatchRecords must be positive");
             }
             this.maxBatchRecords = maxBatchRecords;
+            return this;
+        }
+
+        public Builder adaptiveBatchPolicy(AdaptiveBatchPolicy batchPolicy) {
+            this.batchPolicy = Objects.requireNonNull(batchPolicy, "batchPolicy must not be null");
             return this;
         }
 

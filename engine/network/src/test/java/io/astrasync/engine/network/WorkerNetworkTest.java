@@ -9,6 +9,7 @@ import io.astrasync.connector.api.source.BatchSource;
 import io.astrasync.connector.api.source.SourceSplit;
 import io.astrasync.connector.api.source.SplitPosition;
 import io.astrasync.engine.kernel.SyncResult;
+import io.astrasync.engine.runtime.AdaptiveBatchPolicy;
 import io.astrasync.engine.runtime.BatchTask;
 import io.astrasync.engine.runtime.BatchTaskFactory;
 import io.astrasync.engine.runtime.BatchWorker;
@@ -96,6 +97,22 @@ class WorkerNetworkTest {
             } finally {
                 calls.shutdownNow();
             }
+        }
+    }
+
+    @Test
+    void rejectsAWorkerPolicyMismatchBeforeExecution() {
+        RecordingWorker worker = new RecordingWorker("worker-a");
+        try (WorkerServer server = server(worker, 1, 1, 4)) {
+            server.start();
+            BatchTask adaptiveTask = new RemoteTaskFactory(
+                            3, 2, false, AdaptiveBatchPolicy.adaptive(1, 2, 1_000_000, 0))
+                    .create(split("split-1"));
+
+            assertThatThrownBy(() -> remote(server, 2).execute(adaptiveTask))
+                    .isInstanceOf(NetworkWorkerException.class)
+                    .hasMessageContaining("task factory changed the requested split");
+            assertThat(worker.tasks).isEmpty();
         }
     }
 

@@ -7,6 +7,7 @@ import io.astrasync.connector.api.data.Row;
 import io.astrasync.connector.api.data.RowBatch;
 import io.astrasync.connector.api.sink.BatchSink;
 import io.astrasync.connector.api.source.BatchSource;
+import io.astrasync.engine.runtime.AdaptiveBatchPolicy;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -171,6 +172,28 @@ class SingleNodeSyncJobTest {
         assertThat(result.batchCount()).isEqualTo(2);
         assertThat(result.maxObservedBatchSize()).isEqualTo(2);
         assertThat(result.elapsedNanos()).isNotNegative();
+    }
+
+    @Test
+    void adaptsTheReadLimitAfterACompletedBatch() {
+        List<Integer> requestedLimits = new ArrayList<>();
+        AtomicInteger poll = new AtomicInteger();
+        BatchSource source = batchSource(maxRecords -> {
+            requestedLimits.add(maxRecords);
+            return poll.getAndIncrement() == 0
+                    ? RowBatch.data(List.of(Row.of("id", 1)))
+                    : RowBatch.last(List.of(Row.of("id", 2)));
+        });
+
+        SingleNodeSyncJob.builder()
+                .source(source)
+                .sink(batchSink(ignored -> {}))
+                .maxBatchRecords(4)
+                .adaptiveBatchPolicy(AdaptiveBatchPolicy.adaptive(1, 2, 1_000_000_000L, 0))
+                .build()
+                .run();
+
+        assertThat(requestedLimits).containsExactly(2, 4);
     }
 
     @Test

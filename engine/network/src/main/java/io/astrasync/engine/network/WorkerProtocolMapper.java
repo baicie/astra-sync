@@ -9,6 +9,7 @@ import io.astrasync.engine.runtime.CheckpointExecutionContext;
 import io.astrasync.engine.runtime.CheckpointProgress;
 import io.astrasync.engine.runtime.EpochFence;
 import io.astrasync.engine.runtime.WorkerResult;
+import io.astrasync.protocol.worker.AdaptiveBatchSettings;
 import io.astrasync.protocol.worker.ErrorCode;
 import io.astrasync.protocol.worker.ExecuteCheckpointTaskRequest;
 import io.astrasync.protocol.worker.ExecuteTaskRequest;
@@ -31,6 +32,7 @@ final class WorkerProtocolMapper {
                 .setSplit(toDescriptor(split))
                 .setMaxBatchRecords(task.maxBatchRecords())
                 .setMaxInFlightBatches(task.maxInFlightBatches())
+                .setAdaptiveBatch(toAdaptiveBatch(task.batchPolicy()))
                 .build();
         return WorkerRequest.newBuilder()
                 .setProtocolVersion(WorkerProtocol.CURRENT_VERSION)
@@ -65,6 +67,7 @@ final class WorkerProtocolMapper {
                 .putAllSourcePosition(context.sourcePosition().offsets())
                 .setSplitFingerprint(requireText(splitFingerprint, "splitFingerprint"))
                 .setExactlyOnce(task.exactlyOnce())
+                .setAdaptiveBatch(toAdaptiveBatch(task.batchPolicy()))
                 .build();
         return WorkerRequest.newBuilder()
                 .setProtocolVersion(WorkerProtocol.CHECKPOINT_VERSION)
@@ -239,6 +242,18 @@ final class WorkerProtocolMapper {
         return failure instanceof BatchTaskException taskException ? taskException.partialResult() : SyncResult.empty();
     }
 
+    static boolean matchesAdaptiveBatch(
+            AdaptiveBatchSettings settings, io.astrasync.engine.runtime.AdaptiveBatchPolicy policy) {
+        Objects.requireNonNull(policy, "policy must not be null");
+        if (settings == null || (settings.getTargetBatchNanos() == 0 && settings.getMinBatchRecords() == 0)) {
+            return !policy.enabled();
+        }
+        return settings.getMinBatchRecords() == policy.minBatchRecords()
+                && settings.getInitialBatchRecords() == policy.initialBatchRecords()
+                && settings.getTargetBatchNanos() == policy.targetBatchNanos()
+                && settings.getAdjustmentCooldownSamples() == policy.adjustmentCooldownSamples();
+    }
+
     private static SplitDescriptor toDescriptor(SourceSplit split) {
         return SplitDescriptor.newBuilder()
                 .setSplitId(split.splitId())
@@ -255,6 +270,18 @@ final class WorkerProtocolMapper {
                 .setBatchCount(metrics.batchCount())
                 .setMaxObservedBatchSize(metrics.maxObservedBatchSize())
                 .setElapsedNanos(metrics.elapsedNanos())
+                .build();
+    }
+
+    private static AdaptiveBatchSettings toAdaptiveBatch(io.astrasync.engine.runtime.AdaptiveBatchPolicy policy) {
+        if (!policy.enabled()) {
+            return AdaptiveBatchSettings.getDefaultInstance();
+        }
+        return AdaptiveBatchSettings.newBuilder()
+                .setMinBatchRecords(policy.minBatchRecords())
+                .setInitialBatchRecords(policy.initialBatchRecords())
+                .setTargetBatchNanos(policy.targetBatchNanos())
+                .setAdjustmentCooldownSamples(policy.adjustmentCooldownSamples())
                 .build();
     }
 

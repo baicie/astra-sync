@@ -10,6 +10,7 @@ import io.astrasync.engine.jobspec.JobSpecParser;
 import io.astrasync.engine.plan.CompiledJobPlan;
 import io.astrasync.engine.plan.ConnectorRegistry;
 import io.astrasync.engine.plan.JobCompiler;
+import io.astrasync.engine.runtime.AdaptiveBatchPolicy;
 import io.astrasync.engine.runtime.BatchTask;
 import io.astrasync.engine.runtime.BatchTaskFactory;
 import io.astrasync.engine.runtime.CheckpointExecutionContext;
@@ -35,6 +36,11 @@ public final class JdbcWorkerTaskFactoryProvider implements WorkerTaskFactoryPro
         JdbcConnectorFactory connectorFactory = new JdbcConnectorFactory();
         CompiledJobPlan plan = new JobCompiler(ConnectorRegistry.of(connectorFactory)).compileCheckpointed(jobSpec);
         requireJdbcPlan(plan);
+        AdaptiveBatchPolicy batchPolicy = new AdaptiveBatchPolicy(
+                plan.adaptiveBatch().minBatchRecords(),
+                plan.adaptiveBatch().initialBatchRecords(),
+                plan.adaptiveBatch().targetBatchNanos(),
+                plan.adaptiveBatch().adjustmentCooldownSamples());
 
         JdbcRangeSplitSource splitSource =
                 new JdbcRangeSplitSource(ConnectorConfiguration.of(plan.source().options()));
@@ -73,7 +79,8 @@ public final class JdbcWorkerTaskFactoryProvider implements WorkerTaskFactoryPro
                             sink,
                             plan.maxBatchRecords(),
                             maxInFlightBatches,
-                            plan.deliveryGuarantee() == io.astrasync.engine.jobspec.DeliveryGuarantee.EXACTLY_ONCE);
+                            plan.deliveryGuarantee() == io.astrasync.engine.jobspec.DeliveryGuarantee.EXACTLY_ONCE,
+                            batchPolicy);
                 } catch (RuntimeException exception) {
                     try {
                         source.close();

@@ -15,6 +15,7 @@ import io.astrasync.engine.plan.CompiledJobPlan;
 import io.astrasync.engine.plan.ConnectorPlan;
 import io.astrasync.engine.plan.ConnectorRegistry;
 import io.astrasync.engine.plan.JobCompiler;
+import io.astrasync.engine.runtime.AdaptiveBatchPolicy;
 import java.util.Objects;
 
 /** Compiles, materializes, and executes one job in the current process. */
@@ -43,6 +44,11 @@ public final class LocalJobRunner {
                 .source(source)
                 .sink(sink)
                 .maxBatchRecords(plan.maxBatchRecords())
+                .adaptiveBatchPolicy(new AdaptiveBatchPolicy(
+                        plan.adaptiveBatch().minBatchRecords(),
+                        plan.adaptiveBatch().initialBatchRecords(),
+                        plan.adaptiveBatch().targetBatchNanos(),
+                        plan.adaptiveBatch().adjustmentCooldownSamples()))
                 .cancellationToken(token)
                 .build()
                 .run();
