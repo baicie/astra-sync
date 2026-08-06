@@ -3,6 +3,9 @@ package io.astrasync.engine.coordinator;
 import io.astrasync.connector.api.source.SourceSplit;
 import io.astrasync.connector.api.source.SplitEnumerator;
 import io.astrasync.engine.kernel.SyncResult;
+import io.astrasync.engine.runtime.AdaptiveParallelismController;
+import io.astrasync.engine.runtime.AdaptiveParallelismPolicy;
+import io.astrasync.engine.runtime.AdaptiveParallelismSample;
 import io.astrasync.engine.runtime.BatchTask;
 import io.astrasync.engine.runtime.BatchTaskFactory;
 import io.astrasync.engine.runtime.BatchWorker;
@@ -74,17 +77,8 @@ public final class BatchCoordinator {
 
     public DistributedRunResult run(
             List<? extends BatchTask> tasks, Consumer<? super WorkerResult> completionListener) {
-        Objects.requireNonNull(tasks, "tasks must not be null");
         Objects.requireNonNull(completionListener, "completionListener must not be null");
-        List<BatchTask> copy = new ArrayList<>(tasks.size());
-        Set<String> taskIds = new HashSet<>();
-        for (BatchTask task : tasks) {
-            Objects.requireNonNull(task, "tasks must not contain null");
-            if (!taskIds.add(task.taskId())) {
-                throw new IllegalArgumentException("task id is duplicated: " + task.taskId());
-            }
-            copy.add(task);
-        }
+        List<BatchTask> copy = validateTasks(tasks);
         if (copy.isEmpty()) {
             return new DistributedRunResult(List.of(), SyncResult.empty());
         }
@@ -155,6 +149,133 @@ public final class BatchCoordinator {
         }
     }
 
+    public DistributedRunResult runAdaptive(List<? extends BatchTask> tasks, AdaptiveParallelismPolicy policy) {
+        return runAdaptive(tasks, policy, ignored -> {});
+    }
+
+    public DistributedRunResult runAdaptive(
+            List<? extends BatchTask> tasks,
+            AdaptiveParallelismPolicy policy,
+            Consumer<? super WorkerResult> completionListener) {
+        List<BatchTask> copy = validateTasks(tasks);
+        Objects.requireNonNull(policy, "policy must not be null");
+        Objects.requireNonNull(completionListener, "completionListener must not be null");
+        if (copy.isEmpty()) {
+            return new DistributedRunResult(List.of(), SyncResult.empty());
+        }
+
+        AdaptiveParallelismController controller = new AdaptiveParallelismController(policy, workers.size());
+        long startedNanos = System.nanoTime();
+        List<ExecutorService> queues = new ArrayList<>(workers.size());
+        List<CompletionService<AdaptiveIndexedWorkerResult>> completionServices = new ArrayList<>(workers.size());
+        BlockingQueue<Future<AdaptiveIndexedWorkerResult>> completions = new LinkedBlockingQueue<>();
+        List<Future<AdaptiveIndexedWorkerResult>> futures = new ArrayList<>(copy.size());
+        boolean[] busyWorkers = new boolean[workers.size()];
+        List<WorkerResult> results = new ArrayList<>(Collections.nCopies(copy.size(), null));
+        int nextTaskIndex = 0;
+        int activeTasks = 0;
+        int completedTasks = 0;
+        int nextWorkerIndex = 0;
+        try {
+            for (int index = 0; index < workers.size(); index++) {
+                ExecutorService queue = Executors.newSingleThreadExecutor(new CoordinatorThreadFactory(index));
+                queues.add(queue);
+                completionServices.add(new ExecutorCompletionService<>(queue, completions));
+            }
+            while (completedTasks < copy.size()) {
+                while (nextTaskIndex < copy.size() && activeTasks < controller.currentParallelism()) {
+                    int workerIndex = nextIdleWorker(busyWorkers, nextWorkerIndex);
+                    if (workerIndex < 0) {
+                        break;
+                    }
+                    BatchTask task = copy.get(nextTaskIndex);
+                    int taskIndex = nextTaskIndex++;
+                    busyWorkers[workerIndex] = true;
+                    activeTasks++;
+                    nextWorkerIndex = (workerIndex + 1) % workers.size();
+                    futures.add(completionServices
+                            .get(workerIndex)
+                            .submit(() -> executeAdaptive(taskIndex, workerIndex, workers.get(workerIndex), task)));
+                }
+
+                AdaptiveIndexedWorkerResult indexed = completions.take().get();
+                busyWorkers[indexed.workerIndex()] = false;
+                activeTasks--;
+                completedTasks++;
+                if (indexed.failure() != null) {
+                    cancelAll(futures);
+                    throw indexed.failure();
+                }
+                try {
+                    completionListener.accept(indexed.result());
+                } catch (RuntimeException exception) {
+                    cancelAll(futures);
+                    throw new BatchCoordinatorException(
+                            "task completion listener failed for "
+                                    + indexed.result().taskId(),
+                            exception);
+                }
+                results.set(indexed.index(), indexed.result());
+                controller.observe(new AdaptiveParallelismSample(
+                        indexed.result().metrics().elapsedNanos(),
+                        copy.size() - nextTaskIndex,
+                        Math.max(1, activeTasks)));
+            }
+            return new DistributedRunResult(results, aggregate(results, startedNanos));
+        } catch (InterruptedException exception) {
+            cancelAll(futures);
+            Thread.currentThread().interrupt();
+            throw new BatchCoordinatorException("coordinator interrupted", exception);
+        } catch (CancellationException exception) {
+            cancelAll(futures);
+            throw new BatchCoordinatorException("coordinator cancelled", exception);
+        } catch (ExecutionException exception) {
+            cancelAll(futures);
+            Throwable cause = exception.getCause();
+            if (cause instanceof RuntimeException runtimeException) {
+                throw runtimeException;
+            }
+            throw new BatchCoordinatorException("worker execution failed", cause);
+        } finally {
+            cancelAll(futures);
+            queues.forEach(ExecutorService::shutdownNow);
+        }
+    }
+
+    private List<BatchTask> validateTasks(List<? extends BatchTask> tasks) {
+        Objects.requireNonNull(tasks, "tasks must not be null");
+        List<BatchTask> copy = new ArrayList<>(tasks.size());
+        Set<String> taskIds = new HashSet<>();
+        for (BatchTask task : tasks) {
+            Objects.requireNonNull(task, "tasks must not contain null");
+            if (!taskIds.add(task.taskId())) {
+                throw new IllegalArgumentException("task id is duplicated: " + task.taskId());
+            }
+            copy.add(task);
+        }
+        return copy;
+    }
+
+    private static int nextIdleWorker(boolean[] busyWorkers, int startingIndex) {
+        for (int offset = 0; offset < busyWorkers.length; offset++) {
+            int index = (startingIndex + offset) % busyWorkers.length;
+            if (!busyWorkers[index]) {
+                return index;
+            }
+        }
+        return -1;
+    }
+
+    private static AdaptiveIndexedWorkerResult executeAdaptive(
+            int index, int workerIndex, BatchWorker worker, BatchTask task) {
+        try {
+            WorkerResult result = Objects.requireNonNull(worker.execute(task), "Worker returned null result");
+            return new AdaptiveIndexedWorkerResult(index, workerIndex, result, null);
+        } catch (RuntimeException exception) {
+            return new AdaptiveIndexedWorkerResult(index, workerIndex, null, exception);
+        }
+    }
+
     private static void cancelAll(List<? extends Future<?>> futures) {
         futures.forEach(future -> future.cancel(true));
     }
@@ -211,4 +332,7 @@ public final class BatchCoordinator {
     }
 
     private record IndexedWorkerResult(int index, WorkerResult result, RuntimeException failure, boolean skipped) {}
+
+    private record AdaptiveIndexedWorkerResult(
+            int index, int workerIndex, WorkerResult result, RuntimeException failure) {}
 }

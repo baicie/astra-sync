@@ -6,6 +6,7 @@ import io.astrasync.engine.checkpoint.FullLoadProgress;
 import io.astrasync.engine.checkpoint.SplitPlan;
 import io.astrasync.engine.checkpoint.SplitProgressStore;
 import io.astrasync.engine.kernel.SyncResult;
+import io.astrasync.engine.runtime.AdaptiveParallelismPolicy;
 import io.astrasync.engine.runtime.BatchTask;
 import io.astrasync.engine.runtime.BatchTaskFactory;
 import io.astrasync.engine.runtime.BatchWorker;
@@ -27,6 +28,14 @@ public final class ResumableBatchCoordinator {
     }
 
     public ResumableRunResult run(String jobId, SplitEnumerator enumerator, BatchTaskFactory taskFactory) {
+        return run(jobId, enumerator, taskFactory, null);
+    }
+
+    public ResumableRunResult run(
+            String jobId,
+            SplitEnumerator enumerator,
+            BatchTaskFactory taskFactory,
+            AdaptiveParallelismPolicy parallelismPolicy) {
         Objects.requireNonNull(enumerator, "enumerator must not be null");
         Objects.requireNonNull(taskFactory, "taskFactory must not be null");
         List<SourceSplit> splits =
@@ -48,15 +57,18 @@ public final class ResumableBatchCoordinator {
             pendingSplits.put(split.splitId(), split);
         }
 
-        coordinator.run(
-                pendingTasks,
-                result -> progressStore.recordCompletion(
-                        jobId,
-                        plan.fingerprint(),
-                        Objects.requireNonNull(
-                                pendingSplits.get(result.taskId()),
-                                "Worker returned an unknown task result: " + result.taskId()),
-                        result));
+        var completionListener = (java.util.function.Consumer<WorkerResult>) result -> progressStore.recordCompletion(
+                jobId,
+                plan.fingerprint(),
+                Objects.requireNonNull(
+                        pendingSplits.get(result.taskId()),
+                        "Worker returned an unknown task result: " + result.taskId()),
+                result);
+        if (parallelismPolicy == null) {
+            coordinator.run(pendingTasks, completionListener);
+        } else {
+            coordinator.runAdaptive(pendingTasks, parallelismPolicy, completionListener);
+        }
 
         FullLoadProgress completed = progressStore.open(jobId, plan);
         if (!completed.isComplete()) {

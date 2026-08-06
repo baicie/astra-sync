@@ -23,6 +23,7 @@ message ExecuteTaskRequest {
   SplitDescriptor split = 3;
   int32 max_batch_records = 4;
   int32 max_in_flight_batches = 5;
+  AdaptiveBatchSettings adaptive_batch = 6;
 }
 
 message CancelTaskRequest {
@@ -43,6 +44,14 @@ message ExecuteCheckpointTaskRequest {
   map<string, string> source_position = 9;
   string split_fingerprint = 10;
   bool exactly_once = 11;
+  AdaptiveBatchSettings adaptive_batch = 12;
+}
+
+message AdaptiveBatchSettings {
+  int32 min_batch_records = 1;
+  int32 initial_batch_records = 2;
+  int64 target_batch_nanos = 3;
+  int32 adjustment_cooldown_samples = 4;
 }
 
 message CheckpointAckRequest {

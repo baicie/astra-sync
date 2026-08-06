@@ -13,6 +13,8 @@ import io.astrasync.engine.network.WorkerClient;
 import io.astrasync.engine.plan.CompiledJobPlan;
 import io.astrasync.engine.plan.ConnectorRegistry;
 import io.astrasync.engine.plan.JobCompiler;
+import io.astrasync.engine.runtime.AdaptiveBatchPolicy;
+import io.astrasync.engine.runtime.AdaptiveParallelismPolicy;
 import io.astrasync.engine.runtime.BatchWorker;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -80,7 +82,20 @@ public final class CoordinatorApplication {
         RemoteTaskFactory taskFactory = new RemoteTaskFactory(
                 plan.maxBatchRecords(),
                 checked.maxInFlightBatches(),
-                plan.deliveryGuarantee() == io.astrasync.engine.jobspec.DeliveryGuarantee.EXACTLY_ONCE);
+                plan.deliveryGuarantee() == io.astrasync.engine.jobspec.DeliveryGuarantee.EXACTLY_ONCE,
+                new AdaptiveBatchPolicy(
+                        plan.adaptiveBatch().minBatchRecords(),
+                        plan.adaptiveBatch().initialBatchRecords(),
+                        plan.adaptiveBatch().targetBatchNanos(),
+                        plan.adaptiveBatch().adjustmentCooldownSamples()));
+        AdaptiveParallelismPolicy parallelismPolicy = plan.adaptiveParallelism().enabled()
+                ? new AdaptiveParallelismPolicy(
+                        plan.adaptiveParallelism().minParallelism(),
+                        plan.adaptiveParallelism().initialParallelism(),
+                        plan.adaptiveParallelism().maxParallelism(),
+                        plan.adaptiveParallelism().targetTaskNanos(),
+                        plan.adaptiveParallelism().adjustmentCooldownSamples())
+                : null;
         if (checkpointExecution) {
             CheckpointRunResult checkpointed = new CheckpointBatchCoordinator(
                             workers,
@@ -95,7 +110,7 @@ public final class CoordinatorApplication {
                     checkpointed.recoveredSplitCount());
         }
         return new ResumableBatchCoordinator(workers, new FileSplitProgressStore(checked.progressDirectory()))
-                .run(jobId, splitSource, taskFactory);
+                .run(jobId, splitSource, taskFactory, parallelismPolicy);
     }
 
     private static JobSpec readJobSpec(CoordinatorConfiguration configuration) {

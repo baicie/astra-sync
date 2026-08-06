@@ -12,10 +12,28 @@ public record BatchTask(
         BatchSink sink,
         int maxBatchRecords,
         int maxInFlightBatches,
-        boolean exactlyOnce) {
+        boolean exactlyOnce,
+        AdaptiveBatchPolicy batchPolicy) {
     public BatchTask(
             SourceSplit split, BatchSource source, BatchSink sink, int maxBatchRecords, int maxInFlightBatches) {
         this(split, source, sink, maxBatchRecords, maxInFlightBatches, false);
+    }
+
+    public BatchTask(
+            SourceSplit split,
+            BatchSource source,
+            BatchSink sink,
+            int maxBatchRecords,
+            int maxInFlightBatches,
+            boolean exactlyOnce) {
+        this(
+                split,
+                source,
+                sink,
+                maxBatchRecords,
+                maxInFlightBatches,
+                exactlyOnce,
+                AdaptiveBatchPolicy.fixed(maxBatchRecords));
     }
 
     public BatchTask {
@@ -27,6 +45,10 @@ public record BatchTask(
         }
         if (maxInFlightBatches <= 0) {
             throw new IllegalArgumentException("maxInFlightBatches must be positive");
+        }
+        batchPolicy = Objects.requireNonNull(batchPolicy, "batchPolicy must not be null");
+        if (batchPolicy.minBatchRecords() > maxBatchRecords || batchPolicy.initialBatchRecords() > maxBatchRecords) {
+            throw new IllegalArgumentException("batch policy bounds must not exceed maxBatchRecords");
         }
     }
 

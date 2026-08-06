@@ -4,6 +4,7 @@ import io.astrasync.connector.api.data.RowBatch;
 import io.astrasync.connector.api.sink.BatchSink;
 import io.astrasync.connector.api.source.BatchSource;
 import io.astrasync.connector.api.source.SourceSplit;
+import io.astrasync.engine.runtime.AdaptiveBatchPolicy;
 import io.astrasync.engine.runtime.BatchTask;
 import io.astrasync.engine.runtime.BatchTaskFactory;
 import java.util.Objects;
@@ -13,12 +14,18 @@ public final class RemoteTaskFactory implements BatchTaskFactory {
     private final int maxBatchRecords;
     private final int maxInFlightBatches;
     private final boolean exactlyOnce;
+    private final AdaptiveBatchPolicy batchPolicy;
 
     public RemoteTaskFactory(int maxBatchRecords, int maxInFlightBatches) {
         this(maxBatchRecords, maxInFlightBatches, false);
     }
 
     public RemoteTaskFactory(int maxBatchRecords, int maxInFlightBatches, boolean exactlyOnce) {
+        this(maxBatchRecords, maxInFlightBatches, exactlyOnce, AdaptiveBatchPolicy.fixed(maxBatchRecords));
+    }
+
+    public RemoteTaskFactory(
+            int maxBatchRecords, int maxInFlightBatches, boolean exactlyOnce, AdaptiveBatchPolicy batchPolicy) {
         if (maxBatchRecords <= 0) {
             throw new IllegalArgumentException("maxBatchRecords must be positive");
         }
@@ -28,6 +35,10 @@ public final class RemoteTaskFactory implements BatchTaskFactory {
         this.maxBatchRecords = maxBatchRecords;
         this.maxInFlightBatches = maxInFlightBatches;
         this.exactlyOnce = exactlyOnce;
+        this.batchPolicy = Objects.requireNonNull(batchPolicy, "batchPolicy must not be null");
+        if (batchPolicy.minBatchRecords() > maxBatchRecords || batchPolicy.initialBatchRecords() > maxBatchRecords) {
+            throw new IllegalArgumentException("batch policy bounds must not exceed maxBatchRecords");
+        }
     }
 
     @Override
@@ -39,7 +50,8 @@ public final class RemoteTaskFactory implements BatchTaskFactory {
                 new DescriptorSink(),
                 maxBatchRecords,
                 maxInFlightBatches,
-                exactlyOnce);
+                exactlyOnce,
+                batchPolicy);
     }
 
     private static final class DescriptorSource implements BatchSource {

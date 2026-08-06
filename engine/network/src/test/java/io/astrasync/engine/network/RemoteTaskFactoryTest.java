@@ -7,7 +7,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import io.astrasync.connector.api.data.RowBatch;
 import io.astrasync.connector.api.source.SourceSplit;
 import io.astrasync.connector.api.source.SplitPosition;
+import io.astrasync.engine.runtime.AdaptiveBatchPolicy;
 import io.astrasync.engine.runtime.BatchTask;
+import io.astrasync.protocol.worker.WorkerRequest;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 
@@ -48,6 +50,28 @@ class RemoteTaskFactoryTest {
         assertThatThrownBy(() -> new RemoteTaskFactory(1, 1).create(null))
                 .isInstanceOf(NullPointerException.class)
                 .hasMessage("split must not be null");
+    }
+
+    @Test
+    void carriesAdaptiveBatchPolicyThroughTheWorkerRequest() {
+        AdaptiveBatchPolicy policy = AdaptiveBatchPolicy.adaptive(4, 16, 1_000_000, 2);
+        BatchTask task = new RemoteTaskFactory(32, 3, false, policy).create(split());
+
+        WorkerRequest request = WorkerProtocolMapper.executeRequest("worker-a", task);
+
+        assertThat(request.getExecuteTask().hasAdaptiveBatch()).isTrue();
+        assertThat(request.getExecuteTask().getAdaptiveBatch().getMinBatchRecords())
+                .isEqualTo(4);
+        assertThat(request.getExecuteTask().getAdaptiveBatch().getInitialBatchRecords())
+                .isEqualTo(16);
+        assertThat(request.getExecuteTask().getAdaptiveBatch().getTargetBatchNanos())
+                .isEqualTo(1_000_000);
+        assertThat(WorkerProtocolMapper.matchesAdaptiveBatch(
+                        request.getExecuteTask().getAdaptiveBatch(), policy))
+                .isTrue();
+        assertThat(WorkerProtocolMapper.matchesAdaptiveBatch(
+                        request.getExecuteTask().getAdaptiveBatch(), AdaptiveBatchPolicy.adaptive(4, 8, 1_000_000, 2)))
+                .isFalse();
     }
 
     private static SourceSplit split() {

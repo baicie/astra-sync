@@ -15,6 +15,7 @@ import io.astrasync.connector.api.source.CheckpointableBatchSource;
 import io.astrasync.connector.api.source.SourceSplit;
 import io.astrasync.connector.api.source.SplitPosition;
 import io.astrasync.engine.kernel.SyncStage;
+import io.astrasync.engine.runtime.AdaptiveBatchPolicy;
 import io.astrasync.engine.runtime.BatchTask;
 import io.astrasync.engine.runtime.BatchTaskException;
 import io.astrasync.engine.runtime.CheckpointExecutionContext;
@@ -66,6 +67,24 @@ class InProcessBatchWorkerTest {
                 });
         assertThat(source.closeCount).isEqualTo(1);
         assertThat(sink.closeCount).isEqualTo(1);
+    }
+
+    @Test
+    void adaptsTheReadLimitForSubsequentBatches() {
+        RequestedSource source = new RequestedSource(8);
+        LifecycleSink sink = new LifecycleSink(new ArrayList<>());
+
+        new InProcessBatchWorker("worker-a")
+                .execute(new BatchTask(
+                        split("split-1"),
+                        source,
+                        sink,
+                        4,
+                        4,
+                        false,
+                        AdaptiveBatchPolicy.adaptive(1, 2, 1_000_000_000L, 0)));
+
+        assertThat(source.requestedLimits).startsWith(2).contains(4);
     }
 
     @Test
@@ -154,6 +173,31 @@ class InProcessBatchWorkerTest {
         public void close() {
             closeCount++;
         }
+    }
+
+    private static final class RequestedSource implements BatchSource {
+        private final int totalBatches;
+        private final List<Integer> requestedLimits = new ArrayList<>();
+        private int index;
+
+        private RequestedSource(int totalBatches) {
+            this.totalBatches = totalBatches;
+        }
+
+        @Override
+        public void open() {}
+
+        @Override
+        public RowBatch readBatch(int maxRows) {
+            requestedLimits.add(maxRows);
+            index++;
+            return index == totalBatches
+                    ? RowBatch.last(List.of(Row.of("id", index)))
+                    : RowBatch.data(List.of(Row.of("id", index)));
+        }
+
+        @Override
+        public void close() {}
     }
 
     private static final class LifecycleSink implements BatchSink {

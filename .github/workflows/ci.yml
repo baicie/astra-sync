@@ -77,6 +77,11 @@ jobs:
           -jar tests/benchmark/target/astrasync-benchmarks.jar
           ArrowBatchBenchmark -wi 0 -i 1 -f 1 -r 100ms -p rowCount=128
 
+      - name: Run adaptive controller benchmark smoke
+        run: >-
+          java -jar tests/benchmark/target/astrasync-benchmarks.jar
+          AdaptiveControllerBenchmark -wi 0 -i 1 -f 1 -r 100ms
+
   go:
     name: Go checks
     needs: changes

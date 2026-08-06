@@ -45,6 +45,13 @@ public final class BatchExchange {
         }
     }
 
+    /** Publishes a batch and returns the time spent waiting for exchange capacity. */
+    public long publishMeasured(RowBatch batch) {
+        long startedNanos = System.nanoTime();
+        publish(batch);
+        return Math.max(0, System.nanoTime() - startedNanos);
+    }
+
     public RowBatch receive() {
         while (true) {
             try {

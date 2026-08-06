@@ -9,6 +9,7 @@ import io.astrasync.connector.api.source.BatchSource;
 import io.astrasync.connector.api.source.SourceSplit;
 import io.astrasync.connector.api.source.SplitPosition;
 import io.astrasync.engine.kernel.SyncResult;
+import io.astrasync.engine.runtime.AdaptiveParallelismPolicy;
 import io.astrasync.engine.runtime.BatchTask;
 import io.astrasync.engine.runtime.BatchTaskFactory;
 import io.astrasync.engine.runtime.BatchWorker;
@@ -18,6 +19,7 @@ import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
@@ -117,6 +119,79 @@ class BatchCoordinatorTest {
 
         assertThat(completions).containsExactly("split-2", "split-1");
         assertThat(run.taskResults()).extracting(WorkerResult::taskId).containsExactly("split-1", "split-2");
+    }
+
+    @Test
+    void adaptiveSchedulingDoesNotCancelAnInFlightTaskWhenParallelismShrinks() {
+        CountDownLatch secondStarted = new CountDownLatch(1);
+        CountDownLatch releaseSecond = new CountDownLatch(1);
+        AtomicBoolean secondInterrupted = new AtomicBoolean();
+        BatchWorker first = new BatchWorker() {
+            @Override
+            public String workerId() {
+                return "worker-a";
+            }
+
+            @Override
+            public WorkerResult execute(BatchTask task) {
+                return new WorkerResult(workerId(), task.taskId(), new SyncResult(1, 1, 1, 1, 200));
+            }
+        };
+        BatchWorker second = new BatchWorker() {
+            @Override
+            public String workerId() {
+                return "worker-b";
+            }
+
+            @Override
+            public WorkerResult execute(BatchTask task) {
+                secondStarted.countDown();
+                try {
+                    releaseSecond.await(5, TimeUnit.SECONDS);
+                } catch (InterruptedException exception) {
+                    secondInterrupted.set(true);
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException("in-flight task was cancelled", exception);
+                }
+                return new WorkerResult(workerId(), task.taskId(), new SyncResult(1, 1, 1, 1, 200));
+            }
+        };
+
+        DistributedRunResult result = new BatchCoordinator(List.of(first, second))
+                .runAdaptive(
+                        List.of(task("split-1"), task("split-2"), task("split-3")),
+                        AdaptiveParallelismPolicy.adaptive(1, 2, 2, 100, 0),
+                        completed -> {
+                            if (completed.taskId().equals("split-1")) {
+                                await(secondStarted);
+                                releaseSecond.countDown();
+                            }
+                        });
+
+        assertThat(secondInterrupted).isFalse();
+        assertThat(result.taskResults())
+                .extracting(WorkerResult::taskId)
+                .containsExactly("split-1", "split-2", "split-3");
+    }
+
+    @Test
+    void adaptiveSchedulingPropagatesTheFirstWorkerFailure() {
+        BatchWorker failing = new BatchWorker() {
+            @Override
+            public String workerId() {
+                return "worker-a";
+            }
+
+            @Override
+            public WorkerResult execute(BatchTask task) {
+                throw new IllegalStateException("adaptive worker failed");
+            }
+        };
+
+        assertThatThrownBy(() -> new BatchCoordinator(List.of(failing))
+                        .runAdaptive(List.of(task("split-1")), AdaptiveParallelismPolicy.adaptive(1, 1, 1, 100, 0)))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("adaptive worker failed");
     }
 
     private static BatchWorker worker(
