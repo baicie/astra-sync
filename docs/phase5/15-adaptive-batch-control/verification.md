@@ -27,5 +27,13 @@ local target directory contains stale generated output from an earlier protocol 
 
 ## Pull-request Gate
 
-Every required GitHub Actions job must pass before squash merge. The final CI run and merge commit
-will be recorded after the implementation is pushed.
+Pull request [#26](https://github.com/baicie/astra-sync/pull/26) passed every required GitHub
+Actions job in [CI run 31111025522](https://github.com/baicie/astra-sync/actions/runs/31111025522)
+before squash merge. Go and PostgreSQL jobs were scope-skipped because the change did not touch the
+control plane.
+
+The pull request was squash merged into `main` as
+[`49ee76a08cf6f55c386e754eb77cce76906d03ed`](https://github.com/baicie/astra-sync/commit/49ee76a08cf6f55c386e754eb77cce76906d03ed).
+Post-merge [CI run 31111524781](https://github.com/baicie/astra-sync/actions/runs/31111524781)
+also passed, including Maven verification, Spotless, Arrow and adaptive-controller benchmark
+smokes, protocol validation, repository policy checks, and all five container image builds.

@@ -18,4 +18,4 @@
 - [x] Test adaptive scheduling, no cancellation of in-flight tasks, failure propagation, and checkpoint ordering.
 - [x] Add JMH controller decision workloads and a CI smoke invocation.
 - [x] Run Maven verify, Spotless, benchmark smoke, and repository diff checks.
-- [x] Record local verification evidence; require every PR check before squash merge.
+- [x] Record local and remote verification evidence; require every PR check before squash merge.
