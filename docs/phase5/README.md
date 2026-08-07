@@ -3,7 +3,7 @@
 Phase 5 improves bulk throughput and resource efficiency while preserving bounded memory,
 backpressure, checkpoint correctness, and epoch fencing.
 
-**Status: In Progress**
+**Status: Complete**
 
 ## Delivery Slices
 
@@ -11,7 +11,7 @@ backpressure, checkpoint correctness, and epoch fencing.
 |---:|---|---|
 | 14 | Bounded Arrow batches, deterministic Row conversion, IPC framing, and benchmark baseline | Complete |
 | 15 | Adaptive batch sizing and parallelism based on measured workload signals | Complete |
-| 16 | Spillable exchange and checkpoint persistence optimization | In Progress |
+| 16 | Spillable exchange and checkpoint persistence optimization | Complete |
 
 ## Slice 14 Boundary
 
