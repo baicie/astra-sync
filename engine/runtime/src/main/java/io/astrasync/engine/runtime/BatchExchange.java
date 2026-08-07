@@ -9,29 +9,45 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 /** A bounded, failure-aware exchange for one Source/Sink pair. */
-public final class BatchExchange {
+public final class BatchExchange implements AutoCloseable {
     private static final Duration WAIT_INTERVAL = Duration.ofMillis(25);
 
     private final BlockingQueue<RowBatch> batches;
+    private final SpillableBatchStorage spillStorage;
     private final AtomicReference<Throwable> failure = new AtomicReference<>();
 
     public BatchExchange(int capacity) {
+        this(capacity, SpillPolicy.disabled());
+    }
+
+    public BatchExchange(int capacity, SpillPolicy spillPolicy) {
         if (capacity <= 0) {
             throw new IllegalArgumentException("capacity must be positive");
         }
-        this.batches = new ArrayBlockingQueue<>(capacity);
+        SpillPolicy checked = Objects.requireNonNull(spillPolicy, "spillPolicy must not be null");
+        if (checked.enabled()) {
+            this.batches = null;
+            this.spillStorage = new SpillableBatchStorage(capacity, checked);
+        } else {
+            this.batches = new ArrayBlockingQueue<>(capacity);
+            this.spillStorage = null;
+        }
     }
 
     public int capacity() {
-        return batches.remainingCapacity() + batches.size();
+        return spillStorage == null ? batches.remainingCapacity() + batches.size() : spillStorage.capacity();
     }
 
     public int size() {
-        return batches.size();
+        return spillStorage == null ? batches.size() : spillStorage.size();
     }
 
     public void publish(RowBatch batch) {
         Objects.requireNonNull(batch, "batch must not be null");
+        if (spillStorage != null) {
+            spillStorage.publish(batch, failure::get);
+            return;
+        }
         while (true) {
             throwIfFailed();
             try {
@@ -53,6 +69,9 @@ public final class BatchExchange {
     }
 
     public RowBatch receive() {
+        if (spillStorage != null) {
+            return spillStorage.receive(failure::get);
+        }
         while (true) {
             try {
                 RowBatch batch = batches.poll(WAIT_INTERVAL.toMillis(), TimeUnit.MILLISECONDS);
@@ -69,6 +88,16 @@ public final class BatchExchange {
 
     public void fail(Throwable cause) {
         failure.compareAndSet(null, Objects.requireNonNull(cause, "cause must not be null"));
+        if (spillStorage != null) {
+            spillStorage.fail();
+        }
+    }
+
+    @Override
+    public void close() {
+        if (spillStorage != null) {
+            spillStorage.close();
+        }
     }
 
     private void throwIfFailed() {

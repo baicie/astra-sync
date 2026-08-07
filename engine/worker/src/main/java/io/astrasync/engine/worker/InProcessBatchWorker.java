@@ -51,7 +51,7 @@ public final class InProcessBatchWorker implements BatchWorker, CheckpointBatchW
     public WorkerResult execute(BatchTask task) {
         Objects.requireNonNull(task, "task must not be null");
         long startedNanos = System.nanoTime();
-        BatchExchange exchange = new BatchExchange(task.maxInFlightBatches());
+        BatchExchange exchange = new BatchExchange(task.maxInFlightBatches(), task.spillPolicy());
         AdaptiveBatchController batchController =
                 new AdaptiveBatchController(task.batchPolicy(), task.maxBatchRecords());
         ExecutorService executor = Executors.newFixedThreadPool(2, new WorkerThreadFactory(workerId, task.taskId()));
@@ -76,6 +76,7 @@ public final class InProcessBatchWorker implements BatchWorker, CheckpointBatchW
             throw taskFailure(task, exception.getCause(), sourceOutcome, sinkOutcome, startedNanos);
         } finally {
             executor.shutdownNow();
+            exchange.close();
         }
 
         SyncJobException failure = primaryFailure(sourceOutcome, sinkOutcome);

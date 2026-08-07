@@ -87,7 +87,8 @@ public final class CoordinatorApplication {
                         plan.adaptiveBatch().minBatchRecords(),
                         plan.adaptiveBatch().initialBatchRecords(),
                         plan.adaptiveBatch().targetBatchNanos(),
-                        plan.adaptiveBatch().adjustmentCooldownSamples()));
+                        plan.adaptiveBatch().adjustmentCooldownSamples()),
+                plan.spill());
         AdaptiveParallelismPolicy parallelismPolicy = plan.adaptiveParallelism().enabled()
                 ? new AdaptiveParallelismPolicy(
                         plan.adaptiveParallelism().minParallelism(),

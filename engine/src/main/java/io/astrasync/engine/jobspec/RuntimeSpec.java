@@ -1,11 +1,23 @@
 package io.astrasync.engine.jobspec;
 
 public record RuntimeSpec(
-        int maxBatchRecords, AdaptiveBatchSpec adaptiveBatch, AdaptiveParallelismSpec adaptiveParallelism) {
+        int maxBatchRecords,
+        AdaptiveBatchSpec adaptiveBatch,
+        AdaptiveParallelismSpec adaptiveParallelism,
+        SpillSpec spill) {
     public static final int DEFAULT_MAX_BATCH_RECORDS = 1_024;
 
     public RuntimeSpec(int maxBatchRecords) {
-        this(maxBatchRecords, AdaptiveBatchSpec.disabled(maxBatchRecords), AdaptiveParallelismSpec.disabled());
+        this(
+                maxBatchRecords,
+                AdaptiveBatchSpec.disabled(maxBatchRecords),
+                AdaptiveParallelismSpec.disabled(),
+                SpillSpec.disabled());
+    }
+
+    public RuntimeSpec(
+            int maxBatchRecords, AdaptiveBatchSpec adaptiveBatch, AdaptiveParallelismSpec adaptiveParallelism) {
+        this(maxBatchRecords, adaptiveBatch, adaptiveParallelism, SpillSpec.disabled());
     }
 
     public RuntimeSpec {
@@ -24,6 +36,9 @@ public record RuntimeSpec(
         }
         if (adaptiveParallelism == null) {
             throw new IllegalArgumentException("adaptiveParallelism must not be null");
+        }
+        if (spill == null) {
+            throw new IllegalArgumentException("spill must not be null");
         }
     }
 

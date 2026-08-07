@@ -5,12 +5,12 @@ import com.fasterxml.jackson.databind.SerializationFeature;
 import java.io.IOException;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
-import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
+import java.nio.file.attribute.FileTime;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -26,6 +26,13 @@ public final class FileCheckpointStore implements CheckpointStore {
     private final ObjectMapper mapper = new ObjectMapper()
             .enable(SerializationFeature.INDENT_OUTPUT)
             .enable(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS);
+    private final AtomicCheckpointWriter durableWriter = new AtomicCheckpointWriter(mapper);
+    private final Map<String, CachedState> cache = new LinkedHashMap<>(16, 0.75f, true) {
+        @Override
+        protected boolean removeEldestEntry(Map.Entry<String, CachedState> eldest) {
+            return size() > 64;
+        }
+    };
 
     public FileCheckpointStore(Path root) {
         this.root = Objects.requireNonNull(root, "root must not be null")
@@ -47,8 +54,9 @@ public final class FileCheckpointStore implements CheckpointStore {
         SplitPlan checkedPlan = Objects.requireNonNull(plan, "plan must not be null");
         return locked(checkedJobId, () -> {
             Path manifest = manifest(checkedJobId);
-            CheckpointState state =
-                    Files.exists(manifest) ? read(manifest) : CheckpointState.empty(checkedJobId, checkedPlan);
+            CheckpointState state = Files.exists(manifest)
+                    ? readCached(checkedJobId, manifest)
+                    : CheckpointState.empty(checkedJobId, checkedPlan);
             if (!state.plan().equals(checkedPlan)) {
                 throw new SplitPlanMismatchException("split plan changed for job " + checkedJobId);
             }
@@ -67,8 +75,9 @@ public final class FileCheckpointStore implements CheckpointStore {
         }
         return locked(checkedJobId, () -> {
             Path manifest = manifest(checkedJobId);
-            CheckpointState state =
-                    Files.exists(manifest) ? read(manifest) : CheckpointState.empty(checkedJobId, checkedPlan);
+            CheckpointState state = Files.exists(manifest)
+                    ? readCached(checkedJobId, manifest)
+                    : CheckpointState.empty(checkedJobId, checkedPlan);
             if (!state.plan().equals(checkedPlan)) {
                 throw new SplitPlanMismatchException("split plan changed for job " + checkedJobId);
             }
@@ -94,7 +103,8 @@ public final class FileCheckpointStore implements CheckpointStore {
             if (!Files.exists(manifest)) {
                 return Optional.empty();
             }
-            return Optional.ofNullable(read(manifest).records().get(checkedSplitId));
+            return Optional.ofNullable(
+                    readCached(checkedJobId, manifest).records().get(checkedSplitId));
         });
     }
 
@@ -107,7 +117,8 @@ public final class FileCheckpointStore implements CheckpointStore {
             if (!Files.exists(manifest)) {
                 return Optional.empty();
             }
-            return Optional.ofNullable(read(manifest).completedSplits().get(checkedSplitId));
+            return Optional.ofNullable(
+                    readCached(checkedJobId, manifest).completedSplits().get(checkedSplitId));
         });
     }
 
@@ -120,7 +131,7 @@ public final class FileCheckpointStore implements CheckpointStore {
             if (!Files.exists(manifest)) {
                 throw new CheckpointStoreException("checkpoint epoch was not acquired for job " + checkedJobId);
             }
-            CheckpointState state = read(manifest);
+            CheckpointState state = readCached(checkedJobId, manifest);
             long activeEpoch = state.nextExecutionEpoch() - 1;
             if (checked.executionEpoch() != activeEpoch) {
                 throw new StaleCheckpointException(
@@ -168,7 +179,7 @@ public final class FileCheckpointStore implements CheckpointStore {
             if (!Files.exists(manifest)) {
                 throw new CheckpointStoreException("checkpoint epoch was not acquired for job " + checkedJobId);
             }
-            CheckpointState state = read(manifest);
+            CheckpointState state = readCached(checkedJobId, manifest);
             long activeEpoch = state.nextExecutionEpoch() - 1;
             if (checked.executionEpoch() != activeEpoch) {
                 throw new StaleCheckpointException(
@@ -219,30 +230,27 @@ public final class FileCheckpointStore implements CheckpointStore {
         }
     }
 
-    private void write(Path manifest, CheckpointState state) {
-        Path temporary = null;
+    private CheckpointState readCached(String jobId, Path manifest) {
         try {
-            temporary = Files.createTempFile(root, state.jobId() + "-checkpoint-", ".tmp");
-            Files.write(temporary, mapper.writeValueAsBytes(state), StandardOpenOption.TRUNCATE_EXISTING);
-            try (FileChannel channel = FileChannel.open(temporary, StandardOpenOption.WRITE)) {
-                channel.force(true);
+            FileStamp stamp = FileStamp.read(manifest);
+            CachedState cached = cache.get(jobId);
+            if (cached != null && cached.stamp().equals(stamp)) {
+                return cached.state();
             }
-            try {
-                Files.move(temporary, manifest, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
-            } catch (AtomicMoveNotSupportedException exception) {
-                throw new IOException("checkpoint volume does not support atomic replacement", exception);
-            }
-            temporary = null;
+            CheckpointState state = read(manifest);
+            cache.put(jobId, new CachedState(stamp, state));
+            return state;
+        } catch (IOException exception) {
+            throw new CheckpointStoreException("failed to inspect checkpoint " + manifest.getFileName(), exception);
+        }
+    }
+
+    private void write(Path manifest, CheckpointState state) {
+        try {
+            durableWriter.write(manifest, state);
+            cache.put(state.jobId(), new CachedState(FileStamp.read(manifest), state));
         } catch (IOException exception) {
             throw new CheckpointStoreException("failed to write checkpoint " + manifest.getFileName(), exception);
-        } finally {
-            if (temporary != null) {
-                try {
-                    Files.deleteIfExists(temporary);
-                } catch (IOException ignored) {
-                    // Preserve the primary durable-write failure.
-                }
-            }
         }
     }
 
@@ -278,6 +286,14 @@ public final class FileCheckpointStore implements CheckpointStore {
     @FunctionalInterface
     private interface IoOperation<T> {
         T run() throws IOException;
+    }
+
+    private record CachedState(FileStamp stamp, CheckpointState state) {}
+
+    private record FileStamp(long size, FileTime modifiedTime) {
+        private static FileStamp read(Path path) throws IOException {
+            return new FileStamp(Files.size(path), Files.getLastModifiedTime(path));
+        }
     }
 
     private record CheckpointState(

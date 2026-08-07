@@ -111,6 +111,23 @@ class JobSpecParserTest {
     }
 
     @Test
+    void parsesBoundedSpillSettings() {
+        JobSpec jobSpec = parser.parse(minimalSpec("at-most-once")
+                .replace(
+                        "    guarantee: at-most-once",
+                        "    guarantee: at-most-once\n"
+                                + "  runtime:\n"
+                                + "    spill:\n"
+                                + "      enabled: true\n"
+                                + "      maxBytes: 4096\n"
+                                + "      maxFiles: 3"));
+
+        assertThat(jobSpec.spec().runtime().spill())
+                .extracting(SpillSpec::enabled, SpillSpec::maxBytes, SpillSpec::maxFiles)
+                .containsExactly(true, 4096L, 3);
+    }
+
+    @Test
     void rejectsMalformedAdaptiveSettings() {
         assertFailure(
                 minimalSpec("at-most-once")

@@ -90,7 +90,8 @@ public final class JobCompiler {
                 requested,
                 jobSpec.spec().runtime().maxBatchRecords(),
                 jobSpec.spec().runtime().adaptiveBatch(),
-                jobSpec.spec().runtime().adaptiveParallelism());
+                jobSpec.spec().runtime().adaptiveParallelism(),
+                jobSpec.spec().runtime().spill());
     }
 
     private ConnectorDescriptor resolve(ConnectorSpec connectorSpec, ConnectorRole role) {

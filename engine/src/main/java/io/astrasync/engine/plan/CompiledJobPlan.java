@@ -3,6 +3,7 @@ package io.astrasync.engine.plan;
 import io.astrasync.engine.jobspec.AdaptiveBatchSpec;
 import io.astrasync.engine.jobspec.AdaptiveParallelismSpec;
 import io.astrasync.engine.jobspec.DeliveryGuarantee;
+import io.astrasync.engine.jobspec.SpillSpec;
 import java.util.Objects;
 
 public record CompiledJobPlan(
@@ -14,7 +15,8 @@ public record CompiledJobPlan(
         DeliveryGuarantee deliveryGuarantee,
         int maxBatchRecords,
         AdaptiveBatchSpec adaptiveBatch,
-        AdaptiveParallelismSpec adaptiveParallelism) {
+        AdaptiveParallelismSpec adaptiveParallelism,
+        SpillSpec spill) {
     public CompiledJobPlan(
             String apiVersion,
             String jobName,
@@ -32,7 +34,8 @@ public record CompiledJobPlan(
                 deliveryGuarantee,
                 maxBatchRecords,
                 AdaptiveBatchSpec.disabled(maxBatchRecords),
-                AdaptiveParallelismSpec.disabled());
+                AdaptiveParallelismSpec.disabled(),
+                SpillSpec.disabled());
     }
 
     public CompiledJobPlan {
@@ -51,6 +54,7 @@ public record CompiledJobPlan(
             throw new IllegalArgumentException("adaptive batch bounds must not exceed maxBatchRecords");
         }
         adaptiveParallelism = Objects.requireNonNull(adaptiveParallelism, "adaptiveParallelism must not be null");
+        spill = Objects.requireNonNull(spill, "spill must not be null");
     }
 
     private static String requireText(String value, String name) {

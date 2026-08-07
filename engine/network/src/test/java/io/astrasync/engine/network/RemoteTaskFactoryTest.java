@@ -7,6 +7,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import io.astrasync.connector.api.data.RowBatch;
 import io.astrasync.connector.api.source.SourceSplit;
 import io.astrasync.connector.api.source.SplitPosition;
+import io.astrasync.engine.jobspec.SpillSpec;
 import io.astrasync.engine.runtime.AdaptiveBatchPolicy;
 import io.astrasync.engine.runtime.BatchTask;
 import io.astrasync.protocol.worker.WorkerRequest;
@@ -72,6 +73,21 @@ class RemoteTaskFactoryTest {
         assertThat(WorkerProtocolMapper.matchesAdaptiveBatch(
                         request.getExecuteTask().getAdaptiveBatch(), AdaptiveBatchPolicy.adaptive(4, 8, 1_000_000, 2)))
                 .isFalse();
+    }
+
+    @Test
+    void carriesPortableSpillPolicyThroughTheWorkerRequest() {
+        SpillSpec spec = new SpillSpec(true, 4096, 3);
+        BatchTask task = new RemoteTaskFactory(32, 3, false, AdaptiveBatchPolicy.fixed(32), spec).create(split());
+
+        WorkerRequest request = WorkerProtocolMapper.executeRequest("worker-a", task);
+
+        assertThat(request.getExecuteTask().hasSpill()).isTrue();
+        assertThat(request.getExecuteTask().getSpill().getEnabled()).isTrue();
+        assertThat(request.getExecuteTask().getSpill().getMaxBytes()).isEqualTo(4096);
+        assertThat(request.getExecuteTask().getSpill().getMaxFiles()).isEqualTo(3);
+        assertThat(WorkerProtocolMapper.matchesSpill(request.getExecuteTask().getSpill(), task.spillPolicy()))
+                .isTrue();
     }
 
     private static SourceSplit split() {

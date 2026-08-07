@@ -291,7 +291,9 @@ public final class WorkerServer implements AutoCloseable {
                     || request.getMaxInFlightBatches() != task.maxInFlightBatches()
                     || request.getExactlyOnce() != task.exactlyOnce()
                     || !WorkerProtocolMapper.matchesAdaptiveBatch(
-                            request.hasAdaptiveBatch() ? request.getAdaptiveBatch() : null, task.batchPolicy())) {
+                            request.hasAdaptiveBatch() ? request.getAdaptiveBatch() : null, task.batchPolicy())
+                    || !WorkerProtocolMapper.matchesSpill(
+                            request.hasSpill() ? request.getSpill() : null, task.spillPolicy())) {
                 return WorkerProtocolMapper.checkpointError(
                         ErrorCode.TASK_REJECTED, request.getTaskId(), "task factory changed the requested split");
             }
@@ -400,7 +402,9 @@ public final class WorkerServer implements AutoCloseable {
                     || request.getMaxBatchRecords() != task.maxBatchRecords()
                     || request.getMaxInFlightBatches() != task.maxInFlightBatches()
                     || !WorkerProtocolMapper.matchesAdaptiveBatch(
-                            request.hasAdaptiveBatch() ? request.getAdaptiveBatch() : null, task.batchPolicy())) {
+                            request.hasAdaptiveBatch() ? request.getAdaptiveBatch() : null, task.batchPolicy())
+                    || !WorkerProtocolMapper.matchesSpill(
+                            request.hasSpill() ? request.getSpill() : null, task.spillPolicy())) {
                 return WorkerProtocolMapper.error(
                         ErrorCode.TASK_REJECTED, request.getTaskId(), "task factory changed the requested split");
             }

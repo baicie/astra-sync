@@ -4,6 +4,7 @@ import io.astrasync.connector.api.data.RowBatch;
 import io.astrasync.connector.api.sink.BatchSink;
 import io.astrasync.connector.api.source.BatchSource;
 import io.astrasync.connector.api.source.SourceSplit;
+import io.astrasync.engine.jobspec.SpillSpec;
 import io.astrasync.engine.runtime.AdaptiveBatchPolicy;
 import io.astrasync.engine.runtime.BatchTask;
 import io.astrasync.engine.runtime.BatchTaskFactory;
@@ -15,17 +16,32 @@ public final class RemoteTaskFactory implements BatchTaskFactory {
     private final int maxInFlightBatches;
     private final boolean exactlyOnce;
     private final AdaptiveBatchPolicy batchPolicy;
+    private final SpillSpec spillSpec;
 
     public RemoteTaskFactory(int maxBatchRecords, int maxInFlightBatches) {
         this(maxBatchRecords, maxInFlightBatches, false);
     }
 
     public RemoteTaskFactory(int maxBatchRecords, int maxInFlightBatches, boolean exactlyOnce) {
-        this(maxBatchRecords, maxInFlightBatches, exactlyOnce, AdaptiveBatchPolicy.fixed(maxBatchRecords));
+        this(
+                maxBatchRecords,
+                maxInFlightBatches,
+                exactlyOnce,
+                AdaptiveBatchPolicy.fixed(maxBatchRecords),
+                SpillSpec.disabled());
     }
 
     public RemoteTaskFactory(
             int maxBatchRecords, int maxInFlightBatches, boolean exactlyOnce, AdaptiveBatchPolicy batchPolicy) {
+        this(maxBatchRecords, maxInFlightBatches, exactlyOnce, batchPolicy, SpillSpec.disabled());
+    }
+
+    public RemoteTaskFactory(
+            int maxBatchRecords,
+            int maxInFlightBatches,
+            boolean exactlyOnce,
+            AdaptiveBatchPolicy batchPolicy,
+            SpillSpec spillSpec) {
         if (maxBatchRecords <= 0) {
             throw new IllegalArgumentException("maxBatchRecords must be positive");
         }
@@ -36,6 +52,7 @@ public final class RemoteTaskFactory implements BatchTaskFactory {
         this.maxInFlightBatches = maxInFlightBatches;
         this.exactlyOnce = exactlyOnce;
         this.batchPolicy = Objects.requireNonNull(batchPolicy, "batchPolicy must not be null");
+        this.spillSpec = Objects.requireNonNull(spillSpec, "spillSpec must not be null");
         if (batchPolicy.minBatchRecords() > maxBatchRecords || batchPolicy.initialBatchRecords() > maxBatchRecords) {
             throw new IllegalArgumentException("batch policy bounds must not exceed maxBatchRecords");
         }
@@ -51,7 +68,8 @@ public final class RemoteTaskFactory implements BatchTaskFactory {
                 maxBatchRecords,
                 maxInFlightBatches,
                 exactlyOnce,
-                batchPolicy);
+                batchPolicy,
+                io.astrasync.engine.runtime.SpillPolicy.descriptor(spillSpec));
     }
 
     private static final class DescriptorSource implements BatchSource {
