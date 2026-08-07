@@ -22,5 +22,6 @@
 
 ## Pull-request Gate
 
-Pending PR and post-merge evidence. The local gates above are green; the PR gate will be recorded
-after the remote branch is created and GitHub Actions completes.
+PASS: PR [#28](https://github.com/baicie/astra-sync/pull/28) passed all applicable gates and was
+squash-merged into `main` as `74bd72b2a280fea2b4208717e2d7c9bfd5a97e52`. Post-merge CI run
+`31192184481` completed successfully.

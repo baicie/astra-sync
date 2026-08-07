@@ -17,4 +17,4 @@
 - [x] Test order, bounds, malformed frames, cleanup, failure propagation, cache reload, and stale checkpoint rejection.
 - [x] Add spill/memory JMH smoke coverage and CI wiring.
 - [x] Run Maven verification, Spotless, benchmark smoke, and diff checks.
-- [ ] Record PR and post-merge evidence, then require all applicable checks before squash merge.
+- [x] Record PR and post-merge evidence, then require all applicable checks before squash merge.
