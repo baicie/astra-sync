@@ -7,11 +7,12 @@ import io.astrasync.engine.runtime.WorkerResult;
 import java.io.IOException;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
-import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
+import java.nio.file.attribute.FileTime;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -21,6 +22,13 @@ public final class FileSplitProgressStore implements SplitProgressStore {
     private final ObjectMapper mapper = new ObjectMapper()
             .enable(SerializationFeature.INDENT_OUTPUT)
             .enable(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS);
+    private final AtomicCheckpointWriter durableWriter = new AtomicCheckpointWriter(mapper);
+    private final Map<String, CachedState> cache = new LinkedHashMap<>(16, 0.75f, true) {
+        @Override
+        protected boolean removeEldestEntry(Map.Entry<String, CachedState> eldest) {
+            return size() > 64;
+        }
+    };
 
     public FileSplitProgressStore(Path root) {
         this.root = Objects.requireNonNull(root, "root must not be null")
@@ -47,7 +55,7 @@ public final class FileSplitProgressStore implements SplitProgressStore {
                 write(manifest, created);
                 return created;
             }
-            FullLoadProgress existing = read(manifest);
+            FullLoadProgress existing = readCached(checkedJobId, manifest);
             if (!existing.plan().equals(checkedPlan)) {
                 throw new SplitPlanMismatchException("split plan changed for job " + checkedJobId);
             }
@@ -60,7 +68,7 @@ public final class FileSplitProgressStore implements SplitProgressStore {
         String checkedJobId = FullLoadProgress.requireJobId(jobId);
         return locked(checkedJobId, () -> {
             Path manifest = manifest(checkedJobId);
-            return Files.exists(manifest) ? Optional.of(read(manifest)) : Optional.empty();
+            return Files.exists(manifest) ? Optional.of(readCached(checkedJobId, manifest)) : Optional.empty();
         });
     }
 
@@ -74,7 +82,7 @@ public final class FileSplitProgressStore implements SplitProgressStore {
             if (!Files.exists(manifest)) {
                 throw new SplitProgressException("split progress does not exist for job " + checkedJobId, null);
             }
-            FullLoadProgress existing = read(manifest);
+            FullLoadProgress existing = readCached(checkedJobId, manifest);
             if (!existing.plan().fingerprint().equals(planFingerprint)) {
                 throw new SplitPlanMismatchException("split plan changed for job " + checkedJobId);
             }
@@ -110,31 +118,27 @@ public final class FileSplitProgressStore implements SplitProgressStore {
         }
     }
 
-    private void write(Path manifest, FullLoadProgress progress) {
-        Path temporary = null;
+    private FullLoadProgress readCached(String jobId, Path manifest) {
         try {
-            temporary = Files.createTempFile(root, progress.jobId() + "-", ".tmp");
-            byte[] payload = mapper.writeValueAsBytes(progress);
-            Files.write(temporary, payload, StandardOpenOption.TRUNCATE_EXISTING);
-            try (FileChannel channel = FileChannel.open(temporary, StandardOpenOption.WRITE)) {
-                channel.force(true);
+            FileStamp stamp = FileStamp.read(manifest);
+            CachedState cached = cache.get(jobId);
+            if (cached != null && cached.stamp().equals(stamp)) {
+                return cached.progress();
             }
-            try {
-                Files.move(temporary, manifest, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
-            } catch (AtomicMoveNotSupportedException exception) {
-                throw new IOException("split progress volume does not support atomic replacement", exception);
-            }
-            temporary = null;
+            FullLoadProgress progress = read(manifest);
+            cache.put(jobId, new CachedState(stamp, progress));
+            return progress;
+        } catch (IOException exception) {
+            throw new SplitProgressException("failed to inspect split progress " + manifest.getFileName(), exception);
+        }
+    }
+
+    private void write(Path manifest, FullLoadProgress progress) {
+        try {
+            durableWriter.write(manifest, progress);
+            cache.put(progress.jobId(), new CachedState(FileStamp.read(manifest), progress));
         } catch (IOException exception) {
             throw new SplitProgressException("failed to write split progress " + manifest.getFileName(), exception);
-        } finally {
-            if (temporary != null) {
-                try {
-                    Files.deleteIfExists(temporary);
-                } catch (IOException ignored) {
-                    // The durable manifest write already failed; retain its primary exception.
-                }
-            }
         }
     }
 
@@ -145,5 +149,13 @@ public final class FileSplitProgressStore implements SplitProgressStore {
     @FunctionalInterface
     private interface IoOperation<T> {
         T run() throws IOException;
+    }
+
+    private record CachedState(FileStamp stamp, FullLoadProgress progress) {}
+
+    private record FileStamp(long size, FileTime modifiedTime) {
+        private static FileStamp read(Path path) throws IOException {
+            return new FileStamp(Files.size(path), Files.getLastModifiedTime(path));
+        }
     }
 }

@@ -11,7 +11,7 @@ backpressure, checkpoint correctness, and epoch fencing.
 |---:|---|---|
 | 14 | Bounded Arrow batches, deterministic Row conversion, IPC framing, and benchmark baseline | Complete |
 | 15 | Adaptive batch sizing and parallelism based on measured workload signals | Complete |
-| 16 | Spillable exchange and checkpoint persistence optimization | Planned |
+| 16 | Spillable exchange and checkpoint persistence optimization | In Progress |
 
 ## Slice 14 Boundary
 
@@ -36,3 +36,8 @@ and measurement contracts established here.
   [verification](15-adaptive-batch-control/verification.md)
 - [ADR-032: Bounded Arrow Batch Foundation](../adr/adr-032-bounded-arrow-batch-foundation.md)
 - [ADR-033: Adaptive Batch and Parallelism Control](../adr/adr-033-adaptive-batch-and-parallelism-control.md)
+- [Slice 16](16-spillable-exchange/README.md):
+  [design](16-spillable-exchange/design.md),
+  [implementation plan](16-spillable-exchange/implementation-plan.md), and
+  [verification](16-spillable-exchange/verification.md)
+- [ADR-034: Spillable Exchange and Checkpoint Persistence Optimization](../adr/adr-034-spillable-exchange-and-checkpoint-persistence.md)

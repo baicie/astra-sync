@@ -31,11 +31,13 @@ public final class JobSpecParser {
     private static final Set<String> CONNECTOR_FIELDS = Set.of("connector", "options");
     private static final Set<String> TRANSFORM_FIELDS = Set.of("type", "options");
     private static final Set<String> DELIVERY_FIELDS = Set.of("guarantee");
-    private static final Set<String> RUNTIME_FIELDS = Set.of("maxBatchRecords", "adaptiveBatch", "adaptiveParallelism");
+    private static final Set<String> RUNTIME_FIELDS =
+            Set.of("maxBatchRecords", "adaptiveBatch", "adaptiveParallelism", "spill");
     private static final Set<String> ADAPTIVE_BATCH_FIELDS =
             Set.of("minBatchRecords", "initialBatchRecords", "targetBatchNanos", "adjustmentCooldownSamples");
     private static final Set<String> ADAPTIVE_PARALLELISM_FIELDS = Set.of(
             "minParallelism", "initialParallelism", "maxParallelism", "targetTaskNanos", "adjustmentCooldownSamples");
+    private static final Set<String> SPILL_FIELDS = Set.of("enabled", "maxBytes", "maxFiles");
 
     public JobSpec parse(String document) {
         if (document == null) {
@@ -160,13 +162,14 @@ public final class JobSpecParser {
                 parseAdaptiveBatch(node.get("adaptiveBatch"), child(path, "adaptiveBatch"), maxBatchRecords);
         AdaptiveParallelismSpec adaptiveParallelism =
                 parseAdaptiveParallelism(node.get("adaptiveParallelism"), child(path, "adaptiveParallelism"));
+        SpillSpec spill = parseSpill(node.get("spill"), child(path, "spill"));
         if (adaptiveBatch.minBatchRecords() > maxBatchRecords
                 || adaptiveBatch.initialBatchRecords() > maxBatchRecords) {
             throw failure(
                     child(path, "adaptiveBatch"),
                     "batch bounds must not exceed maxBatchRecords (" + maxBatchRecords + ")");
         }
-        return new RuntimeSpec(maxBatchRecords, adaptiveBatch, adaptiveParallelism);
+        return new RuntimeSpec(maxBatchRecords, adaptiveBatch, adaptiveParallelism, spill);
     }
 
     private static AdaptiveBatchSpec parseAdaptiveBatch(JsonNode node, String path, int maxBatchRecords) {
@@ -204,6 +207,22 @@ public final class JobSpecParser {
         }
     }
 
+    private static SpillSpec parseSpill(JsonNode node, String path) {
+        if (node == null) {
+            return SpillSpec.disabled();
+        }
+        requireObject(node, path);
+        rejectUnknownFields(node, SPILL_FIELDS, path);
+        try {
+            return new SpillSpec(
+                    requiredBoolean(node, "enabled", path),
+                    requiredLong(node, "maxBytes", path),
+                    requiredInt(node, "maxFiles", path));
+        } catch (IllegalArgumentException exception) {
+            throw failure(path, exception.getMessage(), exception);
+        }
+    }
+
     private static int optionalInt(JsonNode parent, String field, String path, int defaultValue) {
         JsonNode node = parent.get(field);
         return node == null ? defaultValue : integerValue(node, child(path, field));
@@ -233,6 +252,17 @@ public final class JobSpecParser {
             throw failure(child(path, field), "must be a 64-bit integer");
         }
         return node.longValue();
+    }
+
+    private static boolean requiredBoolean(JsonNode parent, String field, String path) {
+        JsonNode node = parent.get(field);
+        if (node == null) {
+            throw failure(child(path, field), "is required");
+        }
+        if (!node.isBoolean()) {
+            throw failure(child(path, field), "must be a boolean");
+        }
+        return node.booleanValue();
     }
 
     private static Map<String, String> parseOptions(JsonNode node, String path) {

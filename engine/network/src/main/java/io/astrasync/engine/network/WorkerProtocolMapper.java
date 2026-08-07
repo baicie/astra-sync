@@ -13,6 +13,7 @@ import io.astrasync.protocol.worker.AdaptiveBatchSettings;
 import io.astrasync.protocol.worker.ErrorCode;
 import io.astrasync.protocol.worker.ExecuteCheckpointTaskRequest;
 import io.astrasync.protocol.worker.ExecuteTaskRequest;
+import io.astrasync.protocol.worker.SpillSettings;
 import io.astrasync.protocol.worker.SplitDescriptor;
 import io.astrasync.protocol.worker.SyncMetrics;
 import io.astrasync.protocol.worker.TaskResult;
@@ -33,6 +34,7 @@ final class WorkerProtocolMapper {
                 .setMaxBatchRecords(task.maxBatchRecords())
                 .setMaxInFlightBatches(task.maxInFlightBatches())
                 .setAdaptiveBatch(toAdaptiveBatch(task.batchPolicy()))
+                .setSpill(toSpill(task.spillPolicy()))
                 .build();
         return WorkerRequest.newBuilder()
                 .setProtocolVersion(WorkerProtocol.CURRENT_VERSION)
@@ -68,6 +70,7 @@ final class WorkerProtocolMapper {
                 .setSplitFingerprint(requireText(splitFingerprint, "splitFingerprint"))
                 .setExactlyOnce(task.exactlyOnce())
                 .setAdaptiveBatch(toAdaptiveBatch(task.batchPolicy()))
+                .setSpill(toSpill(task.spillPolicy()))
                 .build();
         return WorkerRequest.newBuilder()
                 .setProtocolVersion(WorkerProtocol.CHECKPOINT_VERSION)
@@ -254,6 +257,16 @@ final class WorkerProtocolMapper {
                 && settings.getAdjustmentCooldownSamples() == policy.adjustmentCooldownSamples();
     }
 
+    static boolean matchesSpill(SpillSettings settings, io.astrasync.engine.runtime.SpillPolicy policy) {
+        Objects.requireNonNull(policy, "policy must not be null");
+        if (settings == null) {
+            return !policy.enabled();
+        }
+        return settings.getEnabled() == policy.enabled()
+                && settings.getMaxBytes() == policy.maxBytes()
+                && settings.getMaxFiles() == policy.maxFiles();
+    }
+
     private static SplitDescriptor toDescriptor(SourceSplit split) {
         return SplitDescriptor.newBuilder()
                 .setSplitId(split.splitId())
@@ -282,6 +295,17 @@ final class WorkerProtocolMapper {
                 .setInitialBatchRecords(policy.initialBatchRecords())
                 .setTargetBatchNanos(policy.targetBatchNanos())
                 .setAdjustmentCooldownSamples(policy.adjustmentCooldownSamples())
+                .build();
+    }
+
+    private static SpillSettings toSpill(io.astrasync.engine.runtime.SpillPolicy policy) {
+        if (!policy.enabled()) {
+            return SpillSettings.getDefaultInstance();
+        }
+        return SpillSettings.newBuilder()
+                .setEnabled(true)
+                .setMaxBytes(policy.maxBytes())
+                .setMaxFiles(policy.maxFiles())
                 .build();
     }
 

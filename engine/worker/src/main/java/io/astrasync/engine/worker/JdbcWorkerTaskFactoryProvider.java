@@ -14,6 +14,7 @@ import io.astrasync.engine.runtime.AdaptiveBatchPolicy;
 import io.astrasync.engine.runtime.BatchTask;
 import io.astrasync.engine.runtime.BatchTaskFactory;
 import io.astrasync.engine.runtime.CheckpointExecutionContext;
+import io.astrasync.engine.runtime.SpillPolicy;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -25,6 +26,7 @@ import java.util.Objects;
 public final class JdbcWorkerTaskFactoryProvider implements WorkerTaskFactoryProvider {
     public static final String JOB_SPEC_ENVIRONMENT = "ASTRASYNC_WORKER_JOB_SPEC";
     public static final String MAX_IN_FLIGHT_BATCHES_ENVIRONMENT = "ASTRASYNC_WORKER_MAX_IN_FLIGHT_BATCHES";
+    public static final String SPILL_DIRECTORY_ENVIRONMENT = "ASTRASYNC_WORKER_SPILL_DIRECTORY";
 
     @Override
     public BatchTaskFactory create(Map<String, String> environment) {
@@ -47,6 +49,9 @@ public final class JdbcWorkerTaskFactoryProvider implements WorkerTaskFactoryPro
         ConnectorConfiguration sinkConfiguration =
                 ConnectorConfiguration.of(plan.sink().options());
         int maxInFlightBatches = positiveInteger(environment, MAX_IN_FLIGHT_BATCHES_ENVIRONMENT, 1);
+        SpillPolicy spillPolicy = plan.spill().enabled()
+                ? SpillPolicy.enabled(Path.of(required(environment, SPILL_DIRECTORY_ENVIRONMENT)), plan.spill())
+                : SpillPolicy.disabled();
         return new BatchTaskFactory() {
             @Override
             public BatchTask create(io.astrasync.connector.api.source.SourceSplit split) {
@@ -80,7 +85,8 @@ public final class JdbcWorkerTaskFactoryProvider implements WorkerTaskFactoryPro
                             plan.maxBatchRecords(),
                             maxInFlightBatches,
                             plan.deliveryGuarantee() == io.astrasync.engine.jobspec.DeliveryGuarantee.EXACTLY_ONCE,
-                            batchPolicy);
+                            batchPolicy,
+                            spillPolicy);
                 } catch (RuntimeException exception) {
                     try {
                         source.close();

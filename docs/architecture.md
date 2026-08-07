@@ -123,3 +123,5 @@ Coordinator/Worker dispatch, and control-plane epoch propagation into checkpoint
 ADR-031 completes Controller convergence and execution liveness. ADR-032 establishes the bounded
 Arrow batch ownership, scalar mapping, IPC, and benchmark contracts that begin Phase 5. ADR-033
 defines bounded adaptive batch sizing and non-checkpoint split parallelism from measured signals.
+ADR-034 adds opt-in local spill frames and checkpoint persistence optimizations while preserving
+the existing bounded exchange and durable checkpoint invariants.

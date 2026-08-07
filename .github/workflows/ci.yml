@@ -82,6 +82,11 @@ jobs:
           java -jar tests/benchmark/target/astrasync-benchmarks.jar
           AdaptiveControllerBenchmark -wi 0 -i 1 -f 1 -r 100ms
 
+      - name: Run spill exchange benchmark smoke
+        run: >-
+          java -jar tests/benchmark/target/astrasync-benchmarks.jar
+          SpillExchangeBenchmark -wi 0 -i 1 -f 1 -r 100ms
+
   go:
     name: Go checks
     needs: changes
