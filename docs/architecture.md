@@ -125,3 +125,6 @@ Arrow batch ownership, scalar mapping, IPC, and benchmark contracts that begin P
 defines bounded adaptive batch sizing and non-checkpoint split parallelism from measured signals.
 ADR-034 adds opt-in local spill frames and checkpoint persistence optimizations while preserving
 the existing bounded exchange and durable checkpoint invariants.
+ADR-035 establishes the first namespace-scoped read-only Console. ADR-036 defines external OIDC,
+Console BFF sessions, and local tenant authorization. ADR-037 defines the transactional,
+append-only control-plane audit boundary required for authenticated mutations.
