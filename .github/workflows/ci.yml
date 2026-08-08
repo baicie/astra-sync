@@ -39,7 +39,7 @@ jobs:
           if [[ -z "${base_sha}" || "${base_sha}" =~ ^0+$ ]]; then
             base_sha="$(git rev-list --max-parents=0 HEAD)"
           fi
-          if git diff --quiet "${base_sha}" HEAD -- control-plane; then
+          if git diff --quiet "${base_sha}" HEAD -- control-plane console; then
             echo "go=false" >> "${GITHUB_OUTPUT}"
           else
             echo "go=true" >> "${GITHUB_OUTPUT}"
@@ -103,6 +103,7 @@ jobs:
           - control-plane/scheduler
           - control-plane/catalog
           - control-plane/auth
+          - console
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
@@ -119,6 +120,8 @@ jobs:
             control-plane/scheduler/go.mod
             control-plane/catalog/go.mod
             control-plane/auth/go.mod
+            console/go.mod
+            console/go.sum
 
       - name: Download dependencies
         working-directory: ${{ matrix.module }}
