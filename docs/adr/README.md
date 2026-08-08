@@ -40,6 +40,7 @@ This directory contains the Architecture Decision Records (ADRs) for AstraSync.
 | [ADR-032](adr-032-bounded-arrow-batch-foundation.md) | Bounded Arrow Batch Foundation | Accepted | 2026-08-06 |
 | [ADR-033](adr-033-adaptive-batch-and-parallelism-control.md) | Adaptive Batch and Parallelism Control | Accepted | 2026-08-06 |
 | [ADR-034](adr-034-spillable-exchange-and-checkpoint-persistence.md) | Spillable Exchange and Checkpoint Persistence Optimization | Accepted | 2026-08-07 |
+| [ADR-035](adr-035-namespace-scoped-read-only-job-console.md) | Namespace-scoped Read-only Job Console | Accepted | 2026-08-08 |
 
 ## Template
 
