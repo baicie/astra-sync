@@ -127,4 +127,7 @@ ADR-034 adds opt-in local spill frames and checkpoint persistence optimizations 
 the existing bounded exchange and durable checkpoint invariants.
 ADR-035 establishes the first namespace-scoped read-only Console. ADR-036 defines external OIDC,
 Console BFF sessions, and local tenant authorization. ADR-037 defines the transactional,
-append-only control-plane audit boundary required for authenticated mutations.
+append-only control-plane audit boundary required for authenticated mutations. ADR-038 defines
+versioned, idempotent operator workflows over the existing desired-state Job lifecycle. ADR-039
+places canonical, side-effect-free JobSpec validation behind the runtime JobCompiler and connector
+descriptor boundary.
