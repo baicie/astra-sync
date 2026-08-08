@@ -43,6 +43,8 @@ This directory contains the Architecture Decision Records (ADRs) for AstraSync.
 | [ADR-035](adr-035-namespace-scoped-read-only-job-console.md) | Namespace-scoped Read-only Job Console | Accepted | 2026-08-08 |
 | [ADR-036](adr-036-external-oidc-and-local-tenant-authorization.md) | External OIDC and Local Tenant Authorization | Accepted | 2026-08-08 |
 | [ADR-037](adr-037-transactional-control-plane-audit-trail.md) | Transactional Control-plane Audit Trail | Accepted | 2026-08-08 |
+| [ADR-038](adr-038-desired-state-job-mutation-workflows.md) | Desired-state Job Mutation Workflows | Accepted | 2026-08-08 |
+| [ADR-039](adr-039-canonical-side-effect-free-jobspec-validation.md) | Canonical Side-effect-free JobSpec Validation | Accepted | 2026-08-08 |
 
 ## Template
 
