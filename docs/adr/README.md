@@ -45,6 +45,8 @@ This directory contains the Architecture Decision Records (ADRs) for AstraSync.
 | [ADR-037](adr-037-transactional-control-plane-audit-trail.md) | Transactional Control-plane Audit Trail | Accepted | 2026-08-08 |
 | [ADR-038](adr-038-desired-state-job-mutation-workflows.md) | Desired-state Job Mutation Workflows | Accepted | 2026-08-08 |
 | [ADR-039](adr-039-canonical-side-effect-free-jobspec-validation.md) | Canonical Side-effect-free JobSpec Validation | Accepted | 2026-08-08 |
+| [ADR-040](adr-040-deployment-authoritative-connector-catalog.md) | Deployment-authoritative Connector Descriptor Catalog | Accepted | 2026-08-08 |
+| [ADR-041](adr-041-external-secrets-epoch-credential-materialization.md) | External Secret References and Epoch-scoped Credential Materialization | Accepted | 2026-08-08 |
 
 ## Template
 

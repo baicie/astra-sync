@@ -130,4 +130,7 @@ Console BFF sessions, and local tenant authorization. ADR-037 defines the transa
 append-only control-plane audit boundary required for authenticated mutations. ADR-038 defines
 versioned, idempotent operator workflows over the existing desired-state Job lifecycle. ADR-039
 places canonical, side-effect-free JobSpec validation behind the runtime JobCompiler and connector
-descriptor boundary.
+descriptor boundary. ADR-040 makes deployed connector artifacts the authority for a revisioned,
+read-only Connector Catalog and explicit Connection schema compatibility. ADR-041 keeps credential
+bytes in external immutable Secrets, resolves tenant references to stable UIDs, and captures one
+Connection generation per execution epoch before Scheduler materialization.
