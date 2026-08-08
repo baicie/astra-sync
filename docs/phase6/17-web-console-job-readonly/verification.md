@@ -21,4 +21,6 @@
 
 ## Pull-request Gate
 
-PENDING: record the PR number, required CI checks, and squash-merge commit here after delivery.
+PASS: PR [#30](https://github.com/baicie/astra-sync/pull/30) passed all required checks, including
+the Console Go matrix entry, and was squash-merged into `main` as `31af09d`. CI run
+`31234845609` completed successfully.
