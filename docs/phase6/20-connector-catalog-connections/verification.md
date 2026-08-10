@@ -1,109 +1,97 @@
-# Phase 6 Slice 20 Design Verification
+# Phase 6 Slice 20 Verification
 
 ## Status
 
-Design complete; runtime verification awaits implementation.
+Implementation complete; production rollout is operator-controlled. Repository closeout evidence
+was collected on 2026-08-10 with every rollout gate at its default disabled value.
 
-## Design Checks
+## Delivery Traceability
 
-| Check | Result |
-|---|---|
-| Current Java descriptor/registry and deployment artifact authority inventoried | PASS |
-| Existing protobuf/Go/CRD `connection_ref` fields and Scheduler rejection inventoried | PASS |
-| Legacy YAML-only Connection CRD explicitly excluded as an implementation baseline | PASS |
-| Catalog list/get ownership, projection, pagination, and tenant scope specified | PASS |
-| Descriptor, inventory, Connection schema, and compiler revisions distinguished | PASS |
-| Option ownership, sensitivity, extension-prefix, and compatibility rules specified | PASS |
-| Connection identity, state, CAS version, immutable generation, and deletion rules specified | PASS |
-| Job name reference to stable UID and Start epoch-generation snapshot specified | PASS |
-| Rotation, disable, Start, retry, and descriptor rollout races specified | PASS |
-| External Secret provider stores no bytes in JobSpec/PostgreSQL/public surfaces | PASS |
-| Kubernetes provider immutability, tenant mapping, materialization, and cleanup specified | PASS |
-| Permissions, built-in roles, method coverage, service identities, and audit specified | PASS |
-| Connection tests separated from canonical validation and isolated against SSRF/writes | PASS |
-| Migration, feature gates, rollout, rollback, and completion evidence specified | PASS |
-| Runtime capability claims excluded from Design Complete status | PASS |
-
-## Public RPC Traceability
-
-| RPC | Lifecycle evidence | Authorization/audit evidence | Safety/concurrency evidence |
-|---|---|---|---|
-| `ListConnectorDescriptors` | Descriptor Public Catalog RPCs | Catalog mapping | Revision-bound tenant pagination |
-| `GetConnectorDescriptor` | Descriptor Public Catalog RPCs | Catalog mapping | Current/retained distinction and redaction |
-| `CreateConnection` | Lifecycle Create | Connection mapping and `connection.create` | Disabled default, schema check, idempotency |
-| `GetConnection` | Lifecycle Read and List | Connection mapping | Redacted same-tenant projection |
-| `ListConnections` | Lifecycle Read and List | Connection mapping | Bounded stable tenant page |
-| `UpdateConnection` | Lifecycle Update | Connection mapping and `connection.update` | CAS and disabled effective update |
-| `RotateConnection` | Lifecycle Rotate | Connection mapping and `connection.rotate` | Immutable generation and Start race |
-| `EnableConnection` | Lifecycle Enable and Disable | Availability permission and audit | Metadata-only compatibility and CAS |
-| `DisableConnection` | Lifecycle Enable and Disable | Availability permission and audit | Future-epoch boundary and CAS |
-| `DeleteConnection` | Lifecycle Delete | Connection mapping and tombstone audit | Binding/test/cleanup reference proof |
-| `TestConnection` | Lifecycle Test Operation | Test permission and request audit | Captured generation, idempotency, budgets |
-| `GetConnectionTest` | Lifecycle Test Operation | Test permission/read audit | Redacted terminal/expiry state |
-
-## Lifecycle Matrix
-
-| Current condition | Update effective settings | Rotate | Enable | Disable | Bind/Start | Delete |
-|---|---|---|---|---|---|---|
-| `DISABLED + COMPATIBLE` | Allowed, new generation | Allowed, new generation | Allowed | No change | Denied | Only if unreferenced |
-| `ACTIVE + COMPATIBLE` | Denied until disabled | Allowed, new generation | No change | Allowed | Allowed | Denied |
-| `DISABLED + REVALIDATION_REQUIRED` | Allowed only as explicit compatible replacement | Allowed but still incompatible unless schema fixed | Denied | No change | Denied | Only if unreferenced |
-| `ACTIVE + REVALIDATION_REQUIRED` | Denied until disabled | Allowed but availability remains incompatible | Denied | Allowed | Denied | Denied |
-| Connector unavailable | Display-only update | Locator rotation allowed but not useful | Denied | Allowed | Denied | Only disabled and unreferenced |
-| Referenced by any Job | State rules apply | State rules apply | State rules apply | Allowed | State/compatibility rules apply | Denied |
-| Referenced by accepted/running epoch | State rules apply | New generation does not alter epoch | State rules apply | Does not stop epoch | Existing epoch fixed | Denied until retention permits |
-
-## Race Traceability
-
-| Race | Winning boundary | Required evidence |
+| Requirement | Authoritative implementation evidence | Verification evidence |
 |---|---|---|
-| Job Update vs Connection Delete | Stable binding foreign key + transaction | Delete cannot leave a dangling UID |
-| Start vs Rotate | Connection row lock/CAS and epoch binding transaction | Epoch uses exactly one committed generation |
-| Start vs Disable | Transaction order | Start accepted first proceeds; Disable first blocks Start |
-| Catalog rollout vs Start | Active compiler/inventory revision | Start captures one compatible revision or fails |
-| Scheduler retry vs rotation | Epoch binding, never current lookup | Retry uses captured generation |
-| Secret delete/recreate vs materialize | Pinned provider UID and immutable requirement | New object is rejected |
-| Lease loss vs Secret creation | Lease-bound cancellation + reconciliation | No Coordinator launch by stale owner |
-| Delete vs test/materialization cleanup | Reference/obligation rows | Delete waits or fails with bounded reason |
+| Deployment-owned connector catalog | Java descriptor SPI and inventory export, protobuf contracts, PostgreSQL catalog activation, Catalog list/get API | Connector schema tests, deterministic inventory comparison, catalog repository integration |
+| Tenant Connection lifecycle | Typed domain/repository, ten RPCs, CAS versions, immutable generations, idempotency, tombstones | Memory/service suites and PostgreSQL atomic lifecycle/concurrent executor tests |
+| OIDC, RBAC, and audit | OIDC validator/resolver, generated-method registry, tenant authorizer, transactional audit, Console BFF sessions/CSRF | Auth unit tests, PostgreSQL identity integration, API/BFF tampering and redaction tests |
+| Stable Job bindings | Stable Job UID plus atomic Job-to-Connection rows | Job mutation service and PostgreSQL binding replacement/foreign-key tests |
+| Epoch generation snapshot | Start transaction captures immutable source/sink generations and compiler revision | PostgreSQL Job lifecycle/generation-fencing race integration |
+| External Secret boundary | Restricted locator types and exact immutable Kubernetes Secret provider | Provider policy, UID recreation, exact-key, size, and sentinel tests |
+| Scheduler materialization | Lease-fenced deterministic execution Secret, durable receipts, runtime mounts, cleanup | Materializer/dispatcher tests and PostgreSQL receipt/cleanup integration |
+| Java runtime merge | Strict mounted credential envelope and `RuntimeCredentialLoader` | Runtime loader validation, duplicate ownership, identity, and zeroization-oriented tests |
+| Isolated Connection test | Database queue, fenced claims, dedicated executor, DNS/egress/SSRF controls | Admission limits, executor fencing, resolver/policy/probe, timeout, and sanitized result tests |
+| Console workflows | OIDC BFF routes, catalog/Connection/Job forms, CAS/conflict and polling behavior | Go BFF and same-origin return-path tests, JavaScript syntax check, browser closeout below |
+| Migration and rollback | Additive migrations, default-closed gates, Helm dependency checks, operator runbook | Helm default/invalid/full render matrix and runbook query review |
 
-## Requirement Traceability
+## Public RPC Coverage
 
-| Requirement | Design evidence |
+| Service | Methods covered |
 |---|---|
-| Catalog reflects executable deployment | Design ownership and descriptor authority/publication |
-| Tenants cannot upload code | Descriptor authority and no public mutation RPC |
-| Stable compatibility | Descriptor revisions and compatibility matrix |
-| Same-tenant stable reference | Lifecycle Job Binding and authorization decision rules |
-| No secrets in control-plane records | Security trust boundary and redaction table |
-| Deterministic rotation/retry | Lifecycle Epoch Snapshot and security rotation semantics |
-| Least-privilege materialization | Provider contract, Kubernetes provider, service identities |
-| Canonical validation remains side-effect free | Design Job Validation integration and isolated test boundary |
-| Auditable administration/use | Authorization audit event matrix |
-| Safe deletion and cleanup | Lifecycle Delete, deterministic resources, failure handling |
-| No premature runtime support | README and implementation feature gate |
+| `ConnectorCatalogService` | `ListConnectorDescriptors`, `GetConnectorDescriptor` |
+| `ConnectionService` | `CreateConnection`, `GetConnection`, `ListConnections`, `UpdateConnection`, `RotateConnection`, `EnableConnection`, `DisableConnection`, `DeleteConnection`, `TestConnection`, `GetConnectionTest` |
+| `JobValidationService` | `ValidateJobSpec` with descriptor, tenant, Connection, and runtime-gate validation |
+| `JobService` | All eight lifecycle methods through deny-by-default authorization; mutations use CAS/idempotency/audit and stable binding rules |
 
-## Static Verification Procedure
+Generated-service registry tests fail when a public method lacks an explicit permission mapping.
+Catalog and Connection projections are allowlisted; Secret locators, provider values, OIDC tokens,
+request bodies, and credential sentinels are excluded from public response, audit, log, and
+idempotency surfaces.
 
-Before merging this design change:
+## Lifecycle and Race Evidence
 
-1. Resolve every relative Markdown link in the Slice 20 directory, Phase 6 index, ADR index, and
-   architecture baseline.
-2. Confirm the public RPC traceability table names both Catalog methods and all ten Connection
-   methods exactly once.
-3. Confirm permission mappings cover every public method and conditional Job use check.
-4. Confirm lifecycle rows cover both administrative states, all compatibility outcomes,
-   references, and accepted epochs.
-5. Search for conflicting claims that PostgreSQL stores secret bytes, canonical validation performs
-   I/O, rotation changes a running epoch, or the legacy CRD is implemented.
-6. Retain exact `Design complete; implementation not started` status in the Slice README.
-7. Run `git diff --check`, Markdown link validation, formatting checks, and inspect the final diff
-   for unrelated changes.
+| Boundary | Required outcome | Covered by |
+|---|---|---|
+| Job Update vs Connection Delete | Stable foreign key prevents a dangling or recaptured name reference | Job mutation and Connection PostgreSQL integration |
+| Start vs Rotate | Epoch captures exactly one committed generation | Atomic Job mutation generation-fencing integration |
+| Start vs Disable | Transaction winner determines admission; accepted epoch is immutable | Service/repository race tests |
+| Catalog rollout vs Start | Active descriptor/compiler revisions match or Start fails closed | Catalog/validation service suites |
+| Scheduler retry vs rotation | Retry reads epoch binding, never current Connection generation | Materialization store and dispatcher suites |
+| Secret delete/recreate | Exact pinned Kubernetes UID mismatch is rejected | Kubernetes provider tests |
+| Lease loss vs materialization | Stale owner cannot launch Coordinator or commit receipts | Dispatcher/materializer/store tests |
+| Terminal/Stop cleanup | Data-plane resources precede execution credential Secret cleanup; external Secret survives | Dispatcher cleanup/orphan tests |
+| Test executor retry | Lease/executor fencing prevents stale completion | Connection executor PostgreSQL integration |
 
-## Deferred Runtime Evidence
+## Automated Closeout
 
-The design does not claim descriptor protobuf generation, connector option metadata, catalog
-publication, PostgreSQL schema, Connection APIs, RBAC enforcement, transactional audit, Job UID
-bindings, epoch generation capture, Secret provider isolation, Kubernetes materialization, runtime
-configuration merge, connectivity tests, Console workflows, legacy migration, race tests, cleanup,
-or production rollout. Each is a mandatory implementation gate before Slice 20 can be marked
-Complete or Scheduler `connectionRef` rejection can be removed.
+| Gate | Command or scope | Result |
+|---|---|---|
+| Go formatting, vet, unit tests | Seven modules listed in `Makefile` | PASS |
+| PostgreSQL integration | Job, auth, catalog, Connection, materialization, Scheduler dispatch, Controller convergence | PASS |
+| Java reactor and coverage | `mvn -B -ntp verify -DskipITs` | PASS |
+| Java formatting | `mvn -B -ntp spotless:check` | PASS |
+| Connector inventory | Export deployed inventory and byte/hash compare with `deployment/catalog/connector-inventory.pb` | PASS |
+| Protobuf | Buf 1.34.0 lint plus deterministic Go generation and clean generated diff | PASS |
+| Helm | Lint; default closed; reject runtime/test half-enable; render full enable | PASS |
+| Linux Go build | `GOOS=linux GOARCH=amd64 go build ./...` in all seven modules | PASS |
+| Console JavaScript | `node --check console/internal/server/web/app.js` | PASS |
+| Container images | API, compiler-validation, Controller, Scheduler, test executor, Console, Coordinator, Worker | PASS |
+| Console browser | Authenticated workflow layout and interaction at desktop/mobile viewports | ENVIRONMENT LIMITED; evidence boundary below |
+| Whitespace and links | `git diff --check` and relative Markdown link validation | PASS |
+
+The in-app Browser could not initialize in this execution environment because its runtime rejected
+the required `node:process` import. This is a verification-tool limitation, not an application
+failure. The built Console image served `GET /health` with HTTP 200 at `http://127.0.0.1:18090`;
+the BFF/session/security suites, same-origin return-path regression tests, JavaScript syntax check,
+responsive CSS review, and CSP review passed. No real OIDC provider or control-plane backend was
+attached to that local container, so an authenticated browser workflow is not claimed here.
+
+The PostgreSQL closeout uses PostgreSQL 16 and includes:
+
+```text
+TestRepositoryPersistsLifecycleAcrossConnections
+TestAtomicJobMutationsFenceConnectionGenerations
+TestRepositoryAtomicallyActivatesCatalog
+TestRepositoryMaterializesOIDCIdentityAndTenantMembership
+TestRepositoryPersistsAtomicConnectionLifecycle
+TestRepositoryFencesConcurrentConnectionTestExecutors
+TestStorePersistsLeaseFencedMaterializationReceiptsAndCleanup
+TestStoreSerializesCapacityAndFencesLeaseAndHeartbeatTakeover
+TestReconcilerConvergesSyncJobWithPostgres
+```
+
+## Rollout Evidence Boundary
+
+The repository proves implementation, default-closed packaging, and local/CI behavior. It does not
+claim that a real identity provider, tenant Secret namespace, staging cluster, or production tenant
+has been enabled. Operators must execute
+[`migration-and-rollback.md`](migration-and-rollback.md), retain environment-specific evidence, and
+approve each expansion. Production rollout is not a prerequisite for merging code whose shipped
+behavior remains disabled, but it is a prerequisite for claiming production availability.

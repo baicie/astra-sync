@@ -5,6 +5,38 @@ Expand the name of the chart.
 {{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
+{{/* Namespace dedicated to bounded Connection test execution. */}}
+{{- define "astrasync.connectionTestExecutorNamespace" -}}
+{{- default (printf "%s-connection-tests" .Release.Namespace | trunc 63 | trimSuffix "-") .Values.connectionTestExecutor.namespace -}}
+{{- end -}}
+
+{{/* Dedicated tokenless identity for the public Console workload. */}}
+{{- define "astrasync.consoleServiceAccountName" -}}
+{{- if .Values.console.serviceAccount.create -}}
+{{- default (include "astrasync.componentFullname" (dict "context" . "component" "console")) .Values.console.serviceAccount.name | trunc 63 | trimSuffix "-" -}}
+{{- else -}}
+{{- required "console.serviceAccount.name is required when create=false" .Values.console.serviceAccount.name | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+{{- end -}}
+
+{{/* Least-privilege identity used only by the Connection test executor. */}}
+{{- define "astrasync.connectionTestExecutorServiceAccountName" -}}
+{{- if .Values.connectionTestExecutor.serviceAccount.create -}}
+{{- default (include "astrasync.componentFullname" (dict "context" . "component" "connection-test")) .Values.connectionTestExecutor.serviceAccount.name | trunc 63 | trimSuffix "-" -}}
+{{- else -}}
+{{- required "connectionTestExecutor.serviceAccount.name is required when create=false" .Values.connectionTestExecutor.serviceAccount.name | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+{{- end -}}
+
+{{/* Dedicated identity for the workload-only compiler service. */}}
+{{- define "astrasync.compilerValidationServiceAccountName" }}
+{{- if .Values.compilerValidation.serviceAccount.create }}
+{{- default (include "astrasync.componentFullname" (dict "context" . "component" "compiler-validation")) .Values.compilerValidation.serviceAccount.name | trunc 63 | trimSuffix "-" }}
+{{- else }}
+{{- required "compilerValidation.serviceAccount.name is required when create=false" .Values.compilerValidation.serviceAccount.name | trunc 63 | trimSuffix "-" }}
+{{- end }}
+{{- end }}
+
 {{/*
 Create a default fully qualified app name.
 */}}
@@ -84,6 +116,16 @@ Create PostgreSQL URL
 {{- if .Values.postgresql.enabled -}}
 {{- $port := dig "primary" "service" "ports" "postgresql" 5432 .Values.postgresql -}}
 postgresql://{{ .Values.postgresql.auth.username }}:{{ .Values.postgresql.auth.password }}@{{ .Release.Name }}-postgresql:{{ $port }}/{{ .Values.postgresql.auth.database }}
+{{- else -}}
+{{- .Values.apiServer.config.databaseUrl -}}
+{{- end -}}
+{{- end -}}
+
+{{/* PostgreSQL URL usable from a workload in another namespace. */}}
+{{- define "astrasync.postgresql.crossNamespaceUrl" -}}
+{{- if .Values.postgresql.enabled -}}
+{{- $port := dig "primary" "service" "ports" "postgresql" 5432 .Values.postgresql -}}
+postgresql://{{ .Values.postgresql.auth.username }}:{{ .Values.postgresql.auth.password }}@{{ .Release.Name }}-postgresql.{{ .Release.Namespace }}.svc.cluster.local:{{ $port }}/{{ .Values.postgresql.auth.database }}
 {{- else -}}
 {{- .Values.apiServer.config.databaseUrl -}}
 {{- end -}}

@@ -375,3 +375,94 @@ var JobService_ServiceDesc = grpc.ServiceDesc{
 	Streams:  []grpc.StreamDesc{},
 	Metadata: "v1/job.proto",
 }
+
+const (
+	JobValidationService_ValidateJobSpec_FullMethodName = "/astra.control.v1.JobValidationService/ValidateJobSpec"
+)
+
+// JobValidationServiceClient is the client API for JobValidationService service.
+//
+// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+type JobValidationServiceClient interface {
+	ValidateJobSpec(ctx context.Context, in *ValidateJobSpecRequest, opts ...grpc.CallOption) (*JobValidationResult, error)
+}
+
+type jobValidationServiceClient struct {
+	cc grpc.ClientConnInterface
+}
+
+func NewJobValidationServiceClient(cc grpc.ClientConnInterface) JobValidationServiceClient {
+	return &jobValidationServiceClient{cc}
+}
+
+func (c *jobValidationServiceClient) ValidateJobSpec(ctx context.Context, in *ValidateJobSpecRequest, opts ...grpc.CallOption) (*JobValidationResult, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(JobValidationResult)
+	err := c.cc.Invoke(ctx, JobValidationService_ValidateJobSpec_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// JobValidationServiceServer is the server API for JobValidationService service.
+// All implementations must embed UnimplementedJobValidationServiceServer
+// for forward compatibility
+type JobValidationServiceServer interface {
+	ValidateJobSpec(context.Context, *ValidateJobSpecRequest) (*JobValidationResult, error)
+	mustEmbedUnimplementedJobValidationServiceServer()
+}
+
+// UnimplementedJobValidationServiceServer must be embedded to have forward compatible implementations.
+type UnimplementedJobValidationServiceServer struct {
+}
+
+func (UnimplementedJobValidationServiceServer) ValidateJobSpec(context.Context, *ValidateJobSpecRequest) (*JobValidationResult, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ValidateJobSpec not implemented")
+}
+func (UnimplementedJobValidationServiceServer) mustEmbedUnimplementedJobValidationServiceServer() {}
+
+// UnsafeJobValidationServiceServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to JobValidationServiceServer will
+// result in compilation errors.
+type UnsafeJobValidationServiceServer interface {
+	mustEmbedUnimplementedJobValidationServiceServer()
+}
+
+func RegisterJobValidationServiceServer(s grpc.ServiceRegistrar, srv JobValidationServiceServer) {
+	s.RegisterService(&JobValidationService_ServiceDesc, srv)
+}
+
+func _JobValidationService_ValidateJobSpec_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ValidateJobSpecRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(JobValidationServiceServer).ValidateJobSpec(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: JobValidationService_ValidateJobSpec_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(JobValidationServiceServer).ValidateJobSpec(ctx, req.(*ValidateJobSpecRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+// JobValidationService_ServiceDesc is the grpc.ServiceDesc for JobValidationService service.
+// It's only intended for direct use with grpc.RegisterService,
+// and not to be introspected or modified (even as a copy)
+var JobValidationService_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "astra.control.v1.JobValidationService",
+	HandlerType: (*JobValidationServiceServer)(nil),
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "ValidateJobSpec",
+			Handler:    _JobValidationService_ValidateJobSpec_Handler,
+		},
+	},
+	Streams:  []grpc.StreamDesc{},
+	Metadata: "v1/job.proto",
+}

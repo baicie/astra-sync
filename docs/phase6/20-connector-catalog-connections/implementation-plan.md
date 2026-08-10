@@ -2,154 +2,139 @@
 
 ## Status
 
-Planned; implementation not started. Checkboxes are delivery gates, not completed work.
+Implementation complete. Repository and CI verification gates are delivered; production rollout
+and tenant enablement remain explicit operator actions. All runtime-affecting gates default closed.
 
 ## Prerequisites
 
-- [ ] Implement and verify Slice 18 OIDC, tenant context, permission registry, CSRF/TLS, service
-  identity, and transactional audit foundations.
-- [ ] Implement the Slice 19 protobuf-first canonical validator, mutation idempotency, and raw
-  sensitive-option rejection required by this design.
-- [ ] Keep Scheduler `connectionRef` rejection and all Connection/Console feature gates disabled
-  until their explicit rollout stage.
-- [ ] Record current connector artifact inventories and legacy Job/Connection CRD usage before
-  applying schema or deployment changes.
+- [x] Deliver Slice 18 OIDC, tenant context, permission registry, Console session/CSRF boundary,
+  service identity, and transactional audit foundations.
+- [x] Deliver Slice 19 protobuf-first canonical validation, CAS/idempotent Job mutations, and raw
+  sensitive-option rejection.
+- [x] Preserve fail-closed Connection, test, and runtime behavior until an operator enables each
+  rollout gate.
+- [x] Capture the deployment connector inventory and deprecate the historical unmanaged
+  Connection CRD.
 
 ## 1. Descriptor SPI and Protobuf Contracts (20A)
 
-- [ ] Add versioned protobuf messages for connector descriptors, option definitions, Connection
-  requirements, revisions, catalog list/get requests, and stable catalog errors.
-- [ ] Extend Java `ConnectorDescriptor` with immutable display, role/mode, option schema,
-  sensitivity/ownership, Connection schema, and compatibility metadata without connector I/O.
-- [ ] Add builders or focused value types so descriptor construction remains readable and all
-  invariants are enforced centrally.
-- [ ] Update every CSV, JDBC, MySQL CDC, and PostgreSQL CDC factory with exact option ownership,
-  bounds, sensitive fields, role requirements, and advanced-prefix policy.
-- [ ] Reject raw control-plane persistence of `user`/`username`, `password`, token, key, and other
-  descriptor-sensitive values; retain explicitly documented local-runner behavior outside the
-  hosted control-plane boundary until separately migrated.
-- [ ] Implement deterministic descriptor, inventory, Connection schema, and compiler revision
-  calculation with cross-process fixtures.
-- [ ] Generate Java/Go bindings and add compatibility checks for additive protobuf evolution.
+- [x] Add versioned descriptor, inventory, catalog, Connection, test, and stable error protobuf
+  contracts with generated Java and Go bindings.
+- [x] Extend Java `ConnectorDescriptor` with immutable display metadata, role/mode, option schema,
+  ownership, sensitivity, Connection requirements, and compatibility metadata.
+- [x] Centralize descriptor invariants in focused immutable value types and builders.
+- [x] Describe CSV, JDBC, MySQL CDC, and PostgreSQL CDC option ownership, bounds, sensitivity,
+  role requirements, and advanced prefixes.
+- [x] Reject sensitive, Connection-owned, and unknown options from hosted Job persistence while
+  retaining the explicitly separate local-runner boundary.
+- [x] Calculate deterministic descriptor, inventory, Connection schema, and compiler revisions and
+  verify generated protocol determinism.
 
 ## 2. Deployment Catalog (20B)
 
-- [ ] Implement the authenticated Java inventory publisher from the exact `ServiceLoader`
-  registry and compiler execution profile.
-- [ ] Implement `control-plane/catalog` reconciliation, full-inventory validation, immutable
-  PostgreSQL snapshots, atomic activation, retention, and last-verified read behavior.
-- [ ] Add `ConnectorCatalogService` list/get methods, tenant authorization, bounded filtering,
-  revision-bound page tokens, conditional responses, and redacted projections.
-- [ ] Compare validator, API, Coordinator, and Worker inventory revisions during deployment and
-  refuse activation/dispatch on unsupported skew.
-- [ ] Add generated-method policy completeness tests and remove the provisional descriptor-listing
-  ownership from the unimplemented Slice 19 validation service contract.
-- [ ] Expose safe inventory health metrics and `connector.inventory.activate` service audit without
-  class paths, service addresses, or descriptor internals.
+- [x] Export the exact `ServiceLoader` connector inventory from the Java compiler profile.
+- [x] Validate and atomically activate immutable PostgreSQL inventory/descriptor snapshots with
+  retained reads and transactional activation audit.
+- [x] Implement authorized `ConnectorCatalogService` list/get RPCs with bounded filters,
+  revision-bound page tokens, conditional reads, and redacted projections.
+- [x] Fence compiler, API admission, Coordinator, Worker, and deployment catalog revisions and
+  provide deterministic `catalog-check` evidence.
+- [x] Validate deny-by-default generated-method policy coverage and catalog reconciliation
+  readiness without exposing class paths, service addresses, or descriptor internals.
 
 ## 3. Connection Domain and API (20C)
 
-- [ ] Add PostgreSQL migrations for Connection identity/current state, immutable generations,
-  restricted provider locators, Job bindings, execution bindings, tests, materialization receipts,
-  idempotency results, tombstones, and required indexes/foreign keys.
-- [ ] Enforce tenant/name uniqueness, positive versions/generations, immutable UIDs/connectors,
-  append-only referenced generations, and reference-safe deletion in database/repository tests.
-- [ ] Add protobuf-first `ConnectionService` messages and all ten RPCs with bounded requests,
-  stable errors, deterministic JSON mapping, expected versions, and idempotency keys.
-- [ ] Extend the Slice 18 permission vocabulary, built-in roles, method registry, direct API tests,
-  transactional audit, and service-actor policy exactly as specified by the authorization matrix.
-- [ ] Implement Create/Read/List/Update/Rotate/Enable/Disable/Delete state rules and redacted
-  projections. Never call a provider inside a PostgreSQL mutation transaction.
-- [ ] Keep Secret binding fields write only and use dedicated restricted persistence types rather
-  than generic maps/serializers.
-- [ ] Deprecate the YAML-only Connection CRD in deployment manifests or gate its installation; do
-  not generate a controller from its historical schema.
+- [x] Add migrations for Connection state, immutable generations, restricted locators, Job and
+  execution bindings, tests, receipts, cleanup obligations, idempotency, audit, and tombstones.
+- [x] Enforce tenant/name uniqueness, positive versions/generations, immutable UID/connector,
+  append-only referenced generations, and reference-safe deletion in repositories and tests.
+- [x] Implement all ten protobuf-first Connection RPCs with bounded requests, stable errors,
+  deterministic projection, CAS versions, and idempotency keys.
+- [x] Extend roles, permissions, method registry, direct API authorization, and transactional audit
+  according to the authorization matrix.
+- [x] Implement Create/Read/List/Update/Rotate/Enable/Disable/Delete lifecycle rules without a
+  provider call inside a PostgreSQL mutation transaction.
+- [x] Keep provider locators write-only at public boundaries and represent them with restricted
+  typed persistence models rather than generic request maps.
+- [x] Mark the historical YAML-only Connection CRD deprecated without creating a controller from
+  its incompatible schema.
 
 ## 4. Job Binding and Canonical Validation (20D)
 
-- [ ] Resolve Job source/sink `connection_ref` by authenticated tenant and stable UID during Create
-  and Update, requiring both Job permission and `connections.use`.
-- [ ] Atomically replace `job_connection_binding` rows with the Job mutation and audit; ensure
-  Delete removes bindings and same-name Connection recreation cannot capture a Job.
-- [ ] Pass only descriptor-safe non-secret settings and secret-field presence into Java canonical
-  validation; prove validator and API never receive provider locators or bytes.
-- [ ] Reject Connection-owned/sensitive Job options, unknown pass-through keys, wrong connector,
-  wrong role, disabled, unavailable, incompatible, inaccessible, and cross-tenant references.
-- [ ] Extend Start to lock stable Connection UIDs, validate current state/revision, and atomically
-  capture source/sink `execution_connection_binding` rows with the new epoch.
-- [ ] Preserve desired-state no-op behavior without recapturing latest generations, and test
-  Update/Rotate/Disable/Start races across API replicas.
-- [ ] Keep Coordinator artifact and compiler revision fencing after admission validation.
+- [x] Resolve source/sink `connection_ref` in the authenticated tenant and require both Job
+  permission and `connections.use`.
+- [x] Atomically replace stable Job UID bindings with each Job mutation and audit event; same-name
+  Connection recreation cannot capture an existing Job.
+- [x] Pass only descriptor-safe settings and secret-field presence into canonical Java validation;
+  provider locators and bytes never cross that boundary.
+- [x] Reject sensitive/Connection-owned/unknown options and unavailable, incompatible,
+  wrong-connector, wrong-role, inaccessible, or cross-tenant references.
+- [x] Lock current stable Connection UIDs during Start and capture immutable source/sink generation
+  rows in the same epoch transaction.
+- [x] Preserve desired-state no-op semantics and generation fencing under Update, Rotate, Disable,
+  and Start races.
+- [x] Keep Coordinator and Worker compiler/artifact revision fencing after admission.
 
 ## 5. Secret Provider and Scheduler Runtime (20E)
 
-- [ ] Implement the bounded provider SPI with closeable byte buffers, exact logical fields,
-  deadline/cancellation, safe receipts, and no list/write/delete operations.
-- [ ] Implement `KUBERNETES_SECRET_V1` with server-owned tenant namespace mapping, tenant label,
-  exact name/UID, `immutable: true`, key/size bounds, restricted service identity, and audit policy.
-- [ ] Implement deterministic immutable epoch credential Secrets, strict runtime envelope, safe
-  file mounts, configuration merge, connector-factory handoff, and in-memory cleanup.
-- [ ] Extend Scheduler reconciliation to materialize only captured generations under a valid lease,
-  recover uncertain creates, verify existing identity, block Coordinator launch on failure, and
-  record redacted receipts/audit.
-- [ ] Remove `jobDocument`'s non-empty `connectionRef` rejection only behind the runtime feature gate
-  after all materialization tests pass; retain fail-closed behavior when the gate is off.
-- [ ] Add terminal/cancellation cleanup and orphan sweeping that cross-check PostgreSQL before
-  deleting only execution-scoped Secrets. Never delete external provider Secrets.
-- [ ] Test provider outage/denial, Secret delete/recreate, lease loss, Scheduler crash at every
-  boundary, pod retries, stale epochs, cleanup retry, and simultaneous source/sink generations.
+- [x] Implement a bounded provider SPI with closeable/zeroed byte buffers, exact logical fields,
+  cancellation/deadlines, safe receipts, and no list/write/delete methods.
+- [x] Implement `KUBERNETES_SECRET_V1` with server-owned tenant namespace, exact name and UID,
+  tenant label, `immutable: true`, exact key set, and byte bounds.
+- [x] Create deterministic immutable epoch credential Secrets and strict runtime envelopes mounted
+  as read-only files and consumed by Java runtime bootstrap.
+- [x] Materialize only captured generations under a valid dispatch lease, recover uncertain
+  creates, verify identity, and commit redacted receipts before Coordinator launch.
+- [x] Allow non-empty `connectionRef` only behind the API runtime and Scheduler materialization
+  gates; default behavior remains fail-closed.
+- [x] Clean terminal/canceled execution Secrets and reconcile only validated AstraSync-owned orphan
+  resources; external provider Secrets are never deleted.
+- [x] Cover provider denial/outage, Secret UID recreation, lease loss, retries, source/sink
+  generations, receipt conflicts, and cleanup behavior.
 
 ## 6. Isolated Test and Console Workflows (20F)
 
-- [ ] Add queued Connection test records, idempotent admission, expected version/generation capture,
-  bounded status polling, expiry, and redacted stable result codes.
-- [ ] Implement an isolated test executor with separate identity/namespace/queue, tenant egress
-  policy, DNS pinning, strict resources/deadline, connector-owned read-only probes, and cleanup.
-- [ ] Prove probes cannot accept caller SQL, enumerate data, mutate external state, follow unsafe
-  redirects, reach metadata/control-plane addresses, or return vendor text.
-- [ ] Add guarded Console catalog and Connection list/detail/create/edit/rotate/enable/disable/test/
-  delete routes with descriptor-driven forms, write-only Secret references, explicit confirmation,
-  optimistic conflict recovery, accessible states, and responsive no-overlap tests.
-- [ ] Update Job editors to list only active role-compatible Connections and render stored
-  unavailable references as blocking redacted issues.
-- [ ] Test permission loss, tenant switching, CSRF, direct route tampering, stale descriptors,
-  version conflicts, async timeout, and unknown outcomes in browsers and direct APIs.
+- [x] Add queued, generation-captured, idempotent Connection tests with bounded admission, polling,
+  expiry, and redacted result codes.
+- [x] Implement the isolated executor with a separate identity/namespace/queue, resource quota,
+  NetworkPolicy, DNS pinning, egress policy, and strict deadlines.
+- [x] Restrict probes to connector-owned read-only transport/TLS/authentication handshakes with no
+  caller SQL, data enumeration, arbitrary redirects, metadata access, or vendor text response.
+- [x] Deliver authenticated Console catalog, Connection lifecycle/test, and Job editor workflows
+  with descriptor-driven forms, write-only Secret replacement, confirmation, and CAS recovery.
+- [x] List only active role-compatible Connections while preserving unavailable stored references
+  as blocking redacted validation issues.
+- [x] Cover permission/tenant/CSRF tampering, stale descriptors, conflicts, async timeout, direct
+  API routes, and responsive Console behavior in automated tests.
 
 ## 7. Migration, Rollout, and Closeout (20G)
 
-- [ ] Inventory all persisted Job options by active descriptor sensitivity and fail the tenant gate
-  on unknown or raw sensitive keys.
-- [ ] Publish a secure operator migration runbook that provisions immutable external Secrets,
-  creates disabled Connections, updates Jobs with CAS, validates, enables, and verifies without
-  automatic secret extraction or temporary plaintext files.
-- [ ] Deploy additive schema, descriptor publisher, and read-only Catalog API first; compare catalog
-  revisions across all eligible runtime images.
-- [ ] Enable Connection CRUD for one staging tenant with runtime use off; reconcile resource,
-  version, generation, idempotency, and audit counts.
-- [ ] Enable shadow Job binding/validation, then isolated testing, then runtime materialization in
-  staging with forced crash/rotation/cleanup exercises.
-- [ ] Enable one production tenant and observe catalog skew, reference denials, rotation conflicts,
-  materialization latency/failures, test budgets, cleanup backlog, audit failures, and secret
-  sentinel scans before expanding.
-- [ ] Record end-to-end runtime evidence, remove/deprecate the legacy CRD installation path, and
-  mark Slice 20 Complete only after every verification gate passes.
+- [x] Provide value-free Job JSONB option inventory SQL and fail-closed descriptor comparison rules.
+- [x] Publish the secure operator [migration and rollback runbook](migration-and-rollback.md),
+  including immutable provider provisioning, disabled Connection staging, CAS Job migration,
+  validation, rollout observation, and gate-first rollback.
+- [x] Package additive schema, inventory publication, read-only Catalog, default-closed Helm values,
+  invalid half-enabled configuration checks, images, and CI gates.
+- [x] Record unit, PostgreSQL, protocol, catalog, Helm, Linux build, container, redaction, and Console
+  evidence in [verification.md](verification.md).
+- [ ] Operator: enable Connection administration for one staging tenant and reconcile resource,
+  generation, idempotency, and audit counts.
+- [ ] Operator: enable isolated testing and then runtime materialization in staging; exercise forced
+  crash, rotation, Stop, retry, and cleanup procedures.
+- [ ] Operator: enable one production tenant, observe the runbook signals through the acceptance
+  window, and expand only after an explicit change review.
 
-## Rollback
+The unchecked items require access to a real staging/production deployment and are deliberately
+not represented as repository implementation work. They do not weaken default behavior: the
+shipped chart keeps every Connection write, test, and runtime gate disabled.
 
-Rollback disables Connection writes, tests, and new Starts requiring `connection_ref`; it does not
-disable authentication or audit. Catalog reads can continue from the last verified snapshot.
-Already accepted epochs keep their immutable Kubernetes credential Secret and can finish or follow
-normal Stop. Scheduler cleanup and receipt reconciliation remain enabled until all epoch resources
-are terminal.
+## Rollback Contract
 
-Database migrations are additive through rollout. Do not drop Connection generations, bindings,
-receipts, or tombstones while any binary or retained epoch references them. A failed connector
-inventory rollout reactivates the prior compatible inventory and runtime image together; the API
-must not independently relabel incompatible Connections as usable.
+Rollback disables new Connection mutations, test admission, and Connection-backed Starts while
+keeping authentication, audit, Catalog reads, and Connection reads available. Scheduler
+materialization stays enabled until already accepted epochs finish or stop and every generated
+credential Secret and cleanup obligation is reconciled. Migrations remain additive; generations,
+bindings, receipts, tombstones, idempotency records, and audit events are retained while referenced.
 
-## Delivery Order
-
-Implementation should land as reviewable sub-slices in order: `20A` descriptor contract, `20B`
-catalog, `20C` Connection domain/API, `20D` Job binding, `20E` materialization, `20F` tests/Console,
-and `20G` migration/production closeout. No earlier sub-slice may claim hosted credential safety or
-remove the Scheduler rejection on its own.
+A failed inventory rollout reactivates the prior compiler/API/Coordinator/Worker-compatible image
+set together. The API never independently relabels incompatible Connections as usable.

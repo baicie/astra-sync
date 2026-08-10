@@ -2,8 +2,10 @@ package io.astrasync.cli;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.astrasync.connector.api.ConnectorInventories;
 import io.astrasync.connector.file.CsvConnectorFactory;
 import io.astrasync.connector.jdbc.JdbcConnectorFactory;
+import io.astrasync.control.v1.ConnectorInventory;
 import io.astrasync.engine.checkpoint.FileCheckpointStore;
 import io.astrasync.engine.coordinator.CdcJobRunResult;
 import io.astrasync.engine.coordinator.LocalCdcJobRunner;
@@ -19,8 +21,10 @@ import io.astrasync.engine.worker.InProcessCdcWorker;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.Objects;
@@ -72,6 +76,7 @@ public final class AstraSyncCli implements Callable<Integer> {
         CommandLine commandLine = new CommandLine(new AstraSyncCli());
         commandLine.addSubcommand("run", new RunCommand(runner));
         commandLine.addSubcommand("cdc", new CdcCommand());
+        commandLine.addSubcommand("catalog-export", new CatalogExportCommand(ConnectorRegistry::discover));
         commandLine.setOut(Objects.requireNonNull(out, "out must not be null"));
         commandLine.setErr(Objects.requireNonNull(err, "err must not be null"));
         commandLine.setParameterExceptionHandler(
@@ -113,6 +118,82 @@ public final class AstraSyncCli implements Callable<Integer> {
 
     private static Supplier<LocalJobRunner> defaultRunner() {
         return () -> new LocalJobRunner(ConnectorRegistry.of(new CsvConnectorFactory(), new JdbcConnectorFactory()));
+    }
+
+    @Command(
+            name = "catalog-export",
+            description = "Export the deployment connector inventory as deterministic protobuf.",
+            mixinStandardHelpOptions = true,
+            version = AstraSyncCli.VERSION)
+    static final class CatalogExportCommand implements Callable<Integer> {
+        private final Supplier<ConnectorRegistry> registry;
+
+        @Spec
+        private CommandSpec commandSpec;
+
+        @Parameters(index = "0", paramLabel = "<output>", description = "Output ConnectorInventory protobuf path.")
+        private Path output;
+
+        @Option(names = "--job-spec-schema", defaultValue = "sync.astrasync.io/v1")
+        private String jobSpecSchema;
+
+        @Option(names = "--compiler-build", defaultValue = AstraSyncCli.VERSION)
+        private String compilerBuild;
+
+        @Option(names = "--execution-profile", defaultValue = "standard")
+        private String executionProfile;
+
+        private CatalogExportCommand(Supplier<ConnectorRegistry> registry) {
+            this.registry = Objects.requireNonNull(registry, "registry must not be null");
+        }
+
+        @Override
+        public Integer call() {
+            Path target = output.toAbsolutePath().normalize();
+            Path temporary = null;
+            try {
+                ConnectorInventory inventory = ConnectorInventories.create(
+                        registry.get().descriptors(), jobSpecSchema, compilerBuild, executionProfile);
+                Path parent = target.getParent();
+                if (parent == null || !Files.isDirectory(parent)) {
+                    throw new IOException("output directory does not exist");
+                }
+                temporary = Files.createTempFile(parent, ".connector-inventory-", ".tmp");
+                Files.write(temporary, ConnectorInventories.deterministicBytes(inventory));
+                moveAtomically(temporary, target);
+                commandSpec
+                        .commandLine()
+                        .getOut()
+                        .printf(
+                                "EXPORTED connectors=%d inventoryRevision=%s compilerRevision=%s%n",
+                                inventory.getDescriptorsCount(),
+                                inventory.getInventoryRevision(),
+                                inventory.getCompilerRevision());
+                return EXIT_SUCCESS;
+            } catch (IOException | IllegalArgumentException exception) {
+                commandSpec.commandLine().getErr().println("FAILED category=input message=cannot export catalog");
+                return EXIT_INPUT;
+            } catch (RuntimeException exception) {
+                commandSpec.commandLine().getErr().println("FAILED category=runtime message=cannot export catalog");
+                return EXIT_RUNTIME;
+            } finally {
+                if (temporary != null) {
+                    try {
+                        Files.deleteIfExists(temporary);
+                    } catch (IOException ignored) {
+                        // The temporary file contains only public descriptor metadata.
+                    }
+                }
+            }
+        }
+
+        private static void moveAtomically(Path source, Path target) throws IOException {
+            try {
+                Files.move(source, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+            } catch (AtomicMoveNotSupportedException exception) {
+                Files.move(source, target, StandardCopyOption.REPLACE_EXISTING);
+            }
+        }
     }
 
     @Command(

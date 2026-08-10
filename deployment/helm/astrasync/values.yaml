@@ -12,12 +12,24 @@ image:
     repository: astrasync/api-server
     tag: "latest"
 
+  compilerValidation:
+    repository: astrasync/compiler-validation
+    tag: "latest"
+
   controller:
     repository: astrasync/controller
     tag: "latest"
 
   scheduler:
     repository: astrasync/scheduler
+    tag: "latest"
+
+  connectionTestExecutor:
+    repository: astrasync/connection-test-executor
+    tag: "latest"
+
+  console:
+    repository: astrasync/console
     tag: "latest"
 
   worker:
@@ -78,6 +90,36 @@ etcd:
 apiServer:
   enabled: true
   replicaCount: 3
+  environment: development
+  auth:
+    mode: disabled
+    oidcIssuer: ""
+    oidcAudience: ""
+  catalog:
+    executionProfile: standard
+    inventoryPath: /app/catalog/connector-inventory.pb
+    tokenKeySecretName: ""
+    tokenKeySecretKey: token-key
+  compilerValidation:
+    endpoint: ""
+    timeout: 3s
+    tls:
+      enabled: false
+      secretName: ""
+      certificateKey: client.crt
+      privateKeyKey: client.key
+      caKey: ca.crt
+      serverName: compiler-validation
+  connectionTests:
+    deadline: 30s
+    # Map tenant UUIDs to private/protected CIDRs allowed for that tenant's probes.
+    tenantEgressPolicies: {}
+  # Rollout gates default closed. Enable each stage only after its verification gates pass.
+  connectionRollout:
+    mutationsEnabled: false
+    testsEnabled: false
+    runtimeEnabled: false
+  tlsServerName: localhost
   service:
     type: ClusterIP
     port: 8080
@@ -108,6 +150,88 @@ apiServer:
   config:
     databaseUrl: ""
     etcdEndpoints: ""
+
+# Operator Console and OIDC backend-for-frontend. Production requires OIDC,
+# an HTTPS public URL, a session-key Secret, and TLS to the API gRPC endpoint.
+console:
+  enabled: true
+  replicaCount: 1
+  environment: development
+  namespace: ""
+  developmentTenantId: 00000000-0000-4000-8000-000000000001
+  publicUrl: ""
+  auth:
+    mode: disabled
+    oidcIssuer: ""
+    oidcAudience: ""
+    clientId: ""
+    scopes: "openid profile"
+    clientSecret:
+      secretName: ""
+      key: client-secret
+    sessionKey:
+      secretName: ""
+      key: session-key
+    sessionIdleTtl: 30m
+    sessionAbsoluteTtl: 8h
+    loginTtl: 10m
+  api:
+    endpoint: ""
+    tls:
+      enabled: false
+      secretName: ""
+      caKey: ca.crt
+      serverName: api-server
+  serviceAccount:
+    create: true
+    annotations: {}
+    name: ""
+  service:
+    type: ClusterIP
+    port: 8090
+  ingress:
+    enabled: false
+    className: ""
+    annotations: {}
+    hosts:
+      - host: console.astrasync.local
+        paths:
+          - path: /
+            pathType: Prefix
+    tls: []
+  resources:
+    limits:
+      cpu: 500m
+      memory: 256Mi
+    requests:
+      cpu: 50m
+      memory: 64Mi
+
+# Internal Java semantic compiler. Production requires mTLS on this workload-only service.
+compilerValidation:
+  enabled: true
+  replicaCount: 2
+  compilerBuild: 0.1.0-SNAPSHOT
+  maxConcurrency: 32
+  service:
+    port: 50052
+  serviceAccount:
+    create: true
+    annotations: {}
+    name: ""
+  tls:
+    enabled: false
+    secretName: ""
+    certificateKey: tls.crt
+    privateKeyKey: tls.key
+    clientCAKey: ca.crt
+  resources:
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+    requests:
+      cpu: 100m
+      memory: 256Mi
 
 # Controller configuration
 controller:
@@ -140,6 +264,8 @@ scheduler:
   heartbeatIntervalMillis: 10000
   reconcileInterval: 5s
   operationTimeout: 10s
+  connectionMaterialization:
+    enabled: false
   service:
     port: 8082
   progress:
@@ -154,6 +280,51 @@ scheduler:
     requests:
       cpu: 250m
       memory: 256Mi
+
+# Isolated, database-backed Connection test queue consumer.
+connectionTestExecutor:
+  enabled: false
+  namespace: ""
+  createNamespace: true
+  replicaCount: 1
+  concurrency: 4
+  claimBatch: 4
+  claimInterval: 1s
+  leaseDuration: 30s
+  probeTimeout: 20s
+  completionTimeout: 3s
+  dialTimeout: 5s
+  kubernetesTimeout: 5s
+  maxDNSAnswers: 8
+  dnsServer: ""
+  protectedCIDRs: []
+  serviceAccount:
+    create: true
+    annotations: {}
+    name: ""
+  resources:
+    limits:
+      cpu: 500m
+      memory: 256Mi
+      ephemeral-storage: 256Mi
+    requests:
+      cpu: 50m
+      memory: 64Mi
+      ephemeral-storage: 64Mi
+  quota:
+    pods: "5"
+    requestsCpu: "2"
+    requestsMemory: 1Gi
+    limitsCpu: "4"
+    limitsMemory: 2Gi
+  networkPolicy:
+    enabled: true
+    postgresqlPort: 5432
+    # Override for clusters whose kubernetes.default Service IP differs.
+    kubernetesApiCIDRs:
+      - 10.96.0.1/32
+    publicIPv4Egress: true
+    additionalAllowedCIDRs: []
 
 # Worker configuration
 worker:

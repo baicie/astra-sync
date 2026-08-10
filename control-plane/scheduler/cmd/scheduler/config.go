@@ -16,11 +16,12 @@ import (
 )
 
 type applicationConfig struct {
-	databaseURL   string
-	kubeconfig    string
-	healthAddress string
-	scheduler     schedulerinternal.Config
-	dispatcher    dispatchkube.Config
+	databaseURL      string
+	kubeconfig       string
+	healthAddress    string
+	executionProfile string
+	scheduler        schedulerinternal.Config
+	dispatcher       dispatchkube.Config
 }
 
 func loadConfig(getenv func(string) string) (applicationConfig, error) {
@@ -153,11 +154,17 @@ func loadConfig(getenv func(string) string) (applicationConfig, error) {
 	if err != nil {
 		return applicationConfig{}, err
 	}
+	materializationEnabled, err := boolean(
+		getenv, "SCHEDULER_CONNECTION_MATERIALIZATION_ENABLED", false)
+	if err != nil {
+		return applicationConfig{}, err
+	}
 
 	return applicationConfig{
-		databaseURL:   databaseURL,
-		kubeconfig:    getenv("KUBECONFIG"),
-		healthAddress: valueOrDefault(getenv("HEALTH_LISTEN_ADDRESS"), ":8082"),
+		databaseURL:      databaseURL,
+		kubeconfig:       getenv("KUBECONFIG"),
+		healthAddress:    valueOrDefault(getenv("HEALTH_LISTEN_ADDRESS"), ":8082"),
+		executionProfile: valueOrDefault(getenv("CONNECTOR_EXECUTION_PROFILE"), "standard"),
 		scheduler: schedulerinternal.Config{
 			OwnerID: ownerID, MaximumActive: maximumActive, LeaseDuration: leaseDuration,
 			HeartbeatTimeout: heartbeatTimeout, ReconcileEvery: reconcileEvery, OperationTimeout: operationTimeout,
@@ -191,8 +198,21 @@ func loadConfig(getenv func(string) string) (applicationConfig, error) {
 				getenv("SCHEDULER_WORKER_JAVA_TOOL_OPTIONS"),
 				"-Xmx4g -XX:+UseG1GC -XX:MaxDirectMemorySize=2g",
 			),
+			ConnectionMaterializationEnabled: materializationEnabled,
 		},
 	}, nil
+}
+
+func boolean(getenv func(string) string, name string, defaultValue bool) (bool, error) {
+	value := getenv(name)
+	if value == "" {
+		return defaultValue, nil
+	}
+	parsed, err := strconv.ParseBool(value)
+	if err != nil {
+		return false, fmt.Errorf("%s must be a boolean", name)
+	}
+	return parsed, nil
 }
 
 func required(getenv func(string) string, name string) (string, error) {

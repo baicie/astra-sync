@@ -26,6 +26,15 @@ class MySqlCdcConnectorFactoryTest {
                         Capability.CHANGE_DATA_CAPTURE,
                         Capability.REPLAYABLE_OFFSET,
                         Capability.EXACTLY_ONCE_SOURCE);
+        assertThat(factory.descriptor().version()).isEqualTo("1.1.0");
+        assertThat(factory.descriptor().connectionRequirement(io.astrasync.connector.api.ConnectorRole.SOURCE))
+                .isEqualTo(io.astrasync.connector.api.ConnectionRequirement.REQUIRED);
+        assertThat(factory.descriptor().options())
+                .filteredOn(
+                        option -> option.sensitivity() == io.astrasync.connector.api.ConnectorOptionSensitivity.SECRET)
+                .extracting(io.astrasync.connector.api.ConnectorOptionDescriptor::key)
+                .containsExactly("password", "username");
+        assertThat(factory.descriptor().optionPrefixes()).isEmpty();
         assertThat(factory.createCdcSource(configuration(Map.of()))).isInstanceOf(MySqlCdcSource.class);
         assertThat(options.properties())
                 .containsEntry("connector.class", "io.debezium.connector.mysql.MySqlConnector")

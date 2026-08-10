@@ -1,8 +1,8 @@
 # Makefile for AstraSync
 
-.PHONY: all build build-java build-go build-connectors test test-java test-go vet-go clean install format check verify docker-build docker-push proto-generate proto-go-generate proto-lint crd-generate install-hooks
+.PHONY: all build build-java build-go build-connectors test test-java test-go vet-go clean install format check verify catalog-check docker-build docker-push proto-generate proto-go-generate proto-lint crd-generate install-hooks
 
-GO_MODULES := control-plane control-plane/api-server control-plane/controller control-plane/scheduler control-plane/catalog control-plane/auth
+GO_MODULES := control-plane control-plane/api-server control-plane/controller control-plane/scheduler control-plane/catalog control-plane/auth console
 CONTROLLER_GEN_VERSION := v0.15.0
 
 # Default target
@@ -75,6 +75,11 @@ check: vet-go
 	@echo "Checking code style..."
 	mvn spotless:check
 
+catalog-check:
+	mvn -pl cli -am package -DskipTests -DskipITs
+	java -jar cli/target/astrasync-cli-0.1.0-SNAPSHOT-all.jar catalog-export target/connector-inventory.pb --compiler-build 0.1.0-SNAPSHOT --execution-profile standard
+	cmp deployment/catalog/connector-inventory.pb target/connector-inventory.pb
+
 # Clean build artifacts
 clean:
 	@echo "Cleaning..."
@@ -93,14 +98,22 @@ docker-build:
 	@echo "Building Docker images..."
 	docker build -t astrasync/worker:latest -f deployment/docker/Dockerfile.worker .
 	docker build -t astrasync/api-server:latest -f deployment/docker/Dockerfile.api .
+	docker build -t astrasync/compiler-validation:latest -f deployment/docker/Dockerfile.compiler-validation .
 	docker build -t astrasync/controller:latest -f deployment/docker/Dockerfile.controller .
+	docker build -t astrasync/scheduler:latest -f deployment/docker/Dockerfile.scheduler .
+	docker build -t astrasync/connection-test-executor:latest -f deployment/docker/Dockerfile.connection-test-executor .
+	docker build -t astrasync/console:latest -f deployment/docker/Dockerfile.console .
 
 # Push Docker images
 docker-push:
 	@echo "Pushing Docker images..."
 	docker push astrasync/worker:latest
 	docker push astrasync/api-server:latest
+	docker push astrasync/compiler-validation:latest
 	docker push astrasync/controller:latest
+	docker push astrasync/scheduler:latest
+	docker push astrasync/connection-test-executor:latest
+	docker push astrasync/console:latest
 
 # Generate protobuf
 proto-generate:

@@ -2,13 +2,14 @@
 
 ## Status
 
-Design complete; implementation not started.
+Implementation complete; production rollout is operator-controlled and disabled by default.
 
 Slice 20 defines the deployment-owned Connector Catalog and the tenant-scoped Connection resource
-needed to replace raw credentials in persisted JobSpecs. It closes the design gap left by ADR-030
-and Slice 19 without claiming that `connection_ref` can be dispatched by the current runtime.
+needed to replace raw credentials in persisted JobSpecs. The implementation closes the design gap
+left by ADR-030 and Slice 19 while keeping all write, test, and runtime capabilities behind
+fail-closed rollout gates.
 
-## Design Outcomes
+## Delivered Outcomes
 
 - A read-only Connector Catalog derived from the exact connector artifacts deployed with the Java
   compiler and runtime, with stable descriptor and inventory revisions.
@@ -22,8 +23,7 @@ and Slice 19 without claiming that `connection_ref` can be dispatched by the cur
   execution-epoch credential materialization and deterministic cleanup.
 - A separately permissioned, rate-limited, isolated, read-only connection test operation that is
   never part of canonical JobSpec validation.
-- A staged implementation and migration plan that preserves the Scheduler's fail-closed behavior
-  until end-to-end materialization is verified.
+- A staged migration and rollback runbook with API and Scheduler gates disabled by default.
 
 ## Records
 
@@ -33,14 +33,16 @@ and Slice 19 without claiming that `connection_ref` can be dispatched by the cur
 - [Security and materialization](security-and-materialization.md)
 - [Authorization matrix](authorization-matrix.md)
 - [Implementation plan](implementation-plan.md)
-- [Design verification](verification.md)
+- [Migration and rollback runbook](migration-and-rollback.md)
+- [Verification](verification.md)
 - [ADR-040: Deployment-authoritative Connector Descriptor Catalog](../../adr/adr-040-deployment-authoritative-connector-catalog.md)
 - [ADR-041: External Secret References and Epoch-scoped Credential Materialization](../../adr/adr-041-external-secrets-epoch-credential-materialization.md)
 
-## Implementation Gate
+## Rollout Gate
 
-The current Scheduler must continue rejecting every non-empty `connectionRef`. That rejection can
-be removed only after the catalog, Connection repository, tenant authorization, epoch binding,
-Secret provider, runtime injection, redaction, cleanup, and failure-path tests are implemented as
-one guarded path. The legacy unowned Connection CRD is not evidence that any of those capabilities
-exist.
+`CONNECTION_MUTATIONS_ENABLED`, `CONNECTION_TESTS_ENABLED`, `CONNECTION_RUNTIME_ENABLED`, and
+`SCHEDULER_CONNECTION_MATERIALIZATION_ENABLED` default to `false`. A disabled runtime gate rejects
+Start for Jobs with `connection_ref`; Catalog and Connection reads remain available. Helm prevents
+runtime admission without Scheduler materialization and prevents test admission without the
+isolated executor. The legacy unowned Connection CRD is deprecated and is not a supported API or
+migration source.

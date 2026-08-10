@@ -4,6 +4,7 @@ package astra.control.v1;
 
 import "google/protobuf/empty.proto";
 import "google/protobuf/timestamp.proto";
+import "v1/connector.proto";
 
 option go_package = "io.astrasync/control-plane/api-server/gen/go/v1;jobv1";
 option java_multiple_files = true;
@@ -21,10 +22,15 @@ service JobService {
   rpc GetJobStatus(GetJobStatusRequest) returns (JobStatus);
 }
 
+service JobValidationService {
+  rpc ValidateJobSpec(ValidateJobSpecRequest) returns (JobValidationResult);
+}
+
 message CreateJobRequest {
   string name = 1;
   string namespace = 2;
   JobSpec spec = 3;
+  string idempotency_key = 4;
 }
 
 message GetJobRequest {
@@ -48,24 +54,28 @@ message UpdateJobRequest {
   string namespace = 2;
   int64 expected_version = 3;
   JobSpec spec = 4;
+  string idempotency_key = 5;
 }
 
 message DeleteJobRequest {
   string name = 1;
   string namespace = 2;
   int64 expected_version = 3;
+  string idempotency_key = 4;
 }
 
 message StartJobRequest {
   string name = 1;
   string namespace = 2;
   int64 expected_version = 3;
+  string idempotency_key = 4;
 }
 
 message StopJobRequest {
   string name = 1;
   string namespace = 2;
   int64 expected_version = 3;
+  string idempotency_key = 4;
 }
 
 message GetJobStatusRequest {
@@ -158,4 +168,59 @@ message FailureInfo {
   string root_cause = 2;
   google.protobuf.Timestamp timestamp = 3;
   string host = 4;
+}
+
+message ValidateJobSpecRequest {
+  string namespace = 1;
+  string name = 2;
+  JobValidationPurpose purpose = 3;
+  int64 expected_version = 4;
+  JobSpec spec = 5;
+}
+
+enum JobValidationPurpose {
+  JOB_VALIDATION_PURPOSE_UNSPECIFIED = 0;
+  JOB_VALIDATION_PURPOSE_CREATE = 1;
+  JOB_VALIDATION_PURPOSE_UPDATE = 2;
+  JOB_VALIDATION_PURPOSE_START = 3;
+}
+
+message JobValidationResult {
+  string validation_id = 1;
+  bool valid = 2;
+  string spec_digest = 3;
+  string compiler_revision = 4;
+  ConnectorExecutionMode execution_mode = 5;
+  repeated JobValidationIssue issues = 6;
+}
+
+message JobValidationIssue {
+  JobValidationIssueCode code = 1;
+  JobValidationSeverity severity = 2;
+  string field_path = 3;
+  string message = 4;
+  string documentation_key = 5;
+}
+
+enum JobValidationSeverity {
+  JOB_VALIDATION_SEVERITY_UNSPECIFIED = 0;
+  JOB_VALIDATION_SEVERITY_ERROR = 1;
+  JOB_VALIDATION_SEVERITY_WARNING = 2;
+}
+
+enum JobValidationIssueCode {
+  JOB_VALIDATION_ISSUE_CODE_UNSPECIFIED = 0;
+  JOB_VALIDATION_ISSUE_CODE_STRUCTURE_INVALID = 1;
+  JOB_VALIDATION_ISSUE_CODE_CONNECTOR_NOT_FOUND = 2;
+  JOB_VALIDATION_ISSUE_CODE_ROLE_UNSUPPORTED = 3;
+  JOB_VALIDATION_ISSUE_CODE_CAPABILITY_MISSING = 4;
+  JOB_VALIDATION_ISSUE_CODE_TRANSFORM_UNSUPPORTED = 5;
+  JOB_VALIDATION_ISSUE_CODE_DELIVERY_UNSUPPORTED = 6;
+  JOB_VALIDATION_ISSUE_CODE_OPTION_UNKNOWN = 7;
+  JOB_VALIDATION_ISSUE_CODE_OPTION_REQUIRED = 8;
+  JOB_VALIDATION_ISSUE_CODE_OPTION_INVALID = 9;
+  JOB_VALIDATION_ISSUE_CODE_CONNECTION_REF_REQUIRED = 10;
+  JOB_VALIDATION_ISSUE_CODE_CONNECTION_REF_UNAVAILABLE = 11;
+  JOB_VALIDATION_ISSUE_CODE_VALIDATION_REVISION_CHANGED = 12;
+  JOB_VALIDATION_ISSUE_CODE_ISSUES_TRUNCATED = 13;
 }

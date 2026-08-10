@@ -22,6 +22,7 @@ import (
 
 	"io.astrasync/control-plane/job"
 	"io.astrasync/control-plane/scheduler/internal/dispatch"
+	"io.astrasync/control-plane/scheduler/internal/materialization"
 	"io.astrasync/control-plane/scheduler/internal/scheduler"
 )
 
@@ -36,36 +37,55 @@ const (
 )
 
 type Config struct {
-	Namespace                   string
-	ServiceAccount              string
-	CoordinatorImage            string
-	WorkerImage                 string
-	HeartbeatURL                string
-	HeartbeatIntervalMillis     int32
-	ImagePullPolicy             corev1.PullPolicy
-	ProgressClaim               string
-	WorkerReplicas              int32
-	WorkerPort                  int32
-	WorkerTimeoutMillis         int32
-	CoordinatorMaxInFlightTasks int32
-	WorkerMaxInFlightBatches    int32
-	WorkerMaxConcurrentTasks    int32
-	WorkerTaskQueueCapacity     int32
-	WorkerMaxConnections        int32
-	CoordinatorBackoffLimit     int32
-	TTLSecondsAfterFinished     *int32
-	CoordinatorResources        corev1.ResourceRequirements
-	WorkerResources             corev1.ResourceRequirements
-	CoordinatorJavaToolOptions  string
-	WorkerJavaToolOptions       string
+	Namespace                        string
+	ServiceAccount                   string
+	CoordinatorImage                 string
+	WorkerImage                      string
+	HeartbeatURL                     string
+	HeartbeatIntervalMillis          int32
+	ImagePullPolicy                  corev1.PullPolicy
+	ProgressClaim                    string
+	WorkerReplicas                   int32
+	WorkerPort                       int32
+	WorkerTimeoutMillis              int32
+	CoordinatorMaxInFlightTasks      int32
+	WorkerMaxInFlightBatches         int32
+	WorkerMaxConcurrentTasks         int32
+	WorkerTaskQueueCapacity          int32
+	WorkerMaxConnections             int32
+	CoordinatorBackoffLimit          int32
+	TTLSecondsAfterFinished          *int32
+	CoordinatorResources             corev1.ResourceRequirements
+	WorkerResources                  corev1.ResourceRequirements
+	CoordinatorJavaToolOptions       string
+	WorkerJavaToolOptions            string
+	ConnectionMaterializationEnabled bool
 }
 
 type Dispatcher struct {
-	client kubernetes.Interface
-	config Config
+	client      kubernetes.Interface
+	config      Config
+	credentials CredentialMaterializer
+}
+
+type CredentialMaterializer interface {
+	Ensure(context.Context, dispatch.Record) (materialization.Result, error)
+	Cleanup(context.Context, dispatch.Identity) error
 }
 
 func New(client kubernetes.Interface, config Config) (*Dispatcher, error) {
+	return newDispatcher(client, config, nil)
+}
+
+func NewWithCredentialMaterializer(
+	client kubernetes.Interface, config Config, credentials CredentialMaterializer,
+) (*Dispatcher, error) {
+	return newDispatcher(client, config, credentials)
+}
+
+func newDispatcher(
+	client kubernetes.Interface, config Config, credentials CredentialMaterializer,
+) (*Dispatcher, error) {
 	if client == nil {
 		return nil, fmt.Errorf("Kubernetes client must not be nil")
 	}
@@ -87,7 +107,10 @@ func New(client kubernetes.Interface, config Config) (*Dispatcher, error) {
 		return nil, fmt.Errorf("Kubernetes dispatch heartbeat URL must use HTTP or HTTPS")
 	}
 	config.HeartbeatURL = strings.TrimRight(config.HeartbeatURL, "/")
-	return &Dispatcher{client: client, config: config}, nil
+	if config.ConnectionMaterializationEnabled && credentials == nil {
+		return nil, fmt.Errorf("Connection materialization is enabled without a credential materializer")
+	}
+	return &Dispatcher{client: client, config: config, credentials: credentials}, nil
 }
 
 func (d *Dispatcher) Reconcile(
@@ -107,6 +130,29 @@ func (d *Dispatcher) Reconcile(
 	document, fingerprint, err := jobDocument(candidate)
 	if err != nil {
 		return scheduler.Observation{}, scheduler.Permanent(err)
+	}
+	credentialSecret := ""
+	credentialCompilerRevision := ""
+	if d.config.ConnectionMaterializationEnabled {
+		materialized, materializeErr := d.credentials.Ensure(ctx, record)
+		if materializeErr != nil {
+			if errors.Is(materializeErr, materialization.ErrProviderPolicy) ||
+				errors.Is(materializeErr, materialization.ErrRevisionMismatch) ||
+				errors.Is(materializeErr, materialization.ErrReceiptConflict) {
+				return scheduler.Observation{}, scheduler.Permanent(materializeErr)
+			}
+			return scheduler.Observation{}, materializeErr
+		}
+		if err := verifyMaterializedRoles(candidate, materialized); err != nil {
+			return scheduler.Observation{}, scheduler.Permanent(err)
+		}
+		if materialized.Required {
+			credentialSecret = materialized.SecretName
+			credentialCompilerRevision = materialized.CompilerRevision
+			fingerprint = combinedFingerprint(fingerprint, materialized.IdentityFingerprint)
+		}
+	} else if candidate.Spec.Source.ConnectionRef != "" || candidate.Spec.Sink.ConnectionRef != "" {
+		return scheduler.Observation{}, scheduler.Permanent(fmt.Errorf("Connection materialization is disabled"))
 	}
 
 	coordinatorName := base + "-coordinator"
@@ -133,7 +179,8 @@ func (d *Dispatcher) Reconcile(
 	if err := d.ensureService(ctx, base, identity, fingerprint); err != nil {
 		return scheduler.Observation{}, err
 	}
-	workers, err := d.ensureWorkers(ctx, base, identity, fingerprint)
+	workers, err := d.ensureWorkers(
+		ctx, base, identity, fingerprint, credentialSecret, credentialCompilerRevision)
 	if err != nil {
 		return scheduler.Observation{}, err
 	}
@@ -143,7 +190,7 @@ func (d *Dispatcher) Reconcile(
 	if existing == nil {
 		created, createErr := d.client.BatchV1().Jobs(d.config.Namespace).Create(
 			ctx,
-			d.coordinatorJob(base, identity, fingerprint),
+			d.coordinatorJob(base, identity, fingerprint, credentialSecret, credentialCompilerRevision),
 			metav1.CreateOptions{},
 		)
 		if apierrors.IsAlreadyExists(createErr) {
@@ -184,7 +231,16 @@ func (d *Dispatcher) Stop(ctx context.Context, identity dispatch.Identity) (bool
 	if len(failures) > 0 {
 		return false, errors.Join(failures...)
 	}
-	return d.resourcesGone(ctx, base)
+	gone, err := d.resourcesGone(ctx, base)
+	if err != nil || !gone {
+		return gone, err
+	}
+	if d.credentials != nil {
+		if err := d.credentials.Cleanup(ctx, identity); err != nil {
+			return false, err
+		}
+	}
+	return true, nil
 }
 
 // Cleanup removes the Secret and Worker resources while retaining the terminal
@@ -194,7 +250,13 @@ func (d *Dispatcher) Cleanup(ctx context.Context, identity dispatch.Identity) er
 	if err != nil {
 		return err
 	}
-	return d.cleanupAuxiliary(ctx, base)
+	if err := d.cleanupAuxiliary(ctx, base); err != nil {
+		return err
+	}
+	if d.credentials != nil {
+		return d.credentials.Cleanup(ctx, identity)
+	}
+	return nil
 }
 
 // SweepOrphans removes auxiliary resources for non-active executions and Coordinator Jobs that no
@@ -210,13 +272,18 @@ func (d *Dispatcher) SweepOrphans(ctx context.Context, records []dispatch.Record
 	}
 	selector := labelComponent + "!=coordinator,app.kubernetes.io/managed-by=astrasync-scheduler"
 	var failures []error
+	credentialOrphans := make([]dispatch.Identity, 0)
 	secrets, err := d.client.CoreV1().Secrets(d.config.Namespace).List(ctx, metav1.ListOptions{LabelSelector: selector})
 	if err != nil {
 		failures = append(failures, fmt.Errorf("list orphan JobSpec Secrets: %w", err))
 	} else {
 		for index := range secrets.Items {
 			resource := &secrets.Items[index]
-			if orphan, _ := orphanResource(resource.Labels, active); orphan {
+			if orphan, identity := orphanResource(resource.Labels, active); orphan {
+				if resource.Labels[labelComponent] == "execution-credentials" && d.credentials != nil {
+					credentialOrphans = append(credentialOrphans, identity)
+					continue
+				}
 				if deleteErr := d.client.CoreV1().Secrets(d.config.Namespace).Delete(
 					ctx, resource.Name, metav1.DeleteOptions{}); deleteErr != nil && !apierrors.IsNotFound(deleteErr) {
 					failures = append(failures, fmt.Errorf("delete orphan Secret %s: %w", resource.Name, deleteErr))
@@ -270,6 +337,22 @@ func (d *Dispatcher) SweepOrphans(ctx context.Context, records []dispatch.Record
 					ctx, resource.Name, metav1.DeleteOptions{PropagationPolicy: &policy}); deleteErr != nil && !apierrors.IsNotFound(deleteErr) {
 					failures = append(failures, fmt.Errorf("delete orphan Coordinator Job %s: %w", resource.Name, deleteErr))
 				}
+			}
+		}
+	}
+	for _, identity := range credentialOrphans {
+		base, baseErr := resourceBase(identity)
+		if baseErr != nil {
+			continue
+		}
+		gone, goneErr := d.dataPlaneAuxiliaryGone(ctx, base)
+		if goneErr != nil {
+			failures = append(failures, goneErr)
+			continue
+		}
+		if gone {
+			if cleanupErr := d.credentials.Cleanup(ctx, identity); cleanupErr != nil {
+				failures = append(failures, cleanupErr)
 			}
 		}
 	}
@@ -394,7 +477,12 @@ func (d *Dispatcher) ensureService(
 }
 
 func (d *Dispatcher) ensureWorkers(
-	ctx context.Context, base string, identity dispatch.Identity, fingerprint string,
+	ctx context.Context,
+	base string,
+	identity dispatch.Identity,
+	fingerprint string,
+	credentialSecret string,
+	credentialCompilerRevision string,
 ) (*appsv1.StatefulSet, error) {
 	name := base + "-worker"
 	existing, err := d.client.AppsV1().StatefulSets(d.config.Namespace).Get(ctx, name, metav1.GetOptions{})
@@ -408,7 +496,9 @@ func (d *Dispatcher) ensureWorkers(
 		return nil, fmt.Errorf("get Worker StatefulSet: %w", err)
 	}
 	created, err := d.client.AppsV1().StatefulSets(d.config.Namespace).Create(
-		ctx, d.workerStatefulSet(base, identity, fingerprint), metav1.CreateOptions{})
+		ctx,
+		d.workerStatefulSet(base, identity, fingerprint, credentialSecret, credentialCompilerRevision),
+		metav1.CreateOptions{})
 	if err != nil {
 		if apierrors.IsAlreadyExists(err) {
 			existing, err = d.client.AppsV1().StatefulSets(d.config.Namespace).Get(
@@ -427,11 +517,15 @@ func (d *Dispatcher) ensureWorkers(
 }
 
 func (d *Dispatcher) workerStatefulSet(
-	base string, identity dispatch.Identity, fingerprint string,
+	base string,
+	identity dispatch.Identity,
+	fingerprint string,
+	credentialSecret string,
+	credentialCompilerRevision string,
 ) *appsv1.StatefulSet {
 	name := base + "-worker"
 	podLabels := labels(identity, "execution-worker")
-	return &appsv1.StatefulSet{
+	worker := &appsv1.StatefulSet{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: name, Namespace: d.config.Namespace,
 			Labels: labels(identity, "worker"), Annotations: annotations(fingerprint),
@@ -462,6 +556,8 @@ func (d *Dispatcher) workerStatefulSet(
 							InitialDelaySeconds: 3, PeriodSeconds: 3, TimeoutSeconds: 2,
 						},
 						Env: []corev1.EnvVar{
+							{Name: "ASTRASYNC_EXECUTION_JOB_UID", Value: identity.JobUID},
+							{Name: "ASTRASYNC_EXECUTION_EPOCH", Value: strconv.FormatInt(identity.Epoch, 10)},
 							{Name: "ASTRASYNC_WORKER_ID", ValueFrom: &corev1.EnvVarSource{
 								FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.name"},
 							}},
@@ -489,10 +585,31 @@ func (d *Dispatcher) workerStatefulSet(
 			},
 		},
 	}
+	if credentialSecret != "" {
+		container := &worker.Spec.Template.Spec.Containers[0]
+		container.Env = append(container.Env, corev1.EnvVar{
+			Name: "ASTRASYNC_RUNTIME_CREDENTIALS", Value: materialization.CredentialMountPath(),
+		}, corev1.EnvVar{
+			Name: "ASTRASYNC_EXECUTION_COMPILER_REVISION", Value: credentialCompilerRevision,
+		})
+		container.VolumeMounts = append(container.VolumeMounts, corev1.VolumeMount{
+			Name: "runtime-credentials", MountPath: materialization.CredentialMountPath(), ReadOnly: true,
+		})
+		worker.Spec.Template.Spec.Volumes = append(worker.Spec.Template.Spec.Volumes, corev1.Volume{
+			Name: "runtime-credentials", VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{
+				SecretName: credentialSecret,
+			}},
+		})
+	}
+	return worker
 }
 
 func (d *Dispatcher) coordinatorJob(
-	base string, identity dispatch.Identity, fingerprint string,
+	base string,
+	identity dispatch.Identity,
+	fingerprint string,
+	credentialSecret string,
+	credentialCompilerRevision string,
 ) *batchv1.Job {
 	workerName := base + "-worker"
 	workerEndpoints := make([]string, d.config.WorkerReplicas)
@@ -502,7 +619,7 @@ func (d *Dispatcher) coordinatorJob(
 			"%s@%s.%s:%d", podName, podName, workerName, d.config.WorkerPort)
 	}
 	jobLabels := labels(identity, "coordinator")
-	return &batchv1.Job{
+	coordinator := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: base + "-coordinator", Namespace: d.config.Namespace,
 			Labels: jobLabels, Annotations: annotations(fingerprint),
@@ -523,6 +640,8 @@ func (d *Dispatcher) coordinatorJob(
 						SecurityContext: containerSecurityContext(),
 						Resources:       d.config.CoordinatorResources,
 						Env: []corev1.EnvVar{
+							{Name: "ASTRASYNC_EXECUTION_JOB_UID", Value: identity.JobUID},
+							{Name: "ASTRASYNC_EXECUTION_EPOCH", Value: strconv.FormatInt(identity.Epoch, 10)},
 							{Name: "ASTRASYNC_COORDINATOR_JOB_SPEC", Value: jobSpecPath},
 							{Name: "ASTRASYNC_COORDINATOR_PROGRESS_DIR", Value: progressMountPath + "/" + runtimeID(identity.JobUID)},
 							{Name: "ASTRASYNC_COORDINATOR_WORKERS", Value: strings.Join(workerEndpoints, ",")},
@@ -560,6 +679,23 @@ func (d *Dispatcher) coordinatorJob(
 			},
 		},
 	}
+	if credentialSecret != "" {
+		container := &coordinator.Spec.Template.Spec.Containers[0]
+		container.Env = append(container.Env, corev1.EnvVar{
+			Name: "ASTRASYNC_RUNTIME_CREDENTIALS", Value: materialization.CredentialMountPath(),
+		}, corev1.EnvVar{
+			Name: "ASTRASYNC_EXECUTION_COMPILER_REVISION", Value: credentialCompilerRevision,
+		})
+		container.VolumeMounts = append(container.VolumeMounts, corev1.VolumeMount{
+			Name: "runtime-credentials", MountPath: materialization.CredentialMountPath(), ReadOnly: true,
+		})
+		coordinator.Spec.Template.Spec.Volumes = append(coordinator.Spec.Template.Spec.Volumes, corev1.Volume{
+			Name: "runtime-credentials", VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{
+				SecretName: credentialSecret,
+			}},
+		})
+	}
+	return coordinator
 }
 
 func observeJob(execution *batchv1.Job) (scheduler.Observation, bool) {
@@ -586,7 +722,17 @@ func observeJob(execution *batchv1.Job) (scheduler.Observation, bool) {
 }
 
 func (d *Dispatcher) cleanupAuxiliary(ctx context.Context, base string) error {
-	return d.deleteAuxiliary(ctx, base, metav1.DeletePropagationBackground)
+	if err := d.deleteAuxiliary(ctx, base, metav1.DeletePropagationBackground); err != nil {
+		return err
+	}
+	gone, err := d.dataPlaneAuxiliaryGone(ctx, base)
+	if err != nil {
+		return err
+	}
+	if !gone {
+		return fmt.Errorf("execution resources are still terminating")
+	}
+	return nil
 }
 
 func (d *Dispatcher) deleteAuxiliary(
@@ -639,13 +785,71 @@ func (d *Dispatcher) resourcesGone(ctx context.Context, base string) (bool, erro
 	return true, nil
 }
 
-func jobDocument(candidate job.Job) ([]byte, string, error) {
-	if candidate.Spec.Source.ConnectionRef != "" || candidate.Spec.Sink.ConnectionRef != "" {
-		return nil, "", fmt.Errorf("connectionRef resolution is not available for Coordinator dispatch")
+func (d *Dispatcher) dataPlaneAuxiliaryGone(ctx context.Context, base string) (bool, error) {
+	checks := []func() error{
+		func() error {
+			_, err := d.client.AppsV1().StatefulSets(d.config.Namespace).Get(
+				ctx, base+"-worker", metav1.GetOptions{})
+			return err
+		},
+		func() error {
+			_, err := d.client.CoreV1().Services(d.config.Namespace).Get(
+				ctx, base+"-worker", metav1.GetOptions{})
+			return err
+		},
+		func() error {
+			_, err := d.client.CoreV1().Secrets(d.config.Namespace).Get(
+				ctx, base+"-spec", metav1.GetOptions{})
+			return err
+		},
 	}
+	for _, check := range checks {
+		err := check()
+		if err == nil {
+			return false, nil
+		}
+		if !apierrors.IsNotFound(err) {
+			return false, err
+		}
+	}
+	return true, nil
+}
+
+func verifyMaterializedRoles(candidate job.Job, result materialization.Result) error {
+	expected := make(map[materialization.Role]struct{}, 2)
+	if candidate.Spec.Source.ConnectionRef != "" {
+		expected[materialization.RoleSource] = struct{}{}
+	}
+	if candidate.Spec.Sink.ConnectionRef != "" {
+		expected[materialization.RoleSink] = struct{}{}
+	}
+	if result.Required != (len(expected) != 0) || len(result.Roles) != len(expected) {
+		return fmt.Errorf("execution Connection bindings do not match the accepted Job")
+	}
+	for _, role := range result.Roles {
+		if _, found := expected[role]; !found {
+			return fmt.Errorf("execution Connection bindings do not match the accepted Job")
+		}
+		delete(expected, role)
+	}
+	if len(expected) != 0 {
+		return fmt.Errorf("execution Connection bindings do not match the accepted Job")
+	}
+	return nil
+}
+
+func combinedFingerprint(jobFingerprint, materializationFingerprint string) string {
+	digest := sha256.Sum256([]byte(jobFingerprint + "|" + materializationFingerprint))
+	return hex.EncodeToString(digest[:])
+}
+
+func jobDocument(candidate job.Job) ([]byte, string, error) {
 	if err := candidate.Spec.Validate(); err != nil {
 		return nil, "", err
 	}
+	runtimeSpec := candidate.Spec.Clone()
+	runtimeSpec.Source.ConnectionRef = ""
+	runtimeSpec.Sink.ConnectionRef = ""
 	document := struct {
 		APIVersion string      `json:"apiVersion"`
 		Kind       string      `json:"kind"`
@@ -657,7 +861,7 @@ func jobDocument(candidate job.Job) ([]byte, string, error) {
 		Metadata: struct {
 			Name string `json:"name"`
 		}{Name: runtimeID(candidate.UID)},
-		Spec: candidate.Spec.Clone(),
+		Spec: runtimeSpec,
 	}
 	encoded, err := json.MarshalIndent(document, "", "  ")
 	if err != nil {

@@ -1,0 +1,140 @@
+{{- if .Values.console.enabled }}
+{{- $oidc := eq .Values.console.auth.mode "oidc" -}}
+{{- if and (eq .Values.console.environment "production") (not $oidc) -}}
+{{- fail "production Console requires console.auth.mode=oidc" -}}
+{{- end -}}
+{{- if and (eq .Values.console.environment "production") (ne .Values.apiServer.auth.mode "oidc") -}}
+{{- fail "production Console requires apiServer.auth.mode=oidc" -}}
+{{- end -}}
+{{- if and (eq .Values.console.environment "production") (not .Values.console.api.tls.enabled) -}}
+{{- fail "production Console requires console.api.tls.enabled=true" -}}
+{{- end -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "astrasync.componentFullname" (dict "context" . "component" "console") }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "astrasync.labels" . | nindent 4 }}
+    app.kubernetes.io/component: console
+spec:
+  replicas: {{ .Values.console.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "astrasync.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: console
+  template:
+    metadata:
+      labels:
+        {{- include "astrasync.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: console
+    spec:
+      serviceAccountName: {{ include "astrasync.consoleServiceAccountName" . }}
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        {{- toYaml .Values.securityContext | nindent 8 }}
+      containers:
+        - name: console
+          image: "{{ .Values.image.console.repository }}:{{ .Values.image.console.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: 8090
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+          resources:
+            {{- toYaml .Values.console.resources | nindent 12 }}
+          env:
+            - name: APP_ENV
+              value: {{ .Values.console.environment | quote }}
+            - name: CONSOLE_AUTH_MODE
+              value: {{ .Values.console.auth.mode | quote }}
+            - name: CONSOLE_LISTEN_ADDRESS
+              value: ":8090"
+            - name: ASTRASYNC_API_GRPC_ENDPOINT
+              value: {{ default (printf "%s:%v" (include "astrasync.componentFullname" (dict "context" . "component" "api-server")) .Values.apiServer.service.grpcPort) .Values.console.api.endpoint | quote }}
+            - name: CONSOLE_TENANT_ID
+              value: {{ .Values.console.developmentTenantId | quote }}
+            - name: CONSOLE_SESSION_IDLE_TTL
+              value: {{ .Values.console.auth.sessionIdleTtl | quote }}
+            - name: CONSOLE_SESSION_ABSOLUTE_TTL
+              value: {{ .Values.console.auth.sessionAbsoluteTtl | quote }}
+            - name: CONSOLE_LOGIN_TTL
+              value: {{ .Values.console.auth.loginTtl | quote }}
+            {{- if .Values.console.namespace }}
+            - name: CONSOLE_NAMESPACE
+              value: {{ .Values.console.namespace | quote }}
+            {{- end }}
+            {{- if $oidc }}
+            - name: DATABASE_URL
+              value: {{ include "astrasync.postgresql.url" . | quote }}
+            - name: CONSOLE_PUBLIC_URL
+              value: {{ required "console.publicUrl is required in OIDC mode" .Values.console.publicUrl | quote }}
+            - name: OIDC_ISSUER
+              value: {{ required "Console OIDC issuer is required" (default .Values.apiServer.auth.oidcIssuer .Values.console.auth.oidcIssuer) | quote }}
+            - name: OIDC_AUDIENCE
+              value: {{ required "Console OIDC audience is required" (default .Values.apiServer.auth.oidcAudience .Values.console.auth.oidcAudience) | quote }}
+            - name: CONSOLE_OIDC_CLIENT_ID
+              value: {{ required "console.auth.clientId is required in OIDC mode" .Values.console.auth.clientId | quote }}
+            - name: CONSOLE_OIDC_SCOPES
+              value: {{ .Values.console.auth.scopes | quote }}
+            - name: CONSOLE_SESSION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "console.auth.sessionKey.secretName is required in OIDC mode" .Values.console.auth.sessionKey.secretName | quote }}
+                  key: {{ .Values.console.auth.sessionKey.key | quote }}
+            {{- if .Values.console.auth.clientSecret.secretName }}
+            - name: CONSOLE_OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.console.auth.clientSecret.secretName | quote }}
+                  key: {{ .Values.console.auth.clientSecret.key | quote }}
+            {{- end }}
+            {{- end }}
+            {{- if .Values.console.api.tls.enabled }}
+            - name: CONSOLE_API_TLS_CA_FILE
+              value: /app/api-tls/{{ .Values.console.api.tls.caKey }}
+            - name: CONSOLE_API_TLS_SERVER_NAME
+              value: {{ .Values.console.api.tls.serverName | quote }}
+            {{- end }}
+          {{- if .Values.console.api.tls.enabled }}
+          volumeMounts:
+            - name: api-tls
+              mountPath: /app/api-tls
+              readOnly: true
+          {{- end }}
+      {{- if .Values.console.api.tls.enabled }}
+      volumes:
+        - name: api-tls
+          secret:
+            secretName: {{ required "console.api.tls.secretName is required when API TLS is enabled" .Values.console.api.tls.secretName | quote }}
+      {{- end }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

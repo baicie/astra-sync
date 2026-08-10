@@ -8,6 +8,8 @@ require (
 	google.golang.org/grpc v1.64.0
 	google.golang.org/protobuf v1.34.2
 	io.astrasync/control-plane v0.0.0
+	io.astrasync/control-plane/auth v0.0.0-00010101000000-000000000000
+	io.astrasync/control-plane/catalog v0.0.0
 )
 
 require (
@@ -25,3 +27,7 @@ require (
 )
 
 replace io.astrasync/control-plane => ..
+
+replace io.astrasync/control-plane/auth => ../auth
+
+replace io.astrasync/control-plane/catalog => ../catalog

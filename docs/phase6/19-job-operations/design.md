@@ -2,8 +2,8 @@
 
 ## Status
 
-Implementation-ready design. No Job mutation UI, canonical validation service, or new write route
-is delivered by this document alone.
+Authoritative design implemented by the Phase 6 platform delivery. Production mutation exposure
+remains subject to identity, TLS, audit, and Connection rollout gates.
 
 ## Goals
 

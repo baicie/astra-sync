@@ -6,6 +6,7 @@ import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.astrasync.connector.file.CsvConnectorFactory;
+import io.astrasync.control.v1.ConnectorInventory;
 import io.astrasync.engine.kernel.SyncJobException;
 import io.astrasync.engine.kernel.SyncResult;
 import io.astrasync.engine.kernel.SyncStage;
@@ -54,6 +55,38 @@ class AstraSyncCliTest {
         assertThat(registry.findDescriptor("mysql-cdc")).isPresent();
         assertThat(registry.findDescriptor("postgres-cdc")).isPresent();
         assertThat(registry.findDescriptor("jdbc")).isPresent();
+    }
+
+    @Test
+    void exportsTheDiscoveredDeploymentCatalogAsDeterministicProtobuf() throws Exception {
+        Path first = tempDirectory.resolve("inventory-first.pb");
+        Path second = tempDirectory.resolve("inventory-second.pb");
+
+        Invocation firstExport = invoke(
+                "catalog-export",
+                first.toString(),
+                "--compiler-build",
+                "test-build",
+                "--execution-profile",
+                "test-profile");
+        Invocation secondExport = invoke(
+                "catalog-export",
+                second.toString(),
+                "--compiler-build",
+                "test-build",
+                "--execution-profile",
+                "test-profile");
+        ConnectorInventory inventory = ConnectorInventory.parseFrom(Files.readAllBytes(first));
+
+        assertThat(firstExport.exitCode()).isZero();
+        assertThat(firstExport.stderr()).isEmpty();
+        assertThat(firstExport.stdout()).contains("EXPORTED connectors=4", "inventoryRevision=sha256:");
+        assertThat(Files.readAllBytes(first)).isEqualTo(Files.readAllBytes(second));
+        assertThat(inventory.getDescriptorsList())
+                .extracting(io.astrasync.control.v1.ConnectorDescriptor::getName)
+                .containsExactly("csv", "jdbc", "mysql-cdc", "postgres-cdc");
+        assertThat(inventory.getCompilerBuild()).isEqualTo("test-build");
+        assertThat(inventory.getExecutionProfile()).isEqualTo("test-profile");
     }
 
     @Test

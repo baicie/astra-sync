@@ -17,6 +17,9 @@ import (
 //go:embed migrations/001_jobs.sql
 var migration string
 
+//go:embed migrations/002_job_mutations.sql
+var mutationMigration string
+
 type Repository struct {
 	db *sql.DB
 }
@@ -43,6 +46,15 @@ func New(db *sql.DB) *Repository {
 func (r *Repository) Migrate(ctx context.Context) error {
 	if _, err := r.db.ExecContext(ctx, migration); err != nil {
 		return fmt.Errorf("migrate control-plane jobs: %w", err)
+	}
+	return nil
+}
+
+// MigrateMutations must run after the auth and Connection schemas because the
+// mutation tables reference tenants and execution bindings.
+func (r *Repository) MigrateMutations(ctx context.Context) error {
+	if _, err := r.db.ExecContext(ctx, mutationMigration); err != nil {
+		return fmt.Errorf("migrate atomic Job mutations: %w", err)
 	}
 	return nil
 }

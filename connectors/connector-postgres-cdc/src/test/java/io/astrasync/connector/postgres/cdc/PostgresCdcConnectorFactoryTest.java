@@ -21,6 +21,15 @@ class PostgresCdcConnectorFactoryTest {
                         Capability.CHANGE_DATA_CAPTURE,
                         Capability.REPLAYABLE_OFFSET,
                         Capability.EXACTLY_ONCE_SOURCE);
+        assertThat(factory.descriptor().version()).isEqualTo("1.1.0");
+        assertThat(factory.descriptor().connectionRequirement(io.astrasync.connector.api.ConnectorRole.SOURCE))
+                .isEqualTo(io.astrasync.connector.api.ConnectionRequirement.REQUIRED);
+        assertThat(factory.descriptor().options())
+                .filteredOn(
+                        option -> option.sensitivity() == io.astrasync.connector.api.ConnectorOptionSensitivity.SECRET)
+                .extracting(io.astrasync.connector.api.ConnectorOptionDescriptor::key)
+                .containsExactly("password", "username");
+        assertThat(factory.descriptor().optionPrefixes()).isEmpty();
         assertThat(factory.createCdcSource(configuration(Map.of())))
                 .isInstanceOf(io.astrasync.connector.debezium.DebeziumCdcSource.class);
         assertThat(options.properties())

@@ -68,6 +68,15 @@ jobs:
       - name: Verify Maven reactor
         run: mvn -B -ntp verify -DskipITs
 
+      - name: Check deployment connector inventory
+        run: |
+          mkdir -p target/catalog-check
+          java -jar cli/target/astrasync-cli-0.1.0-SNAPSHOT-all.jar \
+            catalog-export target/catalog-check/connector-inventory.pb \
+            --compiler-build 0.1.0-SNAPSHOT \
+            --execution-profile standard
+          cmp deployment/catalog/connector-inventory.pb target/catalog-check/connector-inventory.pb
+
       - name: Check Java formatting
         run: mvn -B -ntp spotless:check
 
@@ -177,7 +186,37 @@ jobs:
         working-directory: control-plane
         env:
           ASTRASYNC_TEST_POSTGRES_URL: postgres://astra:astra@127.0.0.1:5432/astrasync?sslmode=disable
-        run: go test -v -count=1 ./job/postgres -run '^TestRepositoryPersistsLifecycleAcrossConnections$'
+        run: >-
+          go test -v -count=1 ./job/postgres
+          -run '^Test(RepositoryPersistsLifecycleAcrossConnections|AtomicJobMutationsFenceConnectionGenerations)$'
+
+      - name: Run PostgreSQL connector catalog integration
+        working-directory: control-plane/catalog
+        env:
+          ASTRASYNC_TEST_POSTGRES_URL: postgres://astra:astra@127.0.0.1:5432/astrasync?sslmode=disable
+        run: go test -v -count=1 ./postgres -run '^TestRepositoryAtomicallyActivatesCatalog$'
+
+      - name: Run PostgreSQL authentication integration
+        working-directory: control-plane/auth
+        env:
+          ASTRASYNC_TEST_POSTGRES_URL: postgres://astra:astra@127.0.0.1:5432/astrasync?sslmode=disable
+        run: go test -v -count=1 ./postgres -run '^TestRepositoryMaterializesOIDCIdentityAndTenantMembership$'
+
+      - name: Run PostgreSQL Connection lifecycle integration
+        working-directory: control-plane
+        env:
+          ASTRASYNC_TEST_POSTGRES_URL: postgres://astra:astra@127.0.0.1:5432/astrasync?sslmode=disable
+        run: >-
+          go test -v -count=1 ./connection/postgres
+          -run '^TestRepository(PersistsAtomicConnectionLifecycle|FencesConcurrentConnectionTestExecutors)$'
+
+      - name: Run PostgreSQL credential materialization integration
+        working-directory: control-plane/scheduler
+        env:
+          ASTRASYNC_TEST_POSTGRES_URL: postgres://astra:astra@127.0.0.1:5432/astrasync?sslmode=disable
+        run: >-
+          go test -v -count=1 ./internal/materialization/postgres
+          -run '^TestStorePersistsLeaseFencedMaterializationReceiptsAndCleanup$'
 
       - name: Run PostgreSQL scheduler admission integration
         working-directory: control-plane/scheduler
@@ -283,12 +322,21 @@ jobs:
           - name: API Server
             file: deployment/docker/Dockerfile.api
             tag: astrasync/api-server:ci
+          - name: Compiler Validation
+            file: deployment/docker/Dockerfile.compiler-validation
+            tag: astrasync/compiler-validation:ci
           - name: Controller
             file: deployment/docker/Dockerfile.controller
             tag: astrasync/controller:ci
           - name: Scheduler
             file: deployment/docker/Dockerfile.scheduler
             tag: astrasync/scheduler:ci
+          - name: Connection Test Executor
+            file: deployment/docker/Dockerfile.connection-test-executor
+            tag: astrasync/connection-test-executor:ci
+          - name: Console
+            file: deployment/docker/Dockerfile.console
+            tag: astrasync/console:ci
           - name: Coordinator
             file: deployment/docker/Dockerfile.coordinator
             tag: astrasync/coordinator:ci

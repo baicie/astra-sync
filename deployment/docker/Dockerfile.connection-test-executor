@@ -1,0 +1,37 @@
+# AstraSync isolated Connection test executor
+FROM golang:1.22-alpine AS builder
+
+WORKDIR /app
+
+COPY control-plane/go.mod control-plane/go.sum ./control-plane/
+COPY control-plane/auth/go.mod control-plane/auth/go.sum ./control-plane/auth/
+COPY control-plane/catalog/go.mod control-plane/catalog/go.sum ./control-plane/catalog/
+COPY control-plane/scheduler/go.mod control-plane/scheduler/go.sum ./control-plane/scheduler/
+WORKDIR /app/control-plane/scheduler
+RUN go mod download
+
+COPY control-plane/auth ../auth
+COPY control-plane/catalog ../catalog
+COPY control-plane/connection ../connection
+COPY control-plane/job ../job
+COPY control-plane/scheduler ./
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" \
+    -o /app/connection-test-executor ./cmd/connection-test-executor
+
+FROM alpine:3.19
+
+WORKDIR /app
+RUN apk add --no-cache ca-certificates tzdata \
+    && addgroup -g 1000 astra \
+    && adduser -u 1000 -G astra -D astra
+
+COPY --from=builder /app/connection-test-executor /app/connection-test-executor
+RUN chown -R astra:astra /app
+
+USER astra
+EXPOSE 8083
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD wget -qO- http://localhost:8083/healthz || exit 1
+
+ENTRYPOINT ["/app/connection-test-executor"]

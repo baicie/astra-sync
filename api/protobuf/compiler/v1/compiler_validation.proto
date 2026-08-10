@@ -1,0 +1,98 @@
+syntax = "proto3";
+
+package astra.compiler.v1;
+
+import "v1/connector.proto";
+
+option go_package = "io.astrasync/control-plane/api-server/gen/go/compiler/v1;compilerv1";
+option java_multiple_files = true;
+option java_package = "io.astrasync.compiler.v1";
+option java_outer_classname = "CompilerValidationProto";
+
+// Internal workload-only service backed by the exact Java compiler and connector artifacts.
+service CompilerValidationService {
+  rpc Validate(ValidateRequest) returns (ValidateResponse);
+  rpc GetInventory(GetInventoryRequest) returns (GetInventoryResponse);
+}
+
+message ValidateRequest {
+  string name = 1;
+  EffectiveConnectorConfig source = 2;
+  EffectiveConnectorConfig sink = 3;
+  repeated CompilerTransform transforms = 4;
+  CompilerDeliveryGuarantee delivery_guarantee = 5;
+  int32 max_batch_records = 6;
+  string execution_profile = 7;
+  string expected_compiler_revision = 8;
+}
+
+// Contains only descriptor-approved values. Secret bytes and provider locators are prohibited.
+message EffectiveConnectorConfig {
+  string connector = 1;
+  map<string, string> job_options = 2;
+  map<string, string> connection_settings = 3;
+  repeated string configured_secret_fields = 4;
+  bool connection_configured = 5;
+  string descriptor_revision = 6;
+  string connection_schema_revision = 7;
+}
+
+message CompilerTransform {
+  string type = 1;
+  map<string, string> options = 2;
+}
+
+enum CompilerDeliveryGuarantee {
+  COMPILER_DELIVERY_GUARANTEE_UNSPECIFIED = 0;
+  COMPILER_DELIVERY_GUARANTEE_EXACTLY_ONCE = 1;
+  COMPILER_DELIVERY_GUARANTEE_AT_LEAST_ONCE = 2;
+  COMPILER_DELIVERY_GUARANTEE_AT_MOST_ONCE = 3;
+}
+
+message ValidateResponse {
+  bool valid = 1;
+  string compiler_revision = 2;
+  string inventory_revision = 3;
+  CompilerExecutionMode execution_mode = 4;
+  repeated CompilerValidationIssue issues = 5;
+}
+
+enum CompilerExecutionMode {
+  COMPILER_EXECUTION_MODE_UNSPECIFIED = 0;
+  COMPILER_EXECUTION_MODE_BATCH = 1;
+  COMPILER_EXECUTION_MODE_CDC = 2;
+}
+
+message CompilerValidationIssue {
+  CompilerValidationIssueCode code = 1;
+  string field_path = 2;
+  string message = 3;
+  string documentation_key = 4;
+}
+
+enum CompilerValidationIssueCode {
+  COMPILER_VALIDATION_ISSUE_CODE_UNSPECIFIED = 0;
+  COMPILER_VALIDATION_ISSUE_CODE_STRUCTURE_INVALID = 1;
+  COMPILER_VALIDATION_ISSUE_CODE_CONNECTOR_NOT_FOUND = 2;
+  COMPILER_VALIDATION_ISSUE_CODE_ROLE_UNSUPPORTED = 3;
+  COMPILER_VALIDATION_ISSUE_CODE_CAPABILITY_MISSING = 4;
+  COMPILER_VALIDATION_ISSUE_CODE_TRANSFORM_UNSUPPORTED = 5;
+  COMPILER_VALIDATION_ISSUE_CODE_DELIVERY_UNSUPPORTED = 6;
+  COMPILER_VALIDATION_ISSUE_CODE_OPTION_UNKNOWN = 7;
+  COMPILER_VALIDATION_ISSUE_CODE_OPTION_REQUIRED = 8;
+  COMPILER_VALIDATION_ISSUE_CODE_OPTION_INVALID = 9;
+  COMPILER_VALIDATION_ISSUE_CODE_OPTION_OWNERSHIP_INVALID = 10;
+  COMPILER_VALIDATION_ISSUE_CODE_SECRET_FIELD_INVALID = 11;
+  COMPILER_VALIDATION_ISSUE_CODE_CONNECTION_REF_REQUIRED = 12;
+  COMPILER_VALIDATION_ISSUE_CODE_CONNECTION_SCHEMA_INCOMPATIBLE = 13;
+  COMPILER_VALIDATION_ISSUE_CODE_VALIDATION_REVISION_CHANGED = 14;
+  COMPILER_VALIDATION_ISSUE_CODE_ISSUES_TRUNCATED = 15;
+}
+
+message GetInventoryRequest {
+  string execution_profile = 1;
+}
+
+message GetInventoryResponse {
+  astra.control.v1.ConnectorInventory inventory = 1;
+}

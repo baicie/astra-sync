@@ -22,9 +22,14 @@ class CsvConnectorFactoryTest {
     @Test
     void advertisesOnlyTheImplementedBoundedRoles() {
         assertThat(factory.descriptor().name()).isEqualTo("csv");
-        assertThat(factory.descriptor().version()).isEqualTo("1.0.0");
+        assertThat(factory.descriptor().version()).isEqualTo("1.1.0");
         assertThat(factory.descriptor().roles()).containsExactlyInAnyOrder(SOURCE, SINK);
         assertThat(factory.descriptor().capabilities()).containsExactlyInAnyOrder(BATCH_READ, BATCH_WRITE);
+        assertThat(factory.descriptor().options())
+                .extracting(io.astrasync.connector.api.ConnectorOptionDescriptor::key)
+                .containsExactly("malformedRowPolicy", "nullValue", "path");
+        assertThat(factory.descriptor().connectionRequirement(SOURCE))
+                .isEqualTo(io.astrasync.connector.api.ConnectionRequirement.NONE);
     }
 
     @Test

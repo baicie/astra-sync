@@ -1,8 +1,8 @@
-# Phase 6 Slice 19 Design Verification
+# Phase 6 Slice 19 Verification
 
 ## Status
 
-Design complete; runtime verification awaits implementation.
+Implementation complete; production mutation rollout remains operator-controlled.
 
 ## Design Checks
 
@@ -52,21 +52,27 @@ Design complete; runtime verification awaits implementation.
 
 ## Static Verification Procedure
 
-Before merging the design change:
+For repository closeout:
 
 1. Resolve every relative Markdown link in the Slice 19 directory, Phase 6 index, ADR index, and
    architecture baseline.
 2. Confirm the workflow matrix names all eight current `JobService` RPCs exactly once in its
    coverage table.
 3. Confirm all seven observed lifecycle states have Edit, Start/Restart, Stop, and Delete decisions.
-4. Search the design for accidental runtime-completion claims and retain
-   `Design complete; implementation not started` status.
+4. Confirm implementation claims are limited to repository behavior and do not claim a production
+   tenant rollout.
 5. Run `git diff --check` and inspect the final diff for unrelated changes.
 
-## Deferred Runtime Evidence
+## Runtime Evidence
 
-The design does not claim protobuf generation, Java/Go validation parity, connector option schemas,
-OIDC/RBAC enforcement, CSRF handling, idempotency persistence, transactional mutation audit,
-secret-reference migration, write routes, browser workflows, convergence polling, race tests,
-deployment rollout, or production operation. Those are mandatory implementation gates before Slice
-19 can be marked Complete.
+The Phase 6 implementation adds protobuf-first validation, the Java compiler-validation service,
+descriptor-owned option schemas, stable Job UIDs, CAS/idempotent transactional mutations,
+Job/Connection bindings, epoch generation snapshots, RBAC/audit enforcement, and same-origin
+Console workflows with conflict and convergence handling. Unit and PostgreSQL integration suites
+cover mutation replay/digest mismatch, atomic audit rollback, binding replacement, generation
+fencing, and lifecycle concurrency. The end-to-end repository verification commands and results are
+recorded in
+[`../20-connector-catalog-connections/verification.md`](../20-connector-catalog-connections/verification.md).
+
+Production deployment and tenant enablement are operator acceptance steps and are not claimed by
+the repository implementation status.

@@ -2,6 +2,7 @@
 FROM maven:3.9.9-eclipse-temurin-21-alpine AS builder
 
 WORKDIR /workspace
+RUN apk add --no-cache gcompat
 COPY . .
 RUN mvn -B -ntp -DskipTests -pl engine/coordinator -am package
 

@@ -2,12 +2,12 @@
 
 ## Status
 
-Design complete; implementation not started.
+Implementation complete; production mutation rollout remains operator-controlled.
 
-Slice 19 defines how authenticated operators create, validate, edit, start, stop, restart, and
+Slice 19 implements how authenticated operators create, validate, edit, start, stop, restart, and
 delete Jobs without weakening the lifecycle, tenant, concurrency, or audit boundaries established
-by earlier slices. The existing `JobService` remains the lifecycle authority; the Console adds a
-same-origin workflow layer rather than another Job model.
+by earlier slices. `JobService` remains the lifecycle authority; the Console adds a same-origin
+workflow layer rather than another Job model.
 
 ## Design Outcomes
 
@@ -32,9 +32,10 @@ same-origin workflow layer rather than another Job model.
 - [ADR-038: Desired-state Job Mutation Workflows](../../adr/adr-038-desired-state-job-mutation-workflows.md)
 - [ADR-039: Canonical Side-effect-free JobSpec Validation](../../adr/adr-039-canonical-side-effect-free-jobspec-validation.md)
 
-## Implementation Gate
+## Rollout Gate
 
-The design does not make the current read-only Console writable. Production mutation routes remain
-disabled until Slice 18 runtime gates pass and the mutation, idempotency, and audit records can
-commit atomically. Validation may be implemented earlier behind authenticated API boundaries, but
-it cannot be treated as authorization or as evidence that a later mutation is safe to skip.
+The Console mutation routes are implemented behind the Slice 18 BFF, authorization, CSRF,
+idempotency, optimistic concurrency, canonical validation, and transactional audit boundaries.
+Production exposure remains conditional on deployment OIDC/TLS configuration and the Slice 20
+Connection rollout gates. Validation is never treated as authorization or as evidence that a later
+mutation is safe to skip.
