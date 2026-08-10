@@ -2,8 +2,8 @@
 
 ## Status
 
-Implementation-ready extension to the Slice 18 policy vocabulary. Runtime enforcement is not
-implemented.
+Implemented extension to the Slice 18 policy vocabulary. API and Console enforcement is
+deny-by-default; production identity and tenant membership configuration remains operator-owned.
 
 ## Permission Vocabulary
 

@@ -8,12 +8,17 @@ RUN apk add --no-cache git ca-certificates
 
 # Download the API module and its replaced shared module independently.
 COPY control-plane/go.mod control-plane/go.sum ./control-plane/
+COPY control-plane/auth/go.mod control-plane/auth/go.sum ./control-plane/auth/
+COPY control-plane/catalog/go.mod control-plane/catalog/go.sum ./control-plane/catalog/
 COPY control-plane/api-server/go.mod control-plane/api-server/go.sum ./control-plane/api-server/
 WORKDIR /app/control-plane/api-server
 RUN go mod download
 
 # Copy source code
 COPY control-plane/job ../job
+COPY control-plane/connection ../connection
+COPY control-plane/auth ../auth
+COPY control-plane/catalog ../catalog
 COPY control-plane/api-server ./
 
 # Build
@@ -33,6 +38,7 @@ RUN addgroup -g 1000 astra && \
 
 # Copy binary
 COPY --from=builder /app/server /app/server
+COPY deployment/catalog/connector-inventory.pb /app/catalog/connector-inventory.pb
 
 # Set ownership
 RUN chown -R astra:astra /app

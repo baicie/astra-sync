@@ -2,12 +2,12 @@
 
 ## Status
 
-Design complete; implementation not started.
+Runtime foundation required by Slices 19 and 20 complete; standalone administration and production
+identity rollout remain planned.
 
-Slice 18 establishes the security boundary required before the Console can expose Job mutations or
-browser-selectable tenants. It delegates user authentication to an external OIDC provider, keeps
-AstraSync roles in PostgreSQL, authorizes every Job RPC at the API Server, and makes control-plane
-mutations auditable.
+Slice 18 establishes the security boundary used by Console and API mutations. It delegates user
+authentication to an external OIDC provider, keeps AstraSync roles in PostgreSQL, authorizes public
+RPCs at the API Server, and makes control-plane mutations auditable.
 
 ## Design Outcomes
 
@@ -29,8 +29,10 @@ mutations auditable.
 - [ADR-036: External OIDC and Local Tenant Authorization](../../adr/adr-036-external-oidc-and-local-tenant-authorization.md)
 - [ADR-037: Transactional Control-plane Audit Trail](../../adr/adr-037-transactional-control-plane-audit-trail.md)
 
-## Implementation Gate
+## Rollout Gate
 
-Implementation must preserve the existing lifecycle version and execution-epoch fences. RBAC is an
-additional admission check; it cannot replace optimistic versions, heartbeat capability tokens, or
-Kubernetes service-account boundaries.
+The delivered foundation preserves the existing lifecycle version and execution-epoch fences. RBAC is
+an additional admission check; it does not replace optimistic versions, heartbeat capability
+tokens, or Kubernetes service-account boundaries. Production requires OIDC, TLS, session keys,
+tenant memberships, audit retention, and fail-closed configuration owned by the deployment. The
+remaining standalone administration surfaces are listed in [implementation-plan.md](implementation-plan.md).

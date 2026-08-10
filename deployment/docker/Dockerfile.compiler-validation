@@ -1,0 +1,27 @@
+# AstraSync internal Java compiler validation service
+FROM maven:3.9.9-eclipse-temurin-21-alpine AS builder
+
+WORKDIR /workspace
+RUN apk add --no-cache gcompat
+COPY . .
+RUN mvn -B -ntp -DskipTests -pl control-plane/compiler-validation -am package
+
+FROM eclipse-temurin:21-jre-alpine
+
+WORKDIR /app
+RUN addgroup -g 1000 astra \
+    && adduser -u 1000 -G astra -D astra \
+    && chown -R astra:astra /app
+
+COPY --from=builder /workspace/control-plane/compiler-validation/target/compiler-validation-*-all.jar /app/compiler-validation.jar
+
+USER astra
+EXPOSE 50052
+
+ENV COMPILER_VALIDATION_PORT=50052 \
+    COMPILER_VALIDATION_MAX_CONCURRENCY=32 \
+    COMPILER_BUILD=0.1.0-SNAPSHOT \
+    CONNECTOR_EXECUTION_PROFILE=standard \
+    JAVA_TOOL_OPTIONS="-XX:+UseG1GC -XX:MaxRAMPercentage=75"
+
+ENTRYPOINT ["java", "-jar", "/app/compiler-validation.jar"]

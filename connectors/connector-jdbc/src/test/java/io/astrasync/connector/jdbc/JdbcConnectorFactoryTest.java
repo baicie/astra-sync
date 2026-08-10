@@ -15,7 +15,7 @@ class JdbcConnectorFactoryTest {
     @Test
     void exposesBoundedAndOptInReplayableJdbcCapabilities() {
         assertThat(factory.descriptor().name()).isEqualTo("jdbc");
-        assertThat(factory.descriptor().version()).isEqualTo("1.0.0");
+        assertThat(factory.descriptor().version()).isEqualTo("1.1.0");
         assertThat(factory.descriptor().roles()).containsExactlyInAnyOrder(ConnectorRole.SOURCE, ConnectorRole.SINK);
         assertThat(factory.descriptor().capabilities())
                 .containsExactlyInAnyOrder(
@@ -25,6 +25,15 @@ class JdbcConnectorFactoryTest {
                         Capability.IDEMPOTENT_WRITE,
                         Capability.UPSERT,
                         Capability.DELETE);
+        assertThat(factory.descriptor().connectionRequirement(ConnectorRole.SOURCE))
+                .isEqualTo(io.astrasync.connector.api.ConnectionRequirement.REQUIRED);
+        assertThat(factory.descriptor().connectionRequirement(ConnectorRole.SINK))
+                .isEqualTo(io.astrasync.connector.api.ConnectionRequirement.REQUIRED);
+        assertThat(factory.descriptor().options())
+                .filteredOn(
+                        option -> option.sensitivity() == io.astrasync.connector.api.ConnectorOptionSensitivity.SECRET)
+                .extracting(io.astrasync.connector.api.ConnectorOptionDescriptor::key)
+                .containsExactly("password", "user");
     }
 
     @Test

@@ -2,8 +2,8 @@
 
 ## Status
 
-Implementation-ready contract. The current Java `ConnectorDescriptor` exposes only name, artifact
-version, roles, and capabilities; the fields below are additive design requirements.
+Implemented contract. Java `ConnectorDescriptor`, protobuf inventory publication, generated
+bindings, and all bundled connector factories carry the fields and invariants below.
 
 ## Authority and Publication
 

@@ -2,7 +2,7 @@
 
 ## Status
 
-Implementation-ready lifecycle and API contract. No Connection repository or service exists yet.
+Implemented lifecycle and API contract. Production mutation admission remains disabled by default.
 
 ## Resource Identity and Projection
 

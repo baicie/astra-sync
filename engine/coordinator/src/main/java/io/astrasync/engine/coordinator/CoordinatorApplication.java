@@ -16,10 +16,12 @@ import io.astrasync.engine.plan.JobCompiler;
 import io.astrasync.engine.runtime.AdaptiveBatchPolicy;
 import io.astrasync.engine.runtime.AdaptiveParallelismPolicy;
 import io.astrasync.engine.runtime.BatchWorker;
+import io.astrasync.engine.runtime.RuntimeCredentialLoader;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 /** Executable Coordinator for the operational JDBC full-load path. */
@@ -28,7 +30,8 @@ public final class CoordinatorApplication {
 
     public static void main(String[] args) {
         try {
-            ResumableRunResult result = run(CoordinatorConfiguration.fromEnvironment(System.getenv()));
+            Map<String, String> environment = System.getenv();
+            ResumableRunResult result = run(CoordinatorConfiguration.fromEnvironment(environment), environment);
             if (result.executionEpoch() == 0) {
                 System.out.printf(
                         "SUCCEEDED resumedSplits=%d executedSplits=%d recordsRead=%d recordsWritten=%d%n",
@@ -54,16 +57,20 @@ public final class CoordinatorApplication {
 
     @SuppressWarnings("try")
     public static ResumableRunResult run(CoordinatorConfiguration configuration) {
+        return run(configuration, Map.of());
+    }
+
+    static ResumableRunResult run(CoordinatorConfiguration configuration, Map<String, String> environment) {
         CoordinatorConfiguration checked = Objects.requireNonNull(configuration, "configuration must not be null");
         try (ExecutionHeartbeat ignored = ExecutionHeartbeat.start(checked.heartbeat())) {
-            return runChecked(checked);
+            return runChecked(checked, Objects.requireNonNull(environment, "environment must not be null"));
         }
     }
 
-    private static ResumableRunResult runChecked(CoordinatorConfiguration checked) {
-        JobSpec jobSpec = readJobSpec(checked);
-        CompiledJobPlan plan =
-                new JobCompiler(ConnectorRegistry.of(new JdbcConnectorFactory())).compileCheckpointed(jobSpec);
+    private static ResumableRunResult runChecked(CoordinatorConfiguration checked, Map<String, String> environment) {
+        ConnectorRegistry registry = ConnectorRegistry.of(new JdbcConnectorFactory());
+        JobSpec jobSpec = RuntimeCredentialLoader.load(readJobSpec(checked), registry, environment);
+        CompiledJobPlan plan = new JobCompiler(registry).compileCheckpointed(jobSpec);
         requireJdbcPlan(plan);
 
         SplitSource splitSource =

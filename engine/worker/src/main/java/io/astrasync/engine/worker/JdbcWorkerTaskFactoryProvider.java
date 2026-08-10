@@ -14,6 +14,7 @@ import io.astrasync.engine.runtime.AdaptiveBatchPolicy;
 import io.astrasync.engine.runtime.BatchTask;
 import io.astrasync.engine.runtime.BatchTaskFactory;
 import io.astrasync.engine.runtime.CheckpointExecutionContext;
+import io.astrasync.engine.runtime.RuntimeCredentialLoader;
 import io.astrasync.engine.runtime.SpillPolicy;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -36,7 +37,9 @@ public final class JdbcWorkerTaskFactoryProvider implements WorkerTaskFactoryPro
                 .normalize();
         JobSpec jobSpec = readJobSpec(jobSpecPath);
         JdbcConnectorFactory connectorFactory = new JdbcConnectorFactory();
-        CompiledJobPlan plan = new JobCompiler(ConnectorRegistry.of(connectorFactory)).compileCheckpointed(jobSpec);
+        ConnectorRegistry registry = ConnectorRegistry.of(connectorFactory);
+        jobSpec = RuntimeCredentialLoader.load(jobSpec, registry, environment);
+        CompiledJobPlan plan = new JobCompiler(registry).compileCheckpointed(jobSpec);
         requireJdbcPlan(plan);
         AdaptiveBatchPolicy batchPolicy = new AdaptiveBatchPolicy(
                 plan.adaptiveBatch().minBatchRecords(),

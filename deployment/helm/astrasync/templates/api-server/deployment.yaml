@@ -1,4 +1,13 @@
 {{- if .Values.apiServer.enabled }}
+{{- if and .Values.apiServer.connectionRollout.runtimeEnabled (not .Values.scheduler.enabled) }}
+{{- fail "apiServer.connectionRollout.runtimeEnabled requires scheduler.enabled=true" }}
+{{- end }}
+{{- if and .Values.apiServer.connectionRollout.runtimeEnabled (not .Values.scheduler.connectionMaterialization.enabled) }}
+{{- fail "apiServer.connectionRollout.runtimeEnabled requires scheduler.connectionMaterialization.enabled=true" }}
+{{- end }}
+{{- if and .Values.apiServer.connectionRollout.testsEnabled (not .Values.connectionTestExecutor.enabled) }}
+{{- fail "apiServer.connectionRollout.testsEnabled requires connectionTestExecutor.enabled=true" }}
+{{- end }}
 # API Server Deployment
 apiVersion: apps/v1
 kind: Deployment
@@ -44,6 +53,9 @@ spec:
             httpGet:
               path: /health
               port: http
+              {{- if .Values.tls.enabled }}
+              scheme: HTTPS
+              {{- end }}
             initialDelaySeconds: 30
             periodSeconds: 10
             timeoutSeconds: 5
@@ -52,6 +64,9 @@ spec:
             httpGet:
               path: /ready
               port: http
+              {{- if .Values.tls.enabled }}
+              scheme: HTTPS
+              {{- end }}
             initialDelaySeconds: 10
             periodSeconds: 5
             timeoutSeconds: 3
@@ -61,6 +76,57 @@ spec:
           env:
             - name: DATABASE_URL
               value: {{ include "astrasync.postgresql.url" . }}
+            - name: APP_ENV
+              value: {{ .Values.apiServer.environment | quote }}
+            - name: AUTH_MODE
+              value: {{ .Values.apiServer.auth.mode | quote }}
+            - name: OIDC_ISSUER
+              value: {{ .Values.apiServer.auth.oidcIssuer | quote }}
+            - name: OIDC_AUDIENCE
+              value: {{ .Values.apiServer.auth.oidcAudience | quote }}
+            - name: CONNECTOR_INVENTORY_PATH
+              value: {{ .Values.apiServer.catalog.inventoryPath | quote }}
+            - name: CONNECTOR_EXECUTION_PROFILE
+              value: {{ .Values.apiServer.catalog.executionProfile | quote }}
+            - name: COMPILER_VALIDATION_ENDPOINT
+              value: {{ default (printf "%s:%v" (include "astrasync.componentFullname" (dict "context" . "component" "compiler-validation")) .Values.compilerValidation.service.port) .Values.apiServer.compilerValidation.endpoint | quote }}
+            - name: COMPILER_VALIDATION_TIMEOUT
+              value: {{ .Values.apiServer.compilerValidation.timeout | quote }}
+            - name: CONNECTION_TEST_DEADLINE
+              value: {{ .Values.apiServer.connectionTests.deadline | quote }}
+            - name: CONNECTION_TEST_TENANT_EGRESS_POLICIES
+              value: {{ toJson .Values.apiServer.connectionTests.tenantEgressPolicies | quote }}
+            - name: CONNECTION_MUTATIONS_ENABLED
+              value: {{ .Values.apiServer.connectionRollout.mutationsEnabled | quote }}
+            - name: CONNECTION_TESTS_ENABLED
+              value: {{ .Values.apiServer.connectionRollout.testsEnabled | quote }}
+            - name: CONNECTION_RUNTIME_ENABLED
+              value: {{ .Values.apiServer.connectionRollout.runtimeEnabled | quote }}
+            {{- if .Values.apiServer.compilerValidation.tls.enabled }}
+            - name: COMPILER_VALIDATION_TLS_CERTIFICATE_FILE
+              value: /app/compiler-tls/{{ .Values.apiServer.compilerValidation.tls.certificateKey }}
+            - name: COMPILER_VALIDATION_TLS_PRIVATE_KEY_FILE
+              value: /app/compiler-tls/{{ .Values.apiServer.compilerValidation.tls.privateKeyKey }}
+            - name: COMPILER_VALIDATION_TLS_CA_FILE
+              value: /app/compiler-tls/{{ .Values.apiServer.compilerValidation.tls.caKey }}
+            - name: COMPILER_VALIDATION_TLS_SERVER_NAME
+              value: {{ .Values.apiServer.compilerValidation.tls.serverName | quote }}
+            {{- end }}
+            {{- if .Values.apiServer.catalog.tokenKeySecretName }}
+            - name: CATALOG_TOKEN_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.apiServer.catalog.tokenKeySecretName | quote }}
+                  key: {{ .Values.apiServer.catalog.tokenKeySecretKey | quote }}
+            {{- end }}
+            {{- if .Values.tls.enabled }}
+            - name: TLS_CERTIFICATE_FILE
+              value: /app/tls/tls.crt
+            - name: TLS_PRIVATE_KEY_FILE
+              value: /app/tls/tls.key
+            - name: TLS_SERVER_NAME
+              value: {{ .Values.apiServer.tlsServerName | quote }}
+            {{- end }}
             - name: ETCD_ENDPOINTS
               value: {{ include "astrasync.etcd.endpoints" . }}
             - name: POD_NAME
@@ -75,10 +141,30 @@ spec:
             - name: config
               mountPath: /app/config
               readOnly: true
+            {{- if .Values.tls.enabled }}
+            - name: tls
+              mountPath: /app/tls
+              readOnly: true
+            {{- end }}
+            {{- if .Values.apiServer.compilerValidation.tls.enabled }}
+            - name: compiler-validation-tls
+              mountPath: /app/compiler-tls
+              readOnly: true
+            {{- end }}
       volumes:
         - name: config
           configMap:
             name: {{ include "astrasync.componentFullname" (dict "context" . "component" "api-config") }}
+        {{- if .Values.tls.enabled }}
+        - name: tls
+          secret:
+            secretName: {{ .Values.tls.secretName | quote }}
+        {{- end }}
+        {{- if .Values.apiServer.compilerValidation.tls.enabled }}
+        - name: compiler-validation-tls
+          secret:
+            secretName: {{ required "apiServer.compilerValidation.tls.secretName is required when TLS is enabled" .Values.apiServer.compilerValidation.tls.secretName | quote }}
+        {{- end }}
       affinity:
         {{- toYaml .Values.affinity | nindent 8 }}
       {{- with .Values.nodeSelector }}

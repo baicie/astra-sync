@@ -13,6 +13,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	jobv1 "io.astrasync/control-plane/api-server/gen/go/v1"
+	"io.astrasync/control-plane/auth"
 	"io.astrasync/control-plane/job"
 )
 
@@ -26,6 +27,32 @@ type JobService struct {
 	repository   job.Repository
 	clock        func() time.Time
 	uidGenerator func() string
+	mutations    job.MutationRepository
+	validator    JobMutationValidator
+	authorizer   auth.Authorizer
+	tokenKey     []byte
+}
+
+func NewTransactionalJobService(
+	repository job.MutationRepository,
+	validator JobMutationValidator,
+	authorizer auth.Authorizer,
+	tokenKey []byte,
+	clock func() time.Time,
+	uidGenerator func() string,
+) (*JobService, error) {
+	if repository == nil || validator == nil || authorizer == nil || len(tokenKey) < 32 {
+		return nil, fmt.Errorf("transactional Job service dependencies must not be nil or undersized")
+	}
+	service, err := NewJobService(repository, clock, uidGenerator)
+	if err != nil {
+		return nil, err
+	}
+	service.mutations = repository
+	service.validator = validator
+	service.authorizer = authorizer
+	service.tokenKey = append([]byte(nil), tokenKey...)
+	return service, nil
 }
 
 func NewJobService(
@@ -38,6 +65,9 @@ func NewJobService(
 }
 
 func (s *JobService) CreateJob(ctx context.Context, request *jobv1.CreateJobRequest) (*jobv1.Job, error) {
+	if s.mutations != nil {
+		return s.createJobMutation(ctx, request)
+	}
 	if request == nil {
 		return nil, status.Error(codes.InvalidArgument, "request must not be nil")
 	}
@@ -103,6 +133,9 @@ func (s *JobService) ListJobs(
 }
 
 func (s *JobService) UpdateJob(ctx context.Context, request *jobv1.UpdateJobRequest) (*jobv1.Job, error) {
+	if s.mutations != nil {
+		return s.updateJobMutation(ctx, request)
+	}
 	if request == nil {
 		return nil, status.Error(codes.InvalidArgument, "request must not be nil")
 	}
@@ -138,6 +171,9 @@ func (s *JobService) UpdateJob(ctx context.Context, request *jobv1.UpdateJobRequ
 func (s *JobService) DeleteJob(
 	ctx context.Context, request *jobv1.DeleteJobRequest,
 ) (*emptypb.Empty, error) {
+	if s.mutations != nil {
+		return s.deleteJobMutation(ctx, request)
+	}
 	if request == nil {
 		return nil, status.Error(codes.InvalidArgument, "request must not be nil")
 	}
@@ -165,6 +201,9 @@ func (s *JobService) DeleteJob(
 }
 
 func (s *JobService) StartJob(ctx context.Context, request *jobv1.StartJobRequest) (*jobv1.Job, error) {
+	if s.mutations != nil {
+		return s.startJobMutation(ctx, request)
+	}
 	if request == nil {
 		return nil, status.Error(codes.InvalidArgument, "request must not be nil")
 	}
@@ -172,6 +211,9 @@ func (s *JobService) StartJob(ctx context.Context, request *jobv1.StartJobReques
 }
 
 func (s *JobService) StopJob(ctx context.Context, request *jobv1.StopJobRequest) (*jobv1.Job, error) {
+	if s.mutations != nil {
+		return s.stopJobMutation(ctx, request)
+	}
 	if request == nil {
 		return nil, status.Error(codes.InvalidArgument, "request must not be nil")
 	}
@@ -279,6 +321,12 @@ func repositoryError(err error) error {
 		return status.Error(codes.AlreadyExists, "job already exists")
 	case errors.Is(err, job.ErrConflict):
 		return status.Error(codes.Aborted, "job version conflict")
+	case errors.Is(err, job.ErrIdempotencyReused):
+		return status.Error(codes.AlreadyExists, "IDEMPOTENCY_KEY_REUSED")
+	case errors.Is(err, job.ErrMutationInProgress):
+		return status.Error(codes.Unavailable, "job mutation is still in progress")
+	case errors.Is(err, job.ErrValidationStale):
+		return status.Error(codes.Unavailable, "job validation revision changed")
 	default:
 		return status.Error(codes.Internal, "job repository operation failed")
 	}

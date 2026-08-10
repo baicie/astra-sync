@@ -24,6 +24,8 @@ import (
 	"io.astrasync/control-plane/scheduler/internal/dispatch"
 	dispatchpostgres "io.astrasync/control-plane/scheduler/internal/dispatch/postgres"
 	dispatchkube "io.astrasync/control-plane/scheduler/internal/kubernetes"
+	"io.astrasync/control-plane/scheduler/internal/materialization"
+	materializationpostgres "io.astrasync/control-plane/scheduler/internal/materialization/postgres"
 	schedulerinternal "io.astrasync/control-plane/scheduler/internal/scheduler"
 )
 
@@ -73,7 +75,28 @@ func run(ctx context.Context, configuration applicationConfig, logger *slog.Logg
 	if err != nil {
 		return fmt.Errorf("create Kubernetes client: %w", err)
 	}
-	dispatcher, err := dispatchkube.New(kubernetesClient, configuration.dispatcher)
+	var dispatcher *dispatchkube.Dispatcher
+	if configuration.dispatcher.ConnectionMaterializationEnabled {
+		materializationStore, storeErr := materializationpostgres.New(
+			db, configuration.executionProfile, uuid.NewString)
+		if storeErr != nil {
+			return storeErr
+		}
+		provider, providerErr := materialization.NewKubernetesSecretProvider(kubernetesClient)
+		if providerErr != nil {
+			return providerErr
+		}
+		credentialMaterializer, materializerErr := materialization.NewMaterializer(
+			materializationStore, provider, kubernetesClient,
+			configuration.dispatcher.Namespace, time.Now)
+		if materializerErr != nil {
+			return materializerErr
+		}
+		dispatcher, err = dispatchkube.NewWithCredentialMaterializer(
+			kubernetesClient, configuration.dispatcher, credentialMaterializer)
+	} else {
+		dispatcher, err = dispatchkube.New(kubernetesClient, configuration.dispatcher)
+	}
 	if err != nil {
 		return err
 	}

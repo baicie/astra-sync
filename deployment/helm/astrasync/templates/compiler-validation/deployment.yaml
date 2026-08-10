@@ -1,0 +1,92 @@
+{{- if .Values.compilerValidation.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "astrasync.componentFullname" (dict "context" . "component" "compiler-validation") }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "astrasync.labels" . | nindent 4 }}
+    app.kubernetes.io/component: compiler-validation
+spec:
+  replicas: {{ .Values.compilerValidation.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "astrasync.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: compiler-validation
+  template:
+    metadata:
+      labels:
+        {{- include "astrasync.labels" . | nindent 8 }}
+        app.kubernetes.io/component: compiler-validation
+    spec:
+      serviceAccountName: {{ include "astrasync.compilerValidationServiceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.securityContext | nindent 8 }}
+      containers:
+        - name: compiler-validation
+          image: "{{ .Values.image.compilerValidation.repository }}:{{ .Values.image.compilerValidation.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          ports:
+            - name: grpc
+              containerPort: {{ .Values.compilerValidation.service.port }}
+              protocol: TCP
+          livenessProbe:
+            tcpSocket:
+              port: grpc
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            tcpSocket:
+              port: grpc
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.compilerValidation.resources | nindent 12 }}
+          env:
+            - name: APP_ENV
+              value: {{ .Values.apiServer.environment | quote }}
+            - name: COMPILER_VALIDATION_PORT
+              value: {{ .Values.compilerValidation.service.port | quote }}
+            - name: COMPILER_VALIDATION_MAX_CONCURRENCY
+              value: {{ .Values.compilerValidation.maxConcurrency | quote }}
+            - name: COMPILER_BUILD
+              value: {{ .Values.compilerValidation.compilerBuild | quote }}
+            - name: CONNECTOR_EXECUTION_PROFILE
+              value: {{ .Values.apiServer.catalog.executionProfile | quote }}
+            {{- if .Values.compilerValidation.tls.enabled }}
+            - name: COMPILER_VALIDATION_TLS_CERTIFICATE_FILE
+              value: /app/tls/{{ .Values.compilerValidation.tls.certificateKey }}
+            - name: COMPILER_VALIDATION_TLS_PRIVATE_KEY_FILE
+              value: /app/tls/{{ .Values.compilerValidation.tls.privateKeyKey }}
+            - name: COMPILER_VALIDATION_TLS_CLIENT_CA_FILE
+              value: /app/tls/{{ .Values.compilerValidation.tls.clientCAKey }}
+            {{- end }}
+          {{- if .Values.compilerValidation.tls.enabled }}
+          volumeMounts:
+            - name: compiler-validation-tls
+              mountPath: /app/tls
+              readOnly: true
+          {{- end }}
+      {{- if .Values.compilerValidation.tls.enabled }}
+      volumes:
+        - name: compiler-validation-tls
+          secret:
+            secretName: {{ required "compilerValidation.tls.secretName is required when TLS is enabled" .Values.compilerValidation.tls.secretName | quote }}
+      {{- end }}
+      affinity:
+        {{- toYaml .Values.affinity | nindent 8 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

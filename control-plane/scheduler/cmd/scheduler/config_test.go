@@ -39,6 +39,14 @@ func TestLoadConfigBuildsValidatedSchedulerAndExecutionDefaults(t *testing.T) {
 	if configuration.dispatcher.ImagePullPolicy != corev1.PullIfNotPresent {
 		t.Fatalf("unexpected image pull policy: %s", configuration.dispatcher.ImagePullPolicy)
 	}
+	if configuration.dispatcher.ConnectionMaterializationEnabled {
+		t.Fatal("Connection materialization must default to fail-closed")
+	}
+	environment["SCHEDULER_CONNECTION_MATERIALIZATION_ENABLED"] = "true"
+	enabled, err := loadConfig(func(name string) string { return environment[name] })
+	if err != nil || !enabled.dispatcher.ConnectionMaterializationEnabled {
+		t.Fatalf("explicitly enable Connection materialization: config=%+v err=%v", enabled.dispatcher, err)
+	}
 }
 
 func TestLoadConfigRejectsMissingIdentityAndInvalidExecutionCapacity(t *testing.T) {

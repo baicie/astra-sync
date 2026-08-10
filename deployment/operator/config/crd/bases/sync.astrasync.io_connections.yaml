@@ -16,6 +16,8 @@ spec:
   scope: Namespaced
   versions:
     - name: v1
+      deprecated: true
+      deprecationWarning: "sync.astrasync.io/v1 Connection is unmanaged and deprecated; use the tenant-scoped ConnectionService API"
       served: true
       storage: true
       schema:

@@ -1,0 +1,9 @@
+{{- if and .Values.connectionTestExecutor.enabled .Values.connectionTestExecutor.createNamespace }}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ include "astrasync.connectionTestExecutorNamespace" . }}
+  labels:
+    {{- include "astrasync.labels" . | nindent 4 }}
+    app.kubernetes.io/component: connection-test-executor
+{{- end }}

@@ -2,8 +2,9 @@
 
 ## Status
 
-Implementation-ready design. No authentication or authorization runtime is delivered by this
-document alone.
+Authoritative design. The OIDC validation, tenant authorization, transactional audit, and Console
+session foundation required by Slices 19 and 20 is implemented. Standalone administration APIs and
+production OIDC, TLS, session-key, and audit-retention rollout remain tracked separately.
 
 ## Goals
 

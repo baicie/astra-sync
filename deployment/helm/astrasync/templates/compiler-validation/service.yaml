@@ -1,0 +1,20 @@
+{{- if .Values.compilerValidation.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "astrasync.componentFullname" (dict "context" . "component" "compiler-validation") }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "astrasync.labels" . | nindent 4 }}
+    app.kubernetes.io/component: compiler-validation
+spec:
+  type: ClusterIP
+  ports:
+    - name: grpc
+      port: {{ .Values.compilerValidation.service.port }}
+      targetPort: grpc
+      protocol: TCP
+  selector:
+    {{- include "astrasync.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: compiler-validation
+{{- end }}

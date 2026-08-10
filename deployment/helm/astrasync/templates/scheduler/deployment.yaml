@@ -85,6 +85,8 @@ spec:
               value: {{ .Values.scheduler.reconcileInterval | quote }}
             - name: SCHEDULER_OPERATION_TIMEOUT
               value: {{ .Values.scheduler.operationTimeout | quote }}
+            - name: SCHEDULER_CONNECTION_MATERIALIZATION_ENABLED
+              value: {{ .Values.scheduler.connectionMaterialization.enabled | quote }}
             - name: SCHEDULER_PROGRESS_CLAIM
               value: {{ include "astrasync.schedulerProgressClaim" . | quote }}
             - name: SCHEDULER_COORDINATOR_IMAGE

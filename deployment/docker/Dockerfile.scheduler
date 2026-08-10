@@ -4,11 +4,16 @@ FROM golang:1.22-alpine AS builder
 WORKDIR /app
 
 COPY control-plane/go.mod control-plane/go.sum ./control-plane/
+COPY control-plane/auth/go.mod control-plane/auth/go.sum ./control-plane/auth/
+COPY control-plane/catalog/go.mod control-plane/catalog/go.sum ./control-plane/catalog/
 COPY control-plane/scheduler/go.mod control-plane/scheduler/go.sum ./control-plane/scheduler/
 WORKDIR /app/control-plane/scheduler
 RUN go mod download
 
 COPY control-plane/job ../job
+COPY control-plane/connection ../connection
+COPY control-plane/auth ../auth
+COPY control-plane/catalog ../catalog
 COPY control-plane/scheduler ./
 RUN CGO_ENABLED=0 GOOS=linux go build -o /app/scheduler ./cmd/scheduler
 

@@ -1,0 +1,16 @@
+{{- if and .Values.connectionTestExecutor.enabled .Values.connectionTestExecutor.createNamespace }}
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: {{ include "astrasync.componentFullname" (dict "context" . "component" "connection-test") }}
+  namespace: {{ include "astrasync.connectionTestExecutorNamespace" . }}
+  labels:
+    {{- include "astrasync.labels" . | nindent 4 }}
+spec:
+  hard:
+    pods: {{ .Values.connectionTestExecutor.quota.pods | quote }}
+    requests.cpu: {{ .Values.connectionTestExecutor.quota.requestsCpu | quote }}
+    requests.memory: {{ .Values.connectionTestExecutor.quota.requestsMemory | quote }}
+    limits.cpu: {{ .Values.connectionTestExecutor.quota.limitsCpu | quote }}
+    limits.memory: {{ .Values.connectionTestExecutor.quota.limitsMemory | quote }}
+{{- end }}

@@ -2,8 +2,8 @@
 
 ## Status
 
-Implementation-ready design. No catalog API, Connection service, Secret resolver, connectivity
-probe, or runtime `connection_ref` support is delivered by this document alone.
+Authoritative design implemented by the Slice 20 delivery. Production rollout remains explicitly
+gated and is not implied by this document or the repository merge.
 
 ## Goals
 

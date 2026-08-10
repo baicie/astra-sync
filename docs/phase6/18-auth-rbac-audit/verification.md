@@ -1,8 +1,9 @@
-# Phase 6 Slice 18 Design Verification
+# Phase 6 Slice 18 Verification
 
 ## Status
 
-Design complete; runtime verification awaits implementation.
+Runtime foundation required by Slices 19 and 20 complete; standalone administration, production
+OIDC interoperability, and rollout remain planned/operator-controlled.
 
 ## Design Checks
 
@@ -31,9 +32,17 @@ Design complete; runtime verification awaits implementation.
 | Durable evidence | Audit Contract and ADR-037 |
 | Safe adoption | Rollout, production startup rules, and implementation plan |
 
-## Deferred Runtime Evidence
+## Runtime Evidence
 
-The following evidence is intentionally not claimed by the design commit: OIDC interoperability,
-browser login, database migrations, interceptor enforcement, revocation latency, transactional
-audit rollback, TLS startup rejection, penetration tests, and production deployment. These become
-mandatory implementation gates before Slice 18 can be marked Complete.
+The Phase 6 implementation adds OIDC JWT validation, bearer authentication, tenant membership and
+role resolution, deny-by-default generated-method coverage, transactional audit persistence,
+opaque encrypted Console sessions, PKCE login state, CSRF checks, and production fail-closed
+configuration. Go unit and PostgreSQL integration suites cover identity materialization,
+cross-tenant authorization, token/session expiry, login replay, and mutation/audit atomicity. The
+end-to-end repository verification commands and results are recorded in
+[`../20-connector-catalog-connections/verification.md`](../20-connector-catalog-connections/verification.md).
+
+No repository test can claim interoperability with a deployment's chosen identity provider or a
+completed production rollout. Identity/membership/audit administration services that are not
+required by Slices 19 and 20 also remain explicit unchecked work in the Slice 18 implementation
+plan; this status does not claim those surfaces.

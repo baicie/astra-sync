@@ -2,8 +2,8 @@
 
 ## Status
 
-Implementation-ready boundary. The current Go API performs structural checks and the current Java
-engine compiles plans, but no shared validation service is delivered yet.
+Implemented boundary. The Go API resolves redacted tenant metadata and delegates canonical,
+side-effect-free validation to the Java compiler-validation service.
 
 ## Problem
 

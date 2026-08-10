@@ -1,0 +1,459 @@
+syntax = "proto3";
+
+package astra.control.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "io.astrasync/control-plane/api-server/gen/go/v1;jobv1";
+option java_multiple_files = true;
+option java_package = "io.astrasync.control.v1";
+option java_outer_classname = "ControlPlaneConnectorProto";
+
+service ConnectorCatalogService {
+  rpc ListConnectorDescriptors(ListConnectorDescriptorsRequest) returns (ListConnectorDescriptorsResponse);
+  rpc GetConnectorDescriptor(GetConnectorDescriptorRequest) returns (GetConnectorDescriptorResponse);
+}
+
+service ConnectionService {
+  rpc CreateConnection(CreateConnectionRequest) returns (Connection);
+  rpc GetConnection(GetConnectionRequest) returns (Connection);
+  rpc ListConnections(ListConnectionsRequest) returns (ListConnectionsResponse);
+  rpc UpdateConnection(UpdateConnectionRequest) returns (Connection);
+  rpc RotateConnection(RotateConnectionRequest) returns (Connection);
+  rpc EnableConnection(EnableConnectionRequest) returns (Connection);
+  rpc DisableConnection(DisableConnectionRequest) returns (Connection);
+  rpc DeleteConnection(DeleteConnectionRequest) returns (DeleteConnectionResponse);
+  rpc TestConnection(TestConnectionRequest) returns (ConnectionTest);
+  rpc GetConnectionTest(GetConnectionTestRequest) returns (ConnectionTest);
+}
+
+message ConnectorInventory {
+  int32 inventory_schema_version = 1;
+  string inventory_revision = 2;
+  string compiler_revision = 3;
+  string job_spec_schema_revision = 4;
+  string compiler_build = 5;
+  string execution_profile = 6;
+  repeated ConnectorDescriptor descriptors = 7;
+}
+
+message ConnectorConnectionSchemaIdentity {
+  string connector_name = 1;
+  repeated ConnectorOptionDefinition options = 2;
+  repeated ConnectorOptionPrefix option_prefixes = 3;
+  repeated ConnectorRoleConnectionRequirement connection_requirements = 4;
+}
+
+message ConnectorInventoryIdentity {
+  repeated ConnectorInventoryEntry entries = 1;
+}
+
+message ConnectorInventoryEntry {
+  string name = 1;
+  string artifact_version = 2;
+  string descriptor_revision = 3;
+}
+
+message ConnectorCompilerIdentity {
+  string inventory_revision = 1;
+  string job_spec_schema_revision = 2;
+  string compiler_build = 3;
+  string execution_profile = 4;
+}
+
+message ConnectorDescriptor {
+  int32 descriptor_schema_version = 1;
+  string descriptor_revision = 2;
+  string name = 3;
+  string artifact_version = 4;
+  string display_name = 5;
+  string description_key = 6;
+  repeated ConnectorRole roles = 7;
+  repeated ConnectorCapability capabilities = 8;
+  repeated ConnectorExecutionMode execution_modes = 9;
+  repeated ConnectorDeliveryConstraint delivery_constraints = 10;
+  repeated ConnectorOptionDefinition options = 11;
+  repeated ConnectorOptionPrefix option_prefixes = 12;
+  repeated ConnectorRoleConnectionRequirement connection_requirements = 13;
+  string connection_schema_revision = 14;
+  repeated string accepted_connection_schema_revisions = 15;
+}
+
+enum ConnectorRole {
+  CONNECTOR_ROLE_UNSPECIFIED = 0;
+  CONNECTOR_ROLE_SOURCE = 1;
+  CONNECTOR_ROLE_SINK = 2;
+}
+
+enum ConnectorCapability {
+  CONNECTOR_CAPABILITY_UNSPECIFIED = 0;
+  CONNECTOR_CAPABILITY_BATCH_READ = 1;
+  CONNECTOR_CAPABILITY_BATCH_WRITE = 2;
+  CONNECTOR_CAPABILITY_STREAM_READ = 3;
+  CONNECTOR_CAPABILITY_PARALLEL_SNAPSHOT = 4;
+  CONNECTOR_CAPABILITY_REPLAYABLE_OFFSET = 5;
+  CONNECTOR_CAPABILITY_SCHEMA_EVOLUTION = 6;
+  CONNECTOR_CAPABILITY_EXACTLY_ONCE_SOURCE = 7;
+  CONNECTOR_CAPABILITY_COLUMN_PROJECTION = 8;
+  CONNECTOR_CAPABILITY_PREDICATE_PUSHDOWN = 9;
+  CONNECTOR_CAPABILITY_SPLIT_MULTIPLEXING = 10;
+  CONNECTOR_CAPABILITY_CHANGE_DATA_CAPTURE = 11;
+  CONNECTOR_CAPABILITY_APPEND = 12;
+  CONNECTOR_CAPABILITY_UPSERT = 13;
+  CONNECTOR_CAPABILITY_DELETE = 14;
+  CONNECTOR_CAPABILITY_TRANSACTIONAL_COMMIT = 15;
+  CONNECTOR_CAPABILITY_IDEMPOTENT_WRITE = 16;
+  CONNECTOR_CAPABILITY_BULK_WRITE = 17;
+  CONNECTOR_CAPABILITY_PARTITION_WRITE = 18;
+  CONNECTOR_CAPABILITY_SORTED_WRITE = 19;
+  CONNECTOR_CAPABILITY_SCHEMA_REGISTRATION = 20;
+  CONNECTOR_CAPABILITY_TRANSFORM_SUPPORT = 21;
+  CONNECTOR_CAPABILITY_TRANSACTION_RECOVERY = 22;
+  CONNECTOR_CAPABILITY_FAULT_TOLERANCE = 23;
+}
+
+enum ConnectorExecutionMode {
+  CONNECTOR_EXECUTION_MODE_UNSPECIFIED = 0;
+  CONNECTOR_EXECUTION_MODE_BATCH = 1;
+  CONNECTOR_EXECUTION_MODE_CDC = 2;
+}
+
+enum ConnectorDeliveryConstraint {
+  CONNECTOR_DELIVERY_CONSTRAINT_UNSPECIFIED = 0;
+  CONNECTOR_DELIVERY_CONSTRAINT_AT_MOST_ONCE = 1;
+  CONNECTOR_DELIVERY_CONSTRAINT_REPLAYABLE_SOURCE = 2;
+  CONNECTOR_DELIVERY_CONSTRAINT_EXACTLY_ONCE_SOURCE = 3;
+  CONNECTOR_DELIVERY_CONSTRAINT_IDEMPOTENT_SINK = 4;
+  CONNECTOR_DELIVERY_CONSTRAINT_TRANSACTIONAL_SINK = 5;
+}
+
+message ConnectorOptionDefinition {
+  string key = 1;
+  repeated ConnectorRole roles = 2;
+  ConnectorOptionOwner owner = 3;
+  ConnectorOptionType value_type = 4;
+  bool required = 5;
+  optional string default_value = 6;
+  repeated string enum_values = 7;
+  optional int64 minimum = 8;
+  optional int64 maximum = 9;
+  optional int32 min_length = 10;
+  optional int32 max_length = 11;
+  optional string pattern_key = 12;
+  ConnectorOptionSensitivity sensitivity = 13;
+  bool advanced = 14;
+  string label_key = 15;
+  string help_key = 16;
+}
+
+enum ConnectorOptionOwner {
+  CONNECTOR_OPTION_OWNER_UNSPECIFIED = 0;
+  CONNECTOR_OPTION_OWNER_JOB = 1;
+  CONNECTOR_OPTION_OWNER_CONNECTION = 2;
+}
+
+enum ConnectorOptionType {
+  CONNECTOR_OPTION_TYPE_UNSPECIFIED = 0;
+  CONNECTOR_OPTION_TYPE_STRING = 1;
+  CONNECTOR_OPTION_TYPE_INTEGER = 2;
+  CONNECTOR_OPTION_TYPE_BOOLEAN = 3;
+  CONNECTOR_OPTION_TYPE_DURATION = 4;
+  CONNECTOR_OPTION_TYPE_ENUM = 5;
+}
+
+enum ConnectorOptionSensitivity {
+  CONNECTOR_OPTION_SENSITIVITY_UNSPECIFIED = 0;
+  CONNECTOR_OPTION_SENSITIVITY_PUBLIC = 1;
+  CONNECTOR_OPTION_SENSITIVITY_RESTRICTED = 2;
+  CONNECTOR_OPTION_SENSITIVITY_SECRET = 3;
+}
+
+message ConnectorOptionPrefix {
+  string prefix = 1;
+  repeated ConnectorRole roles = 2;
+  ConnectorOptionOwner owner = 3;
+  ConnectorOptionSensitivity sensitivity = 4;
+  int32 max_entries = 5;
+  int32 max_value_length = 6;
+  string key_pattern = 7;
+}
+
+message ConnectorRoleConnectionRequirement {
+  ConnectorRole role = 1;
+  ConnectionRequirement requirement = 2;
+}
+
+enum ConnectionRequirement {
+  CONNECTION_REQUIREMENT_UNSPECIFIED = 0;
+  CONNECTION_REQUIREMENT_NONE = 1;
+  CONNECTION_REQUIREMENT_OPTIONAL = 2;
+  CONNECTION_REQUIREMENT_REQUIRED = 3;
+}
+
+message ListConnectorDescriptorsRequest {
+  string tenant_id = 1;
+  repeated ConnectorRole roles = 2;
+  repeated ConnectorCapability capabilities = 3;
+  int32 page_size = 4;
+  string page_token = 5;
+}
+
+message ListConnectorDescriptorsResponse {
+  string inventory_revision = 1;
+  string compiler_revision = 2;
+  repeated ConnectorDescriptor descriptors = 3;
+  string next_page_token = 4;
+}
+
+message GetConnectorDescriptorRequest {
+  string tenant_id = 1;
+  string name = 2;
+  string descriptor_revision = 3;
+}
+
+message GetConnectorDescriptorResponse {
+  string inventory_revision = 1;
+  string compiler_revision = 2;
+  ConnectorDescriptor connector_descriptor = 3;
+}
+
+message CreateConnectionRequest {
+  string tenant_id = 1;
+  string name = 2;
+  string connector = 3;
+  string display_name = 4;
+  string description = 5;
+  repeated ConnectionSetting settings = 6;
+  SecretBinding secret_binding = 7;
+  string idempotency_key = 8;
+}
+
+message GetConnectionRequest {
+  string tenant_id = 1;
+  string name = 2;
+}
+
+message ListConnectionsRequest {
+  string tenant_id = 1;
+  string connector = 2;
+  ConnectionState state = 3;
+  int32 page_size = 4;
+  string page_token = 5;
+}
+
+message ListConnectionsResponse {
+  repeated Connection connections = 1;
+  string next_page_token = 2;
+  string list_revision = 3;
+}
+
+message UpdateConnectionRequest {
+  string tenant_id = 1;
+  string name = 2;
+  int64 expected_version = 3;
+  string display_name = 4;
+  string description = 5;
+  repeated ConnectionSetting settings = 6;
+  string idempotency_key = 7;
+}
+
+message RotateConnectionRequest {
+  string tenant_id = 1;
+  string name = 2;
+  int64 expected_version = 3;
+  SecretBinding secret_binding = 4;
+  string idempotency_key = 5;
+}
+
+message EnableConnectionRequest {
+  string tenant_id = 1;
+  string name = 2;
+  int64 expected_version = 3;
+  string idempotency_key = 4;
+}
+
+message DisableConnectionRequest {
+  string tenant_id = 1;
+  string name = 2;
+  int64 expected_version = 3;
+  string idempotency_key = 4;
+}
+
+message DeleteConnectionRequest {
+  string tenant_id = 1;
+  string name = 2;
+  int64 expected_version = 3;
+  string idempotency_key = 4;
+}
+
+message DeleteConnectionResponse {
+  string uid = 1;
+  MutationOutcome outcome = 2;
+  google.protobuf.Timestamp deleted_at = 3;
+}
+
+message TestConnectionRequest {
+  string tenant_id = 1;
+  string name = 2;
+  int64 expected_version = 3;
+  string idempotency_key = 4;
+}
+
+message GetConnectionTestRequest {
+  string tenant_id = 1;
+  string operation_id = 2;
+}
+
+message Connection {
+  string tenant_id = 1;
+  string name = 2;
+  string uid = 3;
+  string connector = 4;
+  int64 version = 5;
+  int64 generation = 6;
+  ConnectionState state = 7;
+  ConnectionCompatibility compatibility = 8;
+  string display_name = 9;
+  string description = 10;
+  string descriptor_revision = 11;
+  string connection_schema_revision = 12;
+  repeated ConnectionSetting public_settings = 13;
+  SecretProviderKind secret_provider = 14;
+  bool secret_configured = 15;
+  ConnectionReferenceCounts reference_counts = 16;
+  ConnectionTestSummary last_test = 17;
+  google.protobuf.Timestamp created_at = 18;
+  google.protobuf.Timestamp updated_at = 19;
+  MutationOutcome outcome = 20;
+}
+
+message ConnectionSetting {
+  string key = 1;
+  string value = 2;
+}
+
+enum ConnectionState {
+  CONNECTION_STATE_UNSPECIFIED = 0;
+  CONNECTION_STATE_DISABLED = 1;
+  CONNECTION_STATE_ACTIVE = 2;
+}
+
+enum ConnectionCompatibility {
+  CONNECTION_COMPATIBILITY_UNSPECIFIED = 0;
+  CONNECTION_COMPATIBILITY_COMPATIBLE = 1;
+  CONNECTION_COMPATIBILITY_REVALIDATION_REQUIRED = 2;
+  CONNECTION_COMPATIBILITY_CONNECTOR_UNAVAILABLE = 3;
+}
+
+enum MutationOutcome {
+  MUTATION_OUTCOME_UNSPECIFIED = 0;
+  MUTATION_OUTCOME_CHANGED = 1;
+  MUTATION_OUTCOME_NO_CHANGE = 2;
+  MUTATION_OUTCOME_REPLAYED = 3;
+}
+
+message SecretBinding {
+  SecretProviderKind provider = 1;
+  oneof locator {
+    KubernetesSecretBinding kubernetes_secret_v1 = 2;
+  }
+}
+
+enum SecretProviderKind {
+  SECRET_PROVIDER_KIND_UNSPECIFIED = 0;
+  SECRET_PROVIDER_KIND_KUBERNETES_SECRET_V1 = 1;
+}
+
+message KubernetesSecretBinding {
+  string secret_name = 1;
+  string secret_uid = 2;
+  repeated SecretFieldMapping fields = 3;
+}
+
+message SecretFieldMapping {
+  string logical_field = 1;
+  string secret_key = 2;
+}
+
+message ConnectionReferenceCounts {
+  int32 jobs = 1;
+  int32 executions = 2;
+  int32 tests = 3;
+  int32 cleanup_obligations = 4;
+}
+
+message ConnectionTestSummary {
+  string operation_id = 1;
+  int64 generation = 2;
+  ConnectionTestState state = 3;
+  bool current_generation = 4;
+  google.protobuf.Timestamp completed_at = 5;
+}
+
+message ConnectionTest {
+  string tenant_id = 1;
+  string operation_id = 2;
+  string connection_uid = 3;
+  int64 generation = 4;
+  ConnectionTestState state = 5;
+  ConnectionTestPhase phase = 6;
+  ConnectionTestResultCode result_code = 7;
+  bool success = 8;
+  string remediation_key = 9;
+  bool current_generation = 10;
+  google.protobuf.Timestamp created_at = 11;
+  google.protobuf.Timestamp started_at = 12;
+  google.protobuf.Timestamp completed_at = 13;
+  google.protobuf.Timestamp expires_at = 14;
+  MutationOutcome outcome = 15;
+}
+
+enum ConnectionTestState {
+  CONNECTION_TEST_STATE_UNSPECIFIED = 0;
+  CONNECTION_TEST_STATE_QUEUED = 1;
+  CONNECTION_TEST_STATE_RUNNING = 2;
+  CONNECTION_TEST_STATE_SUCCEEDED = 3;
+  CONNECTION_TEST_STATE_FAILED = 4;
+  CONNECTION_TEST_STATE_TIMED_OUT = 5;
+  CONNECTION_TEST_STATE_CANCELED = 6;
+  CONNECTION_TEST_STATE_EXPIRED = 7;
+}
+
+enum ConnectionTestPhase {
+  CONNECTION_TEST_PHASE_UNSPECIFIED = 0;
+  CONNECTION_TEST_PHASE_POLICY = 1;
+  CONNECTION_TEST_PHASE_DNS = 2;
+  CONNECTION_TEST_PHASE_TRANSPORT = 3;
+  CONNECTION_TEST_PHASE_TLS = 4;
+  CONNECTION_TEST_PHASE_AUTHENTICATION = 5;
+  CONNECTION_TEST_PHASE_HANDSHAKE = 6;
+  CONNECTION_TEST_PHASE_COMPLETE = 7;
+}
+
+enum ConnectionTestResultCode {
+  CONNECTION_TEST_RESULT_CODE_UNSPECIFIED = 0;
+  CONNECTION_TEST_RESULT_CODE_OK = 1;
+  CONNECTION_TEST_RESULT_CODE_POLICY_DENIED = 2;
+  CONNECTION_TEST_RESULT_CODE_SECRET_UNAVAILABLE = 3;
+  CONNECTION_TEST_RESULT_CODE_DNS_FAILED = 4;
+  CONNECTION_TEST_RESULT_CODE_TRANSPORT_FAILED = 5;
+  CONNECTION_TEST_RESULT_CODE_TLS_FAILED = 6;
+  CONNECTION_TEST_RESULT_CODE_AUTHENTICATION_FAILED = 7;
+  CONNECTION_TEST_RESULT_CODE_HANDSHAKE_FAILED = 8;
+  CONNECTION_TEST_RESULT_CODE_DEADLINE_EXCEEDED = 9;
+  CONNECTION_TEST_RESULT_CODE_EXECUTOR_UNAVAILABLE = 10;
+}
+
+enum ConnectorServiceErrorReason {
+  CONNECTOR_SERVICE_ERROR_REASON_UNSPECIFIED = 0;
+  CONNECTOR_SERVICE_ERROR_REASON_CATALOG_REVISION_CHANGED = 1;
+  CONNECTOR_SERVICE_ERROR_REASON_CONNECTOR_UNAVAILABLE = 2;
+  CONNECTOR_SERVICE_ERROR_REASON_CONNECTION_SCHEMA_INCOMPATIBLE = 3;
+  CONNECTOR_SERVICE_ERROR_REASON_CONNECTION_REF_UNAVAILABLE = 4;
+  CONNECTOR_SERVICE_ERROR_REASON_CONNECTION_VERSION_CONFLICT = 5;
+  CONNECTOR_SERVICE_ERROR_REASON_CONNECTION_IN_USE = 6;
+  CONNECTOR_SERVICE_ERROR_REASON_SECRET_BINDING_INVALID = 7;
+  CONNECTOR_SERVICE_ERROR_REASON_SECRET_MATERIAL_UNAVAILABLE = 8;
+  CONNECTOR_SERVICE_ERROR_REASON_TEST_LIMIT_EXCEEDED = 9;
+  CONNECTOR_SERVICE_ERROR_REASON_IDEMPOTENCY_KEY_REUSED = 10;
+}

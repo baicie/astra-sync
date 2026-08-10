@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -20,8 +21,129 @@ import (
 
 	"io.astrasync/control-plane/job"
 	"io.astrasync/control-plane/scheduler/internal/dispatch"
+	"io.astrasync/control-plane/scheduler/internal/materialization"
 	"io.astrasync/control-plane/scheduler/internal/scheduler"
 )
+
+func TestDispatcherLaunchesOnlyAfterCredentialMaterializationAndMountsReadOnlyEnvelope(t *testing.T) {
+	client := k8sfake.NewSimpleClientset()
+	candidate := testJob(t)
+	candidate.Spec.Source.ConnectionRef = "orders-db"
+	identity := dispatch.Identity{JobUID: candidate.UID, Epoch: 4}
+	credentialName, _ := materialization.CredentialSecretName(identity)
+	credentials := &fakeCredentialMaterializer{result: materialization.Result{
+		Required: true, SecretName: credentialName,
+		IdentityFingerprint: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		CompilerRevision:    "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+		Roles:               []materialization.Role{materialization.RoleSource},
+	}}
+	configuration := testConfig()
+	configuration.ConnectionMaterializationEnabled = true
+	dispatcher, err := NewWithCredentialMaterializer(client, configuration, credentials)
+	if err != nil {
+		t.Fatalf("new credential-aware dispatcher: %v", err)
+	}
+	record := testRecord(identity)
+	observation, err := dispatcher.Reconcile(context.Background(), candidate, record)
+	if err != nil || observation.State != scheduler.ObservationPending || credentials.ensureCalls != 1 {
+		t.Fatalf("credential-aware reconcile: observation=%+v calls=%d err=%v",
+			observation, credentials.ensureCalls, err)
+	}
+	base, _ := resourceBase(identity)
+	specSecret, err := client.CoreV1().Secrets("jobs").Get(
+		context.Background(), base+"-spec", metav1.GetOptions{})
+	if err != nil || string(specSecret.Data["job.yaml"]) == "" ||
+		strings.Contains(string(specSecret.Data["job.yaml"]), "orders-db") {
+		t.Fatalf("JobSpec Secret retained a Connection reference: secret=%+v err=%v", specSecret, err)
+	}
+	workers, err := client.AppsV1().StatefulSets("jobs").Get(
+		context.Background(), base+"-worker", metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("read credential-aware workers: %v", err)
+	}
+	container := workers.Spec.Template.Spec.Containers[0]
+	if !hasEnvironment(container.Env, "ASTRASYNC_RUNTIME_CREDENTIALS", materialization.CredentialMountPath()) ||
+		!hasEnvironment(container.Env, "ASTRASYNC_EXECUTION_JOB_UID", candidate.UID) ||
+		!hasEnvironment(container.Env, "ASTRASYNC_EXECUTION_EPOCH", "4") ||
+		!hasEnvironment(container.Env, "ASTRASYNC_EXECUTION_COMPILER_REVISION", credentials.result.CompilerRevision) ||
+		!hasReadOnlyMount(container.VolumeMounts, "runtime-credentials", materialization.CredentialMountPath()) ||
+		!hasSecretVolume(workers.Spec.Template.Spec.Volumes, "runtime-credentials", credentialName) {
+		t.Fatalf("runtime credential envelope was not mounted safely: pod=%+v", workers.Spec.Template.Spec)
+	}
+}
+
+func TestDispatcherDoesNotCreateRuntimeResourcesWhenReceiptCommitFails(t *testing.T) {
+	client := k8sfake.NewSimpleClientset()
+	candidate := testJob(t)
+	candidate.Spec.Source.ConnectionRef = "orders-db"
+	identity := dispatch.Identity{JobUID: candidate.UID, Epoch: 4}
+	configuration := testConfig()
+	configuration.ConnectionMaterializationEnabled = true
+	dispatcher, err := NewWithCredentialMaterializer(client, configuration, &fakeCredentialMaterializer{
+		err: errors.New("receipt persistence unavailable"),
+	})
+	if err != nil {
+		t.Fatalf("new credential-aware dispatcher: %v", err)
+	}
+	if _, err := dispatcher.Reconcile(context.Background(), candidate, testRecord(identity)); err == nil {
+		t.Fatal("expected materialization failure")
+	}
+	base, _ := resourceBase(identity)
+	if _, err := client.CoreV1().Secrets("jobs").Get(
+		context.Background(), base+"-spec", metav1.GetOptions{}); !apierrors.IsNotFound(err) {
+		t.Fatalf("JobSpec Secret was created before credential receipt commit: %v", err)
+	}
+	if _, err := client.AppsV1().StatefulSets("jobs").Get(
+		context.Background(), base+"-worker", metav1.GetOptions{}); !apierrors.IsNotFound(err) {
+		t.Fatalf("Workers were created before credential receipt commit: %v", err)
+	}
+}
+
+type fakeCredentialMaterializer struct {
+	result       materialization.Result
+	err          error
+	ensureCalls  int
+	cleanupCalls int
+}
+
+func (m *fakeCredentialMaterializer) Ensure(
+	_ context.Context, _ dispatch.Record,
+) (materialization.Result, error) {
+	m.ensureCalls++
+	return m.result, m.err
+}
+
+func (m *fakeCredentialMaterializer) Cleanup(_ context.Context, _ dispatch.Identity) error {
+	m.cleanupCalls++
+	return m.err
+}
+
+func hasEnvironment(values []corev1.EnvVar, name, expected string) bool {
+	for _, value := range values {
+		if value.Name == name && value.Value == expected {
+			return true
+		}
+	}
+	return false
+}
+
+func hasReadOnlyMount(values []corev1.VolumeMount, name, path string) bool {
+	for _, value := range values {
+		if value.Name == name && value.MountPath == path && value.ReadOnly {
+			return true
+		}
+	}
+	return false
+}
+
+func hasSecretVolume(values []corev1.Volume, name, secretName string) bool {
+	for _, value := range values {
+		if value.Name == name && value.Secret != nil && value.Secret.SecretName == secretName {
+			return true
+		}
+	}
+	return false
+}
 
 func TestDispatcherMaterializesOneIdempotentExecutionGroupAndObservesCompletion(t *testing.T) {
 	client := k8sfake.NewSimpleClientset()

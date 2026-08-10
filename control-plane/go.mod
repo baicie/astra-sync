@@ -5,6 +5,7 @@ go 1.22
 require (
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.7.2
+	io.astrasync/control-plane/auth v0.0.0-00010101000000-000000000000
 )
 
 require (
@@ -15,3 +16,5 @@ require (
 	golang.org/x/sync v0.10.0 // indirect
 	golang.org/x/text v0.21.0 // indirect
 )
+
+replace io.astrasync/control-plane/auth => ./auth

@@ -1,0 +1,96 @@
+{{- if .Values.connectionTestExecutor.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "astrasync.componentFullname" (dict "context" . "component" "connection-test") }}
+  namespace: {{ include "astrasync.connectionTestExecutorNamespace" . }}
+  labels:
+    {{- include "astrasync.labels" . | nindent 4 }}
+    app.kubernetes.io/component: connection-test-executor
+spec:
+  replicas: {{ .Values.connectionTestExecutor.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "astrasync.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: connection-test-executor
+  template:
+    metadata:
+      labels:
+        {{- include "astrasync.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: connection-test-executor
+    spec:
+      serviceAccountName: {{ include "astrasync.connectionTestExecutorServiceAccountName" . }}
+      automountServiceAccountToken: true
+      enableServiceLinks: false
+      securityContext:
+        {{- toYaml .Values.securityContext | nindent 8 }}
+      containers:
+        - name: connection-test-executor
+          image: "{{ .Values.image.connectionTestExecutor.repository }}:{{ .Values.image.connectionTestExecutor.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          ports:
+            - name: health
+              containerPort: 8083
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+          resources:
+            {{- toYaml .Values.connectionTestExecutor.resources | nindent 12 }}
+          env:
+            - name: DATABASE_URL
+              value: {{ include "astrasync.postgresql.crossNamespaceUrl" . | quote }}
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: CONNECTION_TEST_CONCURRENCY
+              value: {{ .Values.connectionTestExecutor.concurrency | quote }}
+            - name: CONNECTION_TEST_CLAIM_BATCH
+              value: {{ .Values.connectionTestExecutor.claimBatch | quote }}
+            - name: CONNECTION_TEST_CLAIM_INTERVAL
+              value: {{ .Values.connectionTestExecutor.claimInterval | quote }}
+            - name: CONNECTION_TEST_LEASE_DURATION
+              value: {{ .Values.connectionTestExecutor.leaseDuration | quote }}
+            - name: CONNECTION_TEST_PROBE_TIMEOUT
+              value: {{ .Values.connectionTestExecutor.probeTimeout | quote }}
+            - name: CONNECTION_TEST_COMPLETION_TIMEOUT
+              value: {{ .Values.connectionTestExecutor.completionTimeout | quote }}
+            - name: CONNECTION_TEST_DIAL_TIMEOUT
+              value: {{ .Values.connectionTestExecutor.dialTimeout | quote }}
+            - name: CONNECTION_TEST_KUBERNETES_TIMEOUT
+              value: {{ .Values.connectionTestExecutor.kubernetesTimeout | quote }}
+            - name: CONNECTION_TEST_MAX_DNS_ANSWERS
+              value: {{ .Values.connectionTestExecutor.maxDNSAnswers | quote }}
+            - name: CONNECTION_TEST_PROTECTED_CIDRS
+              value: {{ join "," .Values.connectionTestExecutor.protectedCIDRs | quote }}
+            {{- if .Values.connectionTestExecutor.dnsServer }}
+            - name: CONNECTION_TEST_DNS_SERVER
+              value: {{ .Values.connectionTestExecutor.dnsServer | quote }}
+            {{- end }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

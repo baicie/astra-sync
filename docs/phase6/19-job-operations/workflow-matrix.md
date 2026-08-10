@@ -2,7 +2,7 @@
 
 ## Status
 
-Design complete; runtime behavior awaits implementation.
+Implemented and covered by API, repository, Console BFF, and browser-workflow tests.
 
 ## JobService Coverage
 

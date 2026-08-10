@@ -2,8 +2,8 @@
 
 ## Status
 
-Implementation-ready security design. The current Scheduler rejects `connectionRef`; no Secret
-provider or materialization path is implemented.
+Implemented security boundary. API runtime admission and Scheduler materialization remain disabled
+by default and must be enabled together only after the rollout gates pass.
 
 ## Protected Assets
 
