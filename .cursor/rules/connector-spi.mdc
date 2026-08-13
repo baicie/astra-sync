@@ -1,0 +1,85 @@
+---
+description: Connector / Format / Transform SPI 约束与新增流程(适用于 connector-api、connectors/*、formats/*、transforms/*)
+globs:
+  - connector-api/**/*.java
+  - connectors/**/*.java
+  - formats/**/*.java
+  - transforms/**/*.java
+  - deployment/catalog/**/*.yaml
+  - deployment/catalog/**/*.proto
+alwaysApply: false
+---
+
+# AstraSync Connector / Format / Transform SPI 规则
+
+AstraSync 通过 SPI 解耦 connector、format、transform。本规则覆盖 SPI 设计、新增流程与
+`deployment/catalog/` 下描述符同步。
+
+## 1. 三层契约
+
+1. **SPI 接口**(`connector-api/`):Source / Sink / SourceSplit / CatalogTable / CommitToken 等。
+2. **Descriptor**(打包在 jar 里的资源):descriptor 文件由 compiler-validation 编译进产物,
+   控制面通过 `Connector Catalog` 读取(ADR-040)。
+3. **Deployment Catalog**(`deployment/catalog/`):控制面与部署侧使用的真实目录,**不允许手工编辑**;
+   必须 `make catalog-check` 通过。
+
+修改任一层都必须 **同时更新另外两层**(如适用);不允许只改 jar descriptor 而不更新
+deployment catalog,反之亦然。
+
+## 2. Source / Sink 实现
+
+- Source 必须实现 `SourceEnumerator`、`SourceReader`/`BatchSource` 两个阶段,
+  **不**允许把 split 枚举和读取混在一个类里。
+- Sink 必须区分 `Writer`、`Committer`(参考 ADR-004),不允许多阶段揉成一个方法。
+- 任何 source / sink 必须显式声明 **能力**:
+  - `DeliveryGuarantee`(exactly/least/most)
+  - `Boundedness`(BOUNDED / UNBOUNDED)
+  - `Snapshot support`(true/false)
+- 能力协商失败必须 **前置拒绝**,见 ADR-009 与根 `AGENTS.md` §1。
+- CDC source 必须标注 `delivery=exactly_once` 才能注册到 Coordinator;不标注会被 catalog-check 拒绝。
+
+## 3. Format 实现
+
+- `formats/<format>-format/` 实现 SPI `RecordFormatter` / `RecordParser`。
+- 跨 connector scalar 编码遵循 ADR-018,不允许自创 encoding;扩展时改 SPI + 同步所有 connector 测试。
+- Arrow format 实现要复用 `engine/runtime` 的 `ArrowValueMapper`,**禁止**自行构造 Arrow 节点。
+
+## 4. Transform 实现
+
+- Transform 必须 **无状态、可重入、线程安全**;任何状态只能存在 `TransformContext` 内。
+- 输出 schema 必须是 **稳定、可序列化** 的 `Schema` 对象;动态生成字段必须给稳定名字。
+- SQL transform 走 SPI `SqlTransformEngine`;不允许把 JDBC 驱动硬编码到 transform 内。
+
+## 5. Connector 新增流程
+
+1. `make new-connector name=<my-name>` 初始化脚手架(参考 `Makefile` `new-connector` target)。
+2. 实现 SPI 接口 + 单测;所有依赖走父 `pom.xml` 版本统一管理。
+3. 写 descriptor(`META-INF/services/io.astrasync.connector.api.ConnectorDescriptor`)。
+4. 更新 `deployment/catalog/connector-inventory.proto` 与 YAML 索引;CI `catalog-check` 校验。
+5. 提交前:
+   ```bash
+   make build-connectors
+   make catalog-check
+   mvn -pl connectors/connector-<name> verify
+   ```
+6. 更新 `docs/connector-dev.md`(如行为有变化)与对应 phase 文档。
+
+## 6. 失败语义
+
+- Source 抛出异常必须 **可分类**:`SplitUnavailable`、`BackoffRequired`、`Fatal`。
+- Sink 写失败必须区分 **transient**(可重试)与 **fatal**(终止 job);不要把两者混在一个 try-catch。
+- commit 失败必须保留 `CommitToken`,以便重放(ADR-027)。
+
+## 7. 资源与生命周期
+
+- `open()` / `close()` 必须幂等,允许多次调用。
+- 所有外部 client(JDBC、Kafka Producer、FileSystem)都要设置 timeout / connection pool 上限。
+- `close()` 中按反向顺序释放资源,失败时仍要继续释放其余资源(参考 try-with-resources 等价语义)。
+
+## 8. 禁止
+
+- 在 connector 实现里硬编码 JDBC URL / Kafka bootstrap / 凭证。
+- 在 source / sink 内调用 `System.out` / 日志库以外的渠道。
+- 把 connector 业务逻辑写到 `connector-api` 包内。
+- 修改 `deployment/catalog/connector-inventory.pb`(生成产物);改 yaml / proto 源。
+- 把 secret 字面量塞进 descriptor。

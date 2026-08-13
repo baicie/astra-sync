@@ -12,6 +12,9 @@ const state = {
   selectedConnector: null,
   activeTest: null,
   testTimer: null,
+  auditEvents: [],
+  auditNextPageToken: "",
+  selectedAuditEvent: null,
 };
 
 const elements = {
@@ -42,6 +45,16 @@ const elements = {
   catalogSummary: document.querySelector("#catalog-summary"),
   inventoryRevision: document.querySelector("#inventory-revision"),
   connectorDetail: document.querySelector("#connector-detail"),
+  auditTab: document.querySelector("#audit-tab"),
+  auditBody: document.querySelector("#audit-body"),
+  auditEmpty: document.querySelector("#audit-empty"),
+  auditError: document.querySelector("#audit-error"),
+  auditSummary: document.querySelector("#audit-summary"),
+  auditDetail: document.querySelector("#audit-detail"),
+  auditRange: document.querySelector("#audit-range-filter"),
+  auditOutcome: document.querySelector("#audit-outcome-filter"),
+  auditRefresh: document.querySelector("#audit-refresh-button"),
+  auditLoadOlder: document.querySelector("#audit-load-older"),
   modal: document.querySelector("#modal"),
   modalEyebrow: document.querySelector("#modal-eyebrow"),
   modalTitle: document.querySelector("#modal-title"),
@@ -75,6 +88,20 @@ const compatibilityLabels = {
   CONNECTION_COMPATIBILITY_COMPATIBLE: "Compatible",
   CONNECTION_COMPATIBILITY_REVALIDATION_REQUIRED: "Revalidation required",
   CONNECTION_COMPATIBILITY_CONNECTOR_UNAVAILABLE: "Connector unavailable",
+};
+
+const auditOutcomeFilters = {
+  changed: ["CHANGED"],
+  "no-change": ["NO_CHANGE"],
+  replayed: ["REPLAYED"],
+  allowed: ["ALLOWED"],
+  denied: ["DENIED", "INVALID_POLICY_INPUT", "INVALID_SCOPE", "PERMISSION_DENIED", "POLICY_STALE", "TENANT_DENIED", "UNAUTHENTICATED", "UNMAPPED_METHOD"],
+};
+
+const auditRangeMilliseconds = {
+  "24h": 24 * 60 * 60 * 1000,
+  "7d": 7 * 24 * 60 * 60 * 1000,
+  "30d": 30 * 24 * 60 * 60 * 1000,
 };
 
 class APIError extends Error {
@@ -141,6 +168,10 @@ function bindGlobalEvents() {
   elements.logout.addEventListener("click", logout);
   elements.connectionState.addEventListener("change", () => loadConnections());
   elements.createConnection.addEventListener("click", openCreateConnection);
+  elements.auditRange.addEventListener("change", () => loadAudit(true));
+  elements.auditOutcome.addEventListener("change", () => loadAudit(true));
+  elements.auditRefresh.addEventListener("click", () => loadAudit(true));
+  elements.auditLoadOlder.addEventListener("click", () => loadAudit(false));
   elements.modal.addEventListener("close", clearModal);
 }
 
@@ -168,6 +199,8 @@ function hasPermission(permission) {
 
 async function loadTenantData() {
   elements.refresh.disabled = true;
+  elements.auditTab.hidden = !hasPermission("audit.read");
+  if (state.view === "audit" && !hasPermission("audit.read")) switchView("jobs");
   const tasks = [loadJobs()];
   if (hasPermission("connectors.read")) tasks.push(loadCatalog());
   if (hasPermission("connections.read")) tasks.push(loadConnections());
@@ -175,6 +208,7 @@ async function loadTenantData() {
     state.connections = [];
     renderConnections();
   }
+  if (state.view === "audit" && hasPermission("audit.read")) tasks.push(loadAudit(true));
   await Promise.allSettled(tasks);
   elements.createConnection.hidden = !hasPermission("connections.create");
   elements.refresh.disabled = false;
@@ -186,15 +220,18 @@ async function refreshCurrentView() {
     if (state.view === "jobs") await Promise.all([loadJobs(), ensureConnectionData()]);
     if (state.view === "connections") await Promise.all([loadConnections(), loadCatalog()]);
     if (state.view === "catalog") await loadCatalog();
+    if (state.view === "audit") await loadAudit(true);
   } finally {
     elements.refresh.disabled = false;
   }
 }
 
 function switchView(view) {
+  if (view === "audit" && !hasPermission("audit.read")) return;
   state.view = view;
   elements.tabs.forEach((tab) => tab.classList.toggle("active", tab.dataset.view === view));
   elements.views.forEach((panel) => { panel.hidden = panel.dataset.viewPanel !== view; });
+  if (view === "audit" && state.auditEvents.length === 0) void loadAudit(true);
 }
 
 function resetSelections() {
@@ -202,9 +239,14 @@ function resetSelections() {
   state.selectedJob = null;
   state.selectedConnection = null;
   state.selectedConnector = null;
+  state.selectedAuditEvent = null;
+  state.auditEvents = [];
+  state.auditNextPageToken = "";
   elements.jobDetail.innerHTML = placeholder("Select a job");
   elements.connectionDetail.innerHTML = placeholder("Select a connection");
   elements.connectorDetail.innerHTML = placeholder("Select a connector");
+  elements.auditDetail.innerHTML = placeholder("Select an event");
+  renderAudit();
 }
 
 async function loadJobs() {
@@ -650,6 +692,110 @@ function pollConnectionTest(connectionName, operationId) {
 function clearTestPoll() {
   if (state.testTimer) window.clearTimeout(state.testTimer);
   state.testTimer = null;
+}
+
+async function loadAudit(reset) {
+  if (!hasPermission("audit.read")) return;
+  if (!reset && !state.auditNextPageToken) return;
+  setLoading(elements.auditError, elements.auditEmpty);
+  elements.auditRefresh.disabled = true;
+  elements.auditLoadOlder.disabled = true;
+  try {
+    const parameters = new URLSearchParams({ page_size: "50" });
+    if (reset) {
+      const range = auditRangeMilliseconds[elements.auditRange.value] || auditRangeMilliseconds["24h"];
+      parameters.set("from", new Date(Date.now() - range).toISOString());
+      const outcomes = auditOutcomeFilters[elements.auditOutcome.value] || [];
+      outcomes.forEach((outcome) => parameters.append("outcome", outcome));
+      state.selectedAuditEvent = null;
+      elements.auditDetail.innerHTML = placeholder("Select an event");
+    } else {
+      parameters.set("page_token", state.auditNextPageToken);
+    }
+    const response = await api(`/api/audit-events?${parameters}`);
+    const events = response.events || [];
+    state.auditEvents = reset ? events : [...state.auditEvents, ...events];
+    state.auditNextPageToken = response.nextPageToken || "";
+    renderAudit();
+  } catch (error) {
+    if (reset) {
+      state.auditEvents = [];
+      state.auditNextPageToken = "";
+      elements.auditBody.innerHTML = "";
+      elements.auditSummary.textContent = "Unavailable";
+    }
+    showPanelError(elements.auditError, error.message);
+    elements.auditLoadOlder.hidden = true;
+  } finally {
+    elements.auditRefresh.disabled = false;
+    elements.auditLoadOlder.disabled = false;
+  }
+}
+
+function renderAudit() {
+  const count = state.auditEvents.length;
+  elements.auditSummary.textContent = `${count} ${count === 1 ? "event" : "events"}`;
+  elements.auditEmpty.hidden = count !== 0;
+  elements.auditError.hidden = true;
+  elements.auditLoadOlder.hidden = state.auditNextPageToken === "";
+  elements.auditBody.innerHTML = state.auditEvents.map((event) => `<tr data-event-id="${escapeAttribute(event.eventId)}" class="${state.selectedAuditEvent?.eventId === event.eventId ? "selected" : ""}">
+    <td>${escapeHTML(formatTime(event.occurredAt))}</td>
+    <td><strong class="resource-name">${escapeHTML(auditEventLabel(event.eventType))}</strong><span class="resource-subtitle">${escapeHTML(event.eventType || "-")}</span></td>
+    <td>${auditOutcomeBadge(event.outcome)}</td>
+    <td>${escapeHTML(event.actorId || "-")}</td>
+    <td>${escapeHTML(auditResource(event.attributes || {}))}</td>
+  </tr>`).join("");
+  elements.auditBody.querySelectorAll("tr").forEach((row) => row.addEventListener("click", () => selectAuditEvent(row.dataset.eventId)));
+  if (state.selectedAuditEvent) {
+    const selected = state.auditEvents.find((event) => event.eventId === state.selectedAuditEvent.eventId);
+    if (selected) {
+      state.selectedAuditEvent = selected;
+      renderAuditDetail(selected);
+    }
+  }
+}
+
+function selectAuditEvent(eventId) {
+  const event = state.auditEvents.find((candidate) => candidate.eventId === eventId);
+  if (!event) return;
+  state.selectedAuditEvent = event;
+  renderAudit();
+  renderAuditDetail(event);
+}
+
+function renderAuditDetail(event) {
+  const attributes = Object.entries(event.attributes || {}).sort(([left], [right]) => left.localeCompare(right));
+  elements.auditDetail.innerHTML = `<div class="detail-header">
+    <p class="eyebrow">AUDIT EVENT</p>
+    <h2>${escapeHTML(auditEventLabel(event.eventType))}</h2>
+    <div class="detail-subtitle">${escapeHTML(event.eventType || "-")}</div>
+    <div class="detail-actions">${auditOutcomeBadge(event.outcome)}</div>
+  </div>
+  <section class="detail-section"><h3>Identity</h3><div class="detail-grid">
+    ${detailValue("Occurred", formatTime(event.occurredAt))}
+    ${detailValue("Actor", event.actorId || "-")}
+    ${detailValue("Event ID", event.eventId || "-")}
+    ${detailValue("Request ID", event.requestId || "-")}
+  </div></section>
+  <section class="detail-section"><h3>Attributes</h3>${attributes.length ? `<dl class="settings-list">${attributes.map(([key, value]) => `<div><dt>${escapeHTML(humanize(key))}</dt><dd>${escapeHTML(value)}</dd></div>`).join("")}</dl>` : `<span class="detail-subtitle">No projected attributes</span>`}</section>`;
+}
+
+function auditEventLabel(value) {
+  return value ? value.split(".").map(humanize).join(" ") : "Unknown event";
+}
+
+function auditResource(attributes) {
+  if (attributes.namespace && attributes.name) return `${attributes.namespace}/${attributes.name}`;
+  for (const key of ["name", "uid", "connectionUid", "jobUid", "operationId"]) {
+    if (attributes[key]) return attributes[key];
+  }
+  return "-";
+}
+
+function auditOutcomeBadge(value) {
+  const denied = ["DENIED", "INVALID_POLICY_INPUT", "INVALID_SCOPE", "PERMISSION_DENIED", "POLICY_STALE", "TENANT_DENIED", "UNAUTHENTICATED", "UNMAPPED_METHOD"];
+  const kind = denied.includes(value) ? "badge-danger" : ["CHANGED", "ALLOWED"].includes(value) ? "badge-success" : value === "REPLAYED" ? "badge-warning" : "badge-neutral";
+  return statusBadge(humanize(value || "Unknown"), kind);
 }
 
 async function loadCatalog() {

@@ -34,6 +34,7 @@ fail-closed rollout gates.
 - [Authorization matrix](authorization-matrix.md)
 - [Implementation plan](implementation-plan.md)
 - [Migration and rollback runbook](migration-and-rollback.md)
+- [Operator enablement](enablement.md)
 - [Verification](verification.md)
 - [ADR-040: Deployment-authoritative Connector Descriptor Catalog](../../adr/adr-040-deployment-authoritative-connector-catalog.md)
 - [ADR-041: External Secret References and Epoch-scoped Credential Materialization](../../adr/adr-041-external-secrets-epoch-credential-materialization.md)

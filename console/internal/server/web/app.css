@@ -67,6 +67,14 @@ textarea { min-height: 76px; resize: vertical; }
 .heading-actions { display: flex; align-items: center; gap: 12px; }
 .workspace { display: grid; grid-template-columns: minmax(0, 1fr) 390px; gap: 16px; align-items: start; }
 .catalog-workspace { grid-template-columns: minmax(340px, .7fr) minmax(420px, 1fr); }
+.audit-workspace { display: grid; grid-template-columns: minmax(0, 1fr) 390px; gap: 16px; align-items: start; }
+.audit-heading { flex-wrap: wrap; }
+.audit-filters { display: flex; align-items: center; gap: 8px; }
+.audit-filters .compact-select { width: 160px; }
+.audit-table { min-width: 880px; }
+.audit-pagination { display: flex; justify-content: center; min-height: 54px; padding: 10px 16px; border-top: 1px solid var(--line); }
+.audit-pagination .button { min-width: 150px; }
+#audit-detail .detail-value { overflow-wrap: anywhere; word-break: break-word; }
 
 .list-panel, .detail-panel { min-width: 0; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); }
 .detail-panel { position: sticky; top: 16px; min-height: 360px; max-height: calc(100vh - 145px); overflow-y: auto; }
@@ -171,7 +179,7 @@ tbody tr:hover, tbody tr.selected { background: #edf7f5; }
 .toast-danger { border-color: var(--danger); color: var(--danger); }
 
 @media (max-width: 1080px) {
-  .workspace, .catalog-workspace { grid-template-columns: minmax(0, 1fr); }
+  .workspace, .catalog-workspace, .audit-workspace { grid-template-columns: minmax(0, 1fr); }
   .detail-panel { position: static; max-height: none; }
   .detail-placeholder { min-height: 190px; }
 }
@@ -190,6 +198,9 @@ tbody tr:hover, tbody tr.selected { background: #edf7f5; }
   .field-wide { grid-column: auto; }
   .option-table { overflow-x: auto; }
   .option-table > div { min-width: 560px; }
+  .audit-heading { align-items: stretch; flex-direction: column; }
+  .audit-filters { width: 100%; }
+  .audit-filters .compact-select { flex: 1; width: auto; }
   .modal-body { padding: 16px; }
   .modal-header, .modal-actions { padding-right: 16px; padding-left: 16px; }
 }
@@ -201,6 +212,7 @@ tbody tr:hover, tbody tr.selected { background: #edf7f5; }
   .heading-actions { align-items: stretch; flex-direction: column; }
   .detail-actions .button { flex: 1 1 calc(50% - 7px); }
   .endpoint-row { align-items: start; flex-direction: column; }
+  .audit-filters { align-items: stretch; flex-direction: column; }
   .modal-actions .button { flex: 1; }
   .toast { right: 16px; bottom: 16px; left: 16px; max-width: none; }
 }

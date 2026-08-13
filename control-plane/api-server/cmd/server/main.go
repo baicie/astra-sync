@@ -254,6 +254,9 @@ func run(ctx context.Context, configuration config) error {
 		controlv1.JobValidationService_ServiceDesc,
 		controlv1.ConnectorCatalogService_ServiceDesc,
 		controlv1.ConnectionService_ServiceDesc,
+		controlv1.AuditService_ServiceDesc,
+		controlv1.IdentityService_ServiceDesc,
+		controlv1.AccessService_ServiceDesc,
 	); err != nil {
 		return fmt.Errorf("validate API authorization registry: %w", err)
 	}
@@ -312,6 +315,26 @@ func run(ctx context.Context, configuration config) error {
 	if err != nil {
 		return fmt.Errorf("create transactional Job service: %w", err)
 	}
+	auditService, err := service.NewAuditService(
+		authRepository, authorizer, configuration.catalogTokenKey, time.Now, uuid.NewString,
+	)
+	if err != nil {
+		return fmt.Errorf("create audit service: %w", err)
+	}
+	identityService, err := service.NewIdentityService(authRepository, authorizer,
+		service.WithIdentityClock(time.Now),
+		service.WithIdentityUIDSource(uuid.NewString),
+	)
+	if err != nil {
+		return fmt.Errorf("create identity service: %w", err)
+	}
+	accessService, err := service.NewAccessService(authRepository, authorizer,
+		service.WithAccessClock(time.Now),
+		service.WithAccessUIDSource(uuid.NewString),
+	)
+	if err != nil {
+		return fmt.Errorf("create access service: %w", err)
+	}
 	if configuration.tlsCertificateFile != "" {
 		serverCredentials, err := credentials.NewServerTLSFromFile(
 			configuration.tlsCertificateFile, configuration.tlsPrivateKeyFile,
@@ -330,6 +353,9 @@ func run(ctx context.Context, configuration config) error {
 	controlv1.RegisterJobValidationServiceServer(grpcServer, jobValidationService)
 	controlv1.RegisterConnectorCatalogServiceServer(grpcServer, catalogService)
 	controlv1.RegisterConnectionServiceServer(grpcServer, connectionService)
+	controlv1.RegisterAuditServiceServer(grpcServer, auditService)
+	controlv1.RegisterIdentityServiceServer(grpcServer, identityService)
+	controlv1.RegisterAccessServiceServer(grpcServer, accessService)
 	if configuration.environment != "production" {
 		reflection.Register(grpcServer)
 	}
@@ -345,6 +371,7 @@ func run(ctx context.Context, configuration config) error {
 		"JobValidationService":    controlv1.RegisterJobValidationServiceHandlerFromEndpoint,
 		"ConnectorCatalogService": controlv1.RegisterConnectorCatalogServiceHandlerFromEndpoint,
 		"ConnectionService":       controlv1.RegisterConnectionServiceHandlerFromEndpoint,
+		"AuditService":            controlv1.RegisterAuditServiceHandlerFromEndpoint,
 	} {
 		if err := register(ctx, gateway, configuration.grpcEndpoint, dialOptions); err != nil {
 			grpcListener.Close()

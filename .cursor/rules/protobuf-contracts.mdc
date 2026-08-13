@@ -1,0 +1,75 @@
+---
+description: Protobuf 与 API 契约的兼容性与生成约定(适用于 api/protobuf、protocol、control-plane/api-server/gen 等)
+globs:
+  - api/protobuf/**/*.proto
+  - protocol/**/*.proto
+  - api/openapi/**/*.yaml
+  - api/openapi/**/*.json
+  - control-plane/api-server/gen/**/*.go
+  - protocol/**/src/main/java/**/*.java
+alwaysApply: false
+---
+
+# AstraSync API / Protobuf 契约规则
+
+AstraSync 控制面 <-> 数据面、控制面 <-> Console、API <-> 客户端 都通过版本化协议通信。
+本规则覆盖 `api/protobuf`、`protocol/`、`api/openapi/` 与生成的代码。
+
+## 1. 总体原则
+
+- **兼容性优先**:已有 wire 格式字段只允许 **追加**,不得修改编号、不得重命名、不得改变类型。
+- **新增字段必须给出默认值**,确保旧客户端不 panic。
+- 删除字段走 **弃用流程**:`reserved <number>` 或 `reserved "<name>";`;保留编号至少 1 个 major 版本。
+- 任何不兼容改动必须先写 **ADR** + 在 PR 中显式标记 `BREAKING CHANGE`(`!`)。
+- 提交 `.proto` 后必须跑 `make proto-generate`,并把 **生成代码 + .pb.go** 一并提交。
+- 不要直接编辑 `gen/**/*.go`、`protocol/**/*pb.java`,这些是生成产物。
+
+## 2. 命名
+
+- package:`io.astrasync.<domain>.v1`(v1 / v2 等显式版本号)。
+- message:`PascalCase`,字段:`snake_case`(Protobuf 风格),枚举值:`SCREAMING_SNAKE_CASE`。
+- service method 用动词:`CreateSyncJob`、`GrantTenantRole`、`ListMembers`,不接受 `SyncJobCreate`。
+- `option java_package = "io.astrasync.protocol.<domain>.v1";`
+- `option java_multiple_files = true;`(除非有跨 message 内部类需求)。
+
+## 3. 字段与编号
+
+- 字段编号一旦分配 **不可重用**,删除字段用 `reserved` 而不是复用编号。
+- 数值字段优先 `int64` / `uint64`(避免精度问题);不要使用 `fixed32`/`sfixed32` 表示时间戳,用 `google.protobuf.Timestamp`。
+- ID 一律 `string`(UUID),不要 `int64`。
+- 时间一律 `google.protobuf.Timestamp`;持续时间一律 `google.protobuf.Duration`。
+- 枚举值必须从 0 起、保持稳定;新增值使用新编号,不能插队。
+
+## 4. 错误与状态
+
+- RPC 返回错误一律用 gRPC `status`,**不**使用业务自定义错误码字段。
+- 业务级"成功但部分失败"使用 `google.rpc.Status` 风格的 message(如 `partial_success`)。
+
+## 5. 文档
+
+- 每个 service、message、field 必须写注释;注释第一行简短概括,空一行后写细节。
+- 不允许 `// TODO` 留在 `.proto`;若不确定,放 ADR。
+- RPC 必须在注释里写明幂等性、并发、重试语义。
+
+## 6. OpenAPI
+
+- 与 gRPC 并存时,OpenAPI 仅是控制面 REST 入口的描述;字段必须与对应 `.proto` 保持一致。
+- `nullable` / `required` 与 `.proto` 行为冲突时以 `.proto` 为准(OpenAPI 字段映射后增删可选性)。
+- 不允许在 OpenAPI 中新增 endpoint 而没有对应 `.proto` RPC。
+
+## 7. 生成
+
+```bash
+make proto-generate        # Java + Go
+make proto-lint            # buf lint
+make catalog-check         # Connector descriptor 与编译产物一致
+```
+
+CI 失败:`mvn protobuf:compile protobuf:compile-custom && buf generate api/protobuf --template buf.gen.yaml`。
+
+## 8. 禁止
+
+- 修改已有字段编号。
+- 把 `bytes` 用作通用容器;说明具体含义(message / scalar)。
+- 在 `.proto` 中引入跨域依赖(如 `common/v1` 引用业务领域类型)。
+- 把 secret / password / token 字段放进 `.proto`(引用外部 secret ID 即可,见 ADR-041)。

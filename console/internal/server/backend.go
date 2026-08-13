@@ -43,3 +43,7 @@ type JobMutationClient interface {
 type JobValidator interface {
 	ValidateJobSpec(context.Context, *jobv1.ValidateJobSpecRequest) (*jobv1.JobValidationResult, error)
 }
+
+type AuditReader interface {
+	ListAuditEvents(context.Context, *jobv1.ListAuditEventsRequest) (*jobv1.ListAuditEventsResponse, error)
+}

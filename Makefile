@@ -4,6 +4,7 @@
 
 GO_MODULES := control-plane control-plane/api-server control-plane/controller control-plane/scheduler control-plane/catalog control-plane/auth console
 CONTROLLER_GEN_VERSION := v0.15.0
+ADMIN_BIN := control-plane/auth/cmd/admin
 
 # Default target
 all: build
@@ -131,6 +132,14 @@ proto-lint:
 crd-generate:
 	@echo "Generating CRD manifests..."
 	cd control-plane/controller && GOTOOLCHAIN=go1.22.12 go run sigs.k8s.io/controller-tools/cmd/controller-gen@$(CONTROLLER_GEN_VERSION) crd paths=./api/v1 output:crd:artifacts:config=../../deployment/operator/config/crd/bases
+
+## Build the offline Slice 18 authentication administrator tool (astra-auth-admin).
+build-auth-admin:
+	cd $(ADMIN_BIN) && go build -o ../../../bin/astra-auth-admin .
+
+## Run the offline Slice 18 authentication administrator tests.
+test-auth-admin:
+	cd $(ADMIN_BIN) && go test ./...
 
 # Create a new connector
 new-connector:

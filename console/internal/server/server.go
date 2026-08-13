@@ -65,6 +65,7 @@ type Server struct {
 	connections  ConnectionClient
 	mutations    JobMutationClient
 	validator    JobValidator
+	audit        AuditReader
 	sessions     SessionManager
 	namespace    string
 	publicOrigin string
@@ -118,6 +119,7 @@ func NewWithConfig(configuration Config) (*Server, error) {
 	server.connections, _ = configuration.Backend.(ConnectionClient)
 	server.mutations, _ = configuration.Backend.(JobMutationClient)
 	server.validator, _ = configuration.Backend.(JobValidator)
+	server.audit, _ = configuration.Backend.(AuditReader)
 	if server.jobs == nil {
 		return nil, fmt.Errorf("Console backend does not implement JobReader")
 	}
@@ -163,6 +165,9 @@ func (s *Server) Handler() http.Handler {
 		mux.HandleFunc("DELETE /api/connections/{name}", s.deleteConnection)
 		mux.HandleFunc("POST /api/connections/{name}/test", s.testConnection)
 		mux.HandleFunc("GET /api/connection-tests/{operationID}", s.getConnectionTest)
+	}
+	if s.audit != nil {
+		mux.HandleFunc("GET /api/audit-events", s.listAuditEvents)
 	}
 
 	content, err := fs.Sub(staticFiles, "web")

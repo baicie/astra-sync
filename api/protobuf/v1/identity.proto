@@ -1,0 +1,66 @@
+syntax = "proto3";
+
+package astra.control.v1;
+
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "io.astrasync/control-plane/api-server/gen/go/v1;identityv1";
+option java_multiple_files = true;
+option java_package = "io.astrasync.control.v1";
+option java_outer_classname = "ControlPlaneIdentityProto";
+
+// IdentityService exposes caller-safe projections of the authenticated
+// principal and the tenant memberships the API Server has resolved for it.
+// The API never returns platform-only fields through this service.
+service IdentityService {
+  rpc GetCurrentPrincipal(GetCurrentPrincipalRequest) returns (Principal);
+  rpc ListTenants(ListTenantsRequest) returns (ListTenantsResponse);
+}
+
+message GetCurrentPrincipalRequest {
+  // The session-derived caller. Tenant selection is enforced server-side and
+  // must never come from the request body.
+}
+
+message ListTenantsRequest {
+  // Pagination token returned by a previous call. Empty for the first page.
+  string page_token = 1;
+  int32 page_size = 2;
+}
+
+message ListTenantsResponse {
+  repeated Tenant tenants = 1;
+  string next_page_token = 2;
+}
+message Principal {
+  string principal_id = 1;
+  string issuer = 2;
+  string subject = 3;
+  string display_name = 4;
+  string status = 5;
+  // Platform-level roles granted to the principal. The identity service
+  // returns the public identifiers only; tenant-admin callers cannot see
+  // platform_admin roles via this service.
+  repeated string platform_roles = 6;
+  repeated TenantMembership memberships = 7;
+  google.protobuf.Timestamp updated_at = 8;
+}
+
+message TenantMembership {
+  string tenant_id = 1;
+  string role = 2;
+  bool active = 3;
+  google.protobuf.Timestamp granted_at = 4;
+  google.protobuf.Timestamp revoked_at = 5;
+  int64 authz_revision = 6;
+}
+
+message Tenant {
+  string tenant_id = 1;
+  string namespace = 2;
+  string display_name = 3;
+  string status = 4;
+  string role = 5;
+  repeated string permissions = 6;
+}

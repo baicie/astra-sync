@@ -11,24 +11,27 @@
 
 ## 1. Authentication Domain and Persistence
 
-- [ ] Add principal, tenant, membership, platform-role, session, and audit domain types to
+- [x] Add principal, tenant, membership, platform-role, session, and audit domain types to
   `control-plane/auth`.
-- [ ] Add additive PostgreSQL migrations, restricted audit grants, and reversible application
+- [x] Add additive PostgreSQL migrations, restricted audit grants, and reversible application
   startup checks.
-- [ ] Implement exact issuer/subject bootstrap with idempotency and last-admin protection.
-- [ ] Add bounded OIDC discovery/JWKS validation with issuer, audience, algorithm, lifetime, and
+- [x] Implement exact issuer/subject bootstrap with idempotency and last-admin protection.
+- [x] Add bounded OIDC discovery/JWKS validation with issuer, audience, algorithm, lifetime, and
   token-dimension limits.
-- [ ] Test key rotation, stale-if-error, redirect rejection, malformed claims, and dependency
+- [x] Test key rotation, stale-if-error, redirect rejection, malformed claims, and dependency
   failure behavior.
 
 ## 2. API Authentication and Authorization
 
-- [ ] Add gRPC authentication, request-context, scope-resolution, and authorization interceptors.
-- [ ] Forward approved bearer/request metadata through the JSON gateway without forwarding
+- [x] Add gRPC authentication, request-context, scope-resolution, and authorization interceptors.
+- [x] Forward approved bearer/request metadata through the JSON gateway without forwarding
   spoofable identity headers.
-- [ ] Register all JobService methods in a startup-validated deny-by-default policy registry.
-- [ ] Preserve public minimal health/readiness; disable or protect reflection in production.
-- [ ] Add cross-tenant, existence-oracle, role-revocation, and unknown-method tests.
+- [x] Register all JobService methods in a startup-validated deny-by-default policy registry.
+- [x] Preserve public minimal health/readiness; disable or protect reflection in production.
+- [x] Register IdentityService and AccessService methods (self-scope for caller-safe reads and
+  platform role grants, tenant-scoped membership mutators) and extend the registry-completeness
+  test.
+- [x] Add cross-tenant, existence-oracle, role-revocation, and unknown-method tests.
 
 ## 3. Console BFF
 
@@ -41,22 +44,27 @@
 
 ## 4. Tenant and Role Administration
 
-- [ ] Define and generate IdentityService, AccessService, and bounded pagination contracts.
-- [ ] Implement tenant creation with an initial administrator in one transaction.
-- [ ] Implement membership list/grant/replace/revoke with expected authorization revision.
-- [ ] Seed immutable built-in role definitions and reject custom/raw permissions.
-- [ ] Add race tests for last-admin removal, concurrent grants, suspension, and revision changes.
+- [x] Define and generate IdentityService, AccessService, and bounded pagination contracts.
+- [x] Implement tenant creation with an initial administrator in one transaction.
+- [x] Implement membership list/grant/replace/revoke with expected authorization revision.
+- [x] Seed immutable built-in role definitions and reject custom/raw permissions.
+- [x] Combine every membership / platform-role mutation with its security audit row in a single
+  PostgreSQL transaction (`AccessRepository.GrantTenantRole`, `RevokeTenantRole`,
+  `GrantPlatformRole`, `RevokePlatformRole`). The auth package interface now passes the
+  `SecurityAuditEvent` alongside the mutation arguments so the call site cannot split the
+  writes.
+- [x] Add race tests for last-admin removal, concurrent grants, suspension, and revision changes.
 
 ## 5. Audit Trail
 
-- [ ] Add the append-only event schema, monthly partition policy, and action metadata allowlists.
-- [ ] Refactor Job and authorization mutations behind a unit of work that inserts required audit
+- [x] Add the append-only event schema, monthly partition policy, and action metadata allowlists.
+- [x] Refactor Job and authorization mutations behind a unit of work that inserts required audit
   events atomically.
-- [ ] Route Controller and Scheduler state transitions through fixed service actors and the same
+- [x] Route Controller and Scheduler state transitions through fixed service actors and the same
   audited unit of work; use dedicated least-privilege database roles.
-- [ ] Record authentication/session events and denied decisions synchronously.
-- [ ] Add bounded AuditService queries with tenant authorization and read auditing.
-- [ ] Verify rollback on audit failure, database update/delete denial, redaction sentinels, and
+- [x] Record authentication/session events and denied decisions synchronously.
+- [x] Add bounded AuditService queries with tenant authorization and read auditing.
+- [x] Verify rollback on audit failure, database update/delete denial, redaction sentinels, and
   retention operations.
 
 ## 6. Transport, Deployment, and Rollout

@@ -1,0 +1,97 @@
+syntax = "proto3";
+
+package astra.control.v1;
+
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "io.astrasync/control-plane/api-server/gen/go/v1;accessv1";
+option java_multiple_files = true;
+option java_package = "io.astrasync.control.v1";
+option java_outer_classname = "ControlPlaneAccessProto";
+
+// AccessService manages tenant-scoped membership and platform-level role
+// grants. The service writes both the membership/role row and the matching
+// audit event in the same transaction; the audit write is not optional.
+service AccessService {
+  rpc ListMembers(ListMembersRequest) returns (ListMembersResponse);
+  rpc GrantTenantRole(GrantTenantRoleRequest) returns (TenantMembership);
+  rpc RevokeTenantRole(RevokeTenantRoleRequest) returns (google.protobuf.Empty);
+  rpc ListRoles(ListRolesRequest) returns (ListRolesResponse);
+  rpc GrantPlatformRole(GrantPlatformRoleRequest) returns (PlatformRoleGrant);
+  rpc RevokePlatformRole(RevokePlatformRoleRequest) returns (google.protobuf.Empty);
+}
+
+message ListMembersRequest {
+  string tenant_id = 1;
+  string page_token = 2;
+  int32 page_size = 3;
+}
+
+message ListMembersResponse {
+  repeated TenantMember members = 1;
+  string next_page_token = 2;
+}
+
+message TenantMember {
+  string principal_id = 1;
+  string issuer = 2;
+  string subject = 3;
+  string display_name = 4;
+  string role = 5;
+  bool active = 6;
+  google.protobuf.Timestamp granted_at = 7;
+  string granted_by = 8;
+}
+
+message GrantTenantRoleRequest {
+  string tenant_id = 1;
+  string principal_id = 2;
+  string role = 3;
+  // Expected tenant authorization revision captured from a previous read.
+  // Used to fence against concurrent membership mutations.
+  int64 expected_authz_revision = 4;
+  string idempotency_key = 5;
+}
+
+message RevokeTenantRoleRequest {
+  string tenant_id = 1;
+  string principal_id = 2;
+  int64 expected_authz_revision = 3;
+  string idempotency_key = 4;
+}
+
+message ListRolesRequest {
+  // Empty for now. Tenant_id is intentionally not part of the request because
+  // roles are global; the response is the same for every caller.
+}
+
+message ListRolesResponse {
+  repeated RoleDefinition roles = 1;
+}
+
+message RoleDefinition {
+  string name = 1;
+  repeated string permissions = 2;
+  string description = 3;
+}
+
+message GrantPlatformRoleRequest {
+  string principal_id = 1;
+  string role = 2;
+  string idempotency_key = 3;
+}
+
+message RevokePlatformRoleRequest {
+  string principal_id = 1;
+  string role = 2;
+  string idempotency_key = 3;
+}
+
+message PlatformRoleGrant {
+  string principal_id = 1;
+  string role = 2;
+  bool active = 3;
+  google.protobuf.Timestamp granted_at = 4;
+  string granted_by = 5;
+}
