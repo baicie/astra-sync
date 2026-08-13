@@ -81,13 +81,19 @@ func TestAccessServiceGrantTenantRoleWritesMembershipAndAudit(t *testing.T) {
 
 	member, err := serviceUnderTest.GrantTenantRole(context.Background(), &controlv1.GrantTenantRoleRequest{
 		TenantId: accessTenantID, PrincipalId: accessPrincipalID,
-		Role: string(auth.RoleTenantOperator), IdempotencyKey: "abcdefghijklmnop1234567890",
+		Role: string(auth.RoleTenantOperator), IdempotencyKey: fixtureIdempotencyKey("access-grant-member"),
 	})
 	if err != nil {
 		t.Fatalf("grant tenant role: %v", err)
 	}
 	if member.GetRole() != string(auth.RoleTenantOperator) {
 		t.Fatalf("unexpected role: %s", member.GetRole())
+	}
+	if member.GetTenantId() != accessTenantID || member.GetAuthzRevision() != 2 {
+		t.Fatalf("unexpected membership scope or revision: %+v", member)
+	}
+	if !member.GetActive() || !member.GetGrantedAt().AsTime().Equal(now) {
+		t.Fatalf("unexpected membership state: %+v", member)
 	}
 	if len(repository.auditWrites) != 1 {
 		t.Fatalf("expected one audit write, got %d", len(repository.auditWrites))
@@ -125,7 +131,7 @@ func TestAccessServiceGrantTenantRoleRejectsUnknownRole(t *testing.T) {
 	}
 	if _, err := serviceUnderTest.GrantTenantRole(context.Background(), &controlv1.GrantTenantRoleRequest{
 		TenantId: accessTenantID, PrincipalId: accessPrincipalID,
-		Role: "tenant_wizard", IdempotencyKey: "abcdefghijklmnop1234567890",
+		Role: "tenant_wizard", IdempotencyKey: fixtureIdempotencyKey("access-grant-unknown-role"),
 	}); status.Code(err) != codes.InvalidArgument {
 		t.Fatalf("expected unknown role rejection, got %v", err)
 	}
@@ -141,7 +147,7 @@ func TestAccessServiceRevokeTenantRoleRecordsAudit(t *testing.T) {
 	}
 	if _, err := serviceUnderTest.RevokeTenantRole(context.Background(), &controlv1.RevokeTenantRoleRequest{
 		TenantId: accessTenantID, PrincipalId: accessPrincipalID,
-		IdempotencyKey: "abcdefghijklmnop1234567890",
+		IdempotencyKey: fixtureIdempotencyKey("access-revoke-member"),
 	}); err != nil {
 		t.Fatalf("revoke tenant role: %v", err)
 	}
@@ -196,7 +202,7 @@ func TestAccessServicePlatformRoleRequiresPlatformAdmin(t *testing.T) {
 	}
 	if _, err := serviceUnderTest.GrantPlatformRole(ctx, &controlv1.GrantPlatformRoleRequest{
 		PrincipalId: accessPrincipalID, Role: auth.PlatformRoleAdmin,
-		IdempotencyKey: "abcdefghijklmnop1234567890",
+		IdempotencyKey: fixtureIdempotencyKey("access-grant-platform-denied"),
 	}); status.Code(err) != codes.PermissionDenied {
 		t.Fatalf("expected platform_admin denial, got %v", err)
 	}
@@ -209,7 +215,7 @@ func TestAccessServicePlatformRoleRequiresPlatformAdmin(t *testing.T) {
 	}
 	grant, err := serviceUnderTest.GrantPlatformRole(platformCtx, &controlv1.GrantPlatformRoleRequest{
 		PrincipalId: accessPrincipalID, Role: auth.PlatformRoleAdmin,
-		IdempotencyKey: "abcdefghijklmnop1234567890",
+		IdempotencyKey: fixtureIdempotencyKey("access-grant-platform"),
 	})
 	if err != nil {
 		t.Fatalf("grant platform role: %v", err)
@@ -241,7 +247,7 @@ func TestAccessServicePlatformRoleRejectsUnknownRole(t *testing.T) {
 	}
 	if _, err := serviceUnderTest.GrantPlatformRole(ctx, &controlv1.GrantPlatformRoleRequest{
 		PrincipalId: accessPrincipalID, Role: "tenant_admin",
-		IdempotencyKey: "abcdefghijklmnop1234567890",
+		IdempotencyKey: fixtureIdempotencyKey("access-grant-platform-unknown-role"),
 	}); status.Code(err) != codes.InvalidArgument {
 		t.Fatalf("expected unknown role rejection, got %v", err)
 	}
@@ -262,7 +268,7 @@ func TestAccessServiceRevokePlatformRoleRequiresPlatformAdmin(t *testing.T) {
 	}
 	if _, err := serviceUnderTest.RevokePlatformRole(ctx, &controlv1.RevokePlatformRoleRequest{
 		PrincipalId: accessPrincipalID, Role: auth.PlatformRoleAdmin,
-		IdempotencyKey: "abcdefghijklmnop1234567890",
+		IdempotencyKey: fixtureIdempotencyKey("access-revoke-platform-denied"),
 	}); status.Code(err) != codes.PermissionDenied {
 		t.Fatalf("expected platform_admin denial, got %v", err)
 	}
@@ -276,7 +282,7 @@ func TestAccessServiceRepositoryErrorsAreSanitized(t *testing.T) {
 	}
 	if _, err := serviceUnderTest.GrantTenantRole(context.Background(), &controlv1.GrantTenantRoleRequest{
 		TenantId: accessTenantID, PrincipalId: accessPrincipalID,
-		Role: string(auth.RoleTenantOperator), IdempotencyKey: "abcdefghijklmnop1234567890",
+		Role: string(auth.RoleTenantOperator), IdempotencyKey: fixtureIdempotencyKey("access-repository-error"),
 	}); status.Code(err) != codes.Internal || strings.Contains(status.Convert(err).Message(), "postgres detail") {
 		t.Fatalf("expected sanitized repository error, got %v", err)
 	}
@@ -294,7 +300,7 @@ func TestAccessServiceAuditFailureIsInternal(t *testing.T) {
 	}
 	if _, err := serviceUnderTest.GrantTenantRole(context.Background(), &controlv1.GrantTenantRoleRequest{
 		TenantId: accessTenantID, PrincipalId: accessPrincipalID,
-		Role: string(auth.RoleTenantOperator), IdempotencyKey: "abcdefghijklmnop1234567890",
+		Role: string(auth.RoleTenantOperator), IdempotencyKey: fixtureIdempotencyKey("access-audit-error"),
 	}); status.Code(err) != codes.Internal {
 		t.Fatalf("expected audit failure to be internal, got %v", err)
 	}
@@ -308,7 +314,7 @@ func TestAccessServiceRevokeTenantRoleEmptyResponse(t *testing.T) {
 	}
 	response, err := serviceUnderTest.RevokeTenantRole(context.Background(), &controlv1.RevokeTenantRoleRequest{
 		TenantId: accessTenantID, PrincipalId: accessPrincipalID,
-		IdempotencyKey: "abcdefghijklmnop1234567890",
+		IdempotencyKey: fixtureIdempotencyKey("access-revoke-empty-response"),
 	})
 	if err != nil {
 		t.Fatalf("revoke tenant role: %v", err)
@@ -332,7 +338,7 @@ func TestAccessServiceTransactionIsAtomicOnAuditFailure(t *testing.T) {
 	}
 	if _, err := serviceUnderTest.GrantTenantRole(context.Background(), &controlv1.GrantTenantRoleRequest{
 		TenantId: accessTenantID, PrincipalId: accessPrincipalID,
-		Role: string(auth.RoleTenantOperator), IdempotencyKey: "abcdefghijklmnop1234567890",
+		Role: string(auth.RoleTenantOperator), IdempotencyKey: fixtureIdempotencyKey("access-atomic-audit-error"),
 	}); status.Code(err) != codes.Internal {
 		t.Fatalf("expected audit failure to be internal, got %v", err)
 	}
@@ -351,25 +357,25 @@ func TestAccessServiceTransactionEmitsExactlyOneAuditPerMutation(t *testing.T) {
 	}
 	if _, err := serviceUnderTest.GrantTenantRole(context.Background(), &controlv1.GrantTenantRoleRequest{
 		TenantId: accessTenantID, PrincipalId: accessPrincipalID,
-		Role: string(auth.RoleTenantOperator), IdempotencyKey: "abcdefghijklmnop1234567890",
+		Role: string(auth.RoleTenantOperator), IdempotencyKey: fixtureIdempotencyKey("access-audit-count-grant"),
 	}); err != nil {
 		t.Fatalf("grant tenant role: %v", err)
 	}
 	if _, err := serviceUnderTest.RevokeTenantRole(context.Background(), &controlv1.RevokeTenantRoleRequest{
 		TenantId: accessTenantID, PrincipalId: accessPrincipalID,
-		IdempotencyKey: "qrstuvwxyz1234567890abcdef",
+		IdempotencyKey: fixtureIdempotencyKey("access-audit-count-revoke"),
 	}); err != nil {
 		t.Fatalf("revoke tenant role: %v", err)
 	}
 	if _, err := serviceUnderTest.GrantPlatformRole(context.Background(), &controlv1.GrantPlatformRoleRequest{
 		PrincipalId: accessPrincipalID, Role: auth.PlatformRoleAdmin,
-		IdempotencyKey: "mnopqrstuv1234567890abcdefgh",
+		IdempotencyKey: fixtureIdempotencyKey("access-audit-count-platform-grant"),
 	}); err == nil {
 		t.Fatalf("expected platform admin denial, got nil")
 	}
 	if _, err := serviceUnderTest.RevokePlatformRole(context.Background(), &controlv1.RevokePlatformRoleRequest{
 		PrincipalId: accessPrincipalID, Role: auth.PlatformRoleAdmin,
-		IdempotencyKey: "ijklmnopqr1234567890abcdefgh",
+		IdempotencyKey: fixtureIdempotencyKey("access-audit-count-platform-revoke"),
 	}); err == nil {
 		t.Fatalf("expected platform admin denial, got nil")
 	}

@@ -4,8 +4,8 @@
 
 Runtime foundation required by Slices 19 and 20 complete; standalone tenant and role
 administration API also implemented with transactional audit coupling. Production OIDC
-interoperability, Console BFF session boundary, transport hardening, and rollout remain
-operator-controlled gates.
+interoperability, transport hardening, and rollout remain operator-controlled gates. The
+Console BFF session boundary is complete at repository level.
 
 Slice 18 establishes the security boundary used by Console and API mutations. It delegates user
 authentication to an external OIDC provider, keeps AstraSync roles in PostgreSQL, authorizes public
@@ -47,5 +47,4 @@ The delivered foundation preserves the existing lifecycle version and execution-
 an additional admission check; it does not replace optimistic versions, heartbeat capability
 tokens, or Kubernetes service-account boundaries. Production requires OIDC, TLS, session keys,
 tenant memberships, audit retention, and fail-closed configuration owned by the deployment. The
-remaining TLS, Console BFF session, and rollout work is listed in
-[implementation-plan.md](implementation-plan.md).
+remaining TLS and rollout work is listed in [implementation-plan.md](implementation-plan.md).

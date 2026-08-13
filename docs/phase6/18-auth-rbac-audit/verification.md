@@ -3,8 +3,9 @@
 ## Status
 
 Runtime foundation required by Slices 19 and 20 complete; IdentityService and AccessService
-administration complete with transactional audit. Production OIDC interop, bootstrap tooling
-hardening, and rollout remain tracked by the Slice 18 implementation plan.
+administration complete with transactional audit. The Console BFF session boundary is complete
+at repository level. Production OIDC interop, bootstrap tooling hardening, transport hardening,
+and rollout remain tracked by the Slice 18 implementation plan.
 
 ## Design Checks
 

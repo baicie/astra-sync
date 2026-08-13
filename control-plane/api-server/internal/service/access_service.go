@@ -213,7 +213,7 @@ func (s *AccessService) ListMembers(
 // membership row and the audit event in a single transactional unit.
 func (s *AccessService) GrantTenantRole(
 	ctx context.Context, request *controlv1.GrantTenantRoleRequest,
-) (*controlv1.TenantMember, error) {
+) (*controlv1.TenantMembership, error) {
 	if request == nil {
 		return nil, status.Error(codes.InvalidArgument, "request must not be nil")
 	}
@@ -251,12 +251,12 @@ func (s *AccessService) GrantTenantRole(
 		return nil, accessRepositoryError(err)
 	}
 	auditEvent.Attributes["authzRevision"] = view.AuthzRevision
-	return &controlv1.TenantMember{
-		PrincipalId: request.GetPrincipalId(),
-		Role:        string(role),
-		Active:      true,
-		GrantedAt:   timestamppb.New(now),
-		GrantedBy:   actorID,
+	return &controlv1.TenantMembership{
+		TenantId:      request.GetTenantId(),
+		Role:          string(role),
+		Active:        true,
+		GrantedAt:     timestamppb.New(now),
+		AuthzRevision: view.AuthzRevision,
 	}, nil
 }
 

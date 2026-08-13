@@ -26,6 +26,10 @@ const (
 // IdentityServiceClient is the client API for IdentityService service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+//
+// IdentityService exposes caller-safe projections of the authenticated
+// principal and the tenant memberships the API Server has resolved for it.
+// The API never returns platform-only fields through this service.
 type IdentityServiceClient interface {
 	GetCurrentPrincipal(ctx context.Context, in *GetCurrentPrincipalRequest, opts ...grpc.CallOption) (*Principal, error)
 	ListTenants(ctx context.Context, in *ListTenantsRequest, opts ...grpc.CallOption) (*ListTenantsResponse, error)
@@ -62,6 +66,10 @@ func (c *identityServiceClient) ListTenants(ctx context.Context, in *ListTenants
 // IdentityServiceServer is the server API for IdentityService service.
 // All implementations must embed UnimplementedIdentityServiceServer
 // for forward compatibility
+//
+// IdentityService exposes caller-safe projections of the authenticated
+// principal and the tenant memberships the API Server has resolved for it.
+// The API never returns platform-only fields through this service.
 type IdentityServiceServer interface {
 	GetCurrentPrincipal(context.Context, *GetCurrentPrincipalRequest) (*Principal, error)
 	ListTenants(context.Context, *ListTenantsRequest) (*ListTenantsResponse, error)

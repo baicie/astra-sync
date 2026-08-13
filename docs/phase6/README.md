@@ -9,8 +9,8 @@ replace persisted raw credentials with auditable, epoch-fenced external Secret r
 The Slice 18 runtime foundation used by Slices 19 and 20 is implemented; production
 enablement remains guarded by explicit operator-controlled rollout gates. Slice 21 closes the
 tenant audit investigation loop with a bounded, read-audited API and Console activity view.
-Phase 6 remains in progress because the Console BFF session boundary, transport hardening,
-and production identity rollout are not yet delivered.
+Phase 6 remains in progress because transport hardening and production identity rollout are
+not yet delivered.
 
 ## Roadmap
 
@@ -78,9 +78,9 @@ AccessService administration are implemented. Identity proof still stays at an e
 provider, tenant roles still live in local PostgreSQL state, and permissions are still
 enforced independently in the API Server. Audit records are appended transactionally with
 the data change they describe. The Console uses opaque server-side sessions and same-origin
-CSRF protection. The Console BFF session boundary, transport hardening, and production IdP
-rollout remain tracked by the Slice 18 implementation plan; production also requires
-deployment-owned TLS, key, membership, and retention configuration.
+CSRF protection. Transport hardening and production IdP rollout remain tracked by the Slice 18
+implementation plan; production also requires deployment-owned TLS, key, membership, and
+retention configuration.
 
 Slice 19 reuses the durable desired-state Job lifecycle, requires expected versions and
 idempotency for operator writes, distinguishes accepted commands from asynchronous convergence,

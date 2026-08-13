@@ -31,9 +31,13 @@ const (
 // AccessServiceClient is the client API for AccessService service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+//
+// AccessService manages tenant-scoped membership and platform-level role
+// grants. The service writes both the membership/role row and the matching
+// audit event in the same transaction; the audit write is not optional.
 type AccessServiceClient interface {
 	ListMembers(ctx context.Context, in *ListMembersRequest, opts ...grpc.CallOption) (*ListMembersResponse, error)
-	GrantTenantRole(ctx context.Context, in *GrantTenantRoleRequest, opts ...grpc.CallOption) (*TenantMember, error)
+	GrantTenantRole(ctx context.Context, in *GrantTenantRoleRequest, opts ...grpc.CallOption) (*TenantMembership, error)
 	RevokeTenantRole(ctx context.Context, in *RevokeTenantRoleRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	ListRoles(ctx context.Context, in *ListRolesRequest, opts ...grpc.CallOption) (*ListRolesResponse, error)
 	GrantPlatformRole(ctx context.Context, in *GrantPlatformRoleRequest, opts ...grpc.CallOption) (*PlatformRoleGrant, error)
@@ -58,9 +62,9 @@ func (c *accessServiceClient) ListMembers(ctx context.Context, in *ListMembersRe
 	return out, nil
 }
 
-func (c *accessServiceClient) GrantTenantRole(ctx context.Context, in *GrantTenantRoleRequest, opts ...grpc.CallOption) (*TenantMember, error) {
+func (c *accessServiceClient) GrantTenantRole(ctx context.Context, in *GrantTenantRoleRequest, opts ...grpc.CallOption) (*TenantMembership, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(TenantMember)
+	out := new(TenantMembership)
 	err := c.cc.Invoke(ctx, AccessService_GrantTenantRole_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
@@ -111,9 +115,13 @@ func (c *accessServiceClient) RevokePlatformRole(ctx context.Context, in *Revoke
 // AccessServiceServer is the server API for AccessService service.
 // All implementations must embed UnimplementedAccessServiceServer
 // for forward compatibility
+//
+// AccessService manages tenant-scoped membership and platform-level role
+// grants. The service writes both the membership/role row and the matching
+// audit event in the same transaction; the audit write is not optional.
 type AccessServiceServer interface {
 	ListMembers(context.Context, *ListMembersRequest) (*ListMembersResponse, error)
-	GrantTenantRole(context.Context, *GrantTenantRoleRequest) (*TenantMember, error)
+	GrantTenantRole(context.Context, *GrantTenantRoleRequest) (*TenantMembership, error)
 	RevokeTenantRole(context.Context, *RevokeTenantRoleRequest) (*emptypb.Empty, error)
 	ListRoles(context.Context, *ListRolesRequest) (*ListRolesResponse, error)
 	GrantPlatformRole(context.Context, *GrantPlatformRoleRequest) (*PlatformRoleGrant, error)
@@ -128,7 +136,7 @@ type UnimplementedAccessServiceServer struct {
 func (UnimplementedAccessServiceServer) ListMembers(context.Context, *ListMembersRequest) (*ListMembersResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListMembers not implemented")
 }
-func (UnimplementedAccessServiceServer) GrantTenantRole(context.Context, *GrantTenantRoleRequest) (*TenantMember, error) {
+func (UnimplementedAccessServiceServer) GrantTenantRole(context.Context, *GrantTenantRoleRequest) (*TenantMembership, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GrantTenantRole not implemented")
 }
 func (UnimplementedAccessServiceServer) RevokeTenantRole(context.Context, *RevokeTenantRoleRequest) (*emptypb.Empty, error) {

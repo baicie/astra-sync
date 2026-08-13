@@ -2,10 +2,9 @@ syntax = "proto3";
 
 package astra.control.v1;
 
-import "google/protobuf/empty.proto";
 import "google/protobuf/timestamp.proto";
 
-option go_package = "io.astrasync/control-plane/api-server/gen/go/v1;identityv1";
+option go_package = "io.astrasync/control-plane/api-server/gen/go/v1;jobv1";
 option java_multiple_files = true;
 option java_package = "io.astrasync.control.v1";
 option java_outer_classname = "ControlPlaneIdentityProto";

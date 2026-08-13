@@ -54,8 +54,8 @@ focuses on a single property.
 
 ## Future Coverage
 
-- IdP discovery / JWKS rotation tests require a live OIDC mock and are out
-  of scope for these in-process tests. They are covered by the Slice 21
-  PostgreSQL integration suite plus manual staging validation.
+- IdP discovery and JWKS rotation are covered by the `console/internal/oidc`
+  unit tests. Interoperability with the deployment's real identity provider
+  still requires staging validation.
 - Cross-origin browser fetch behavior is covered by the CSP test fixtures
   shipped with the static web assets and is not repeated here.

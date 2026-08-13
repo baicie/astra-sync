@@ -35,12 +35,12 @@
 
 ## 3. Console BFF
 
-- [ ] Add login, callback, logout, current-session, and tenant-list routes.
-- [ ] Implement Authorization Code with PKCE, state/nonce validation, opaque session cookies, token
+- [x] Add login, callback, logout, current-session, and tenant-list routes.
+- [x] Implement Authorization Code with PKCE, state/nonce validation, opaque session cookies, token
   encryption, rotation, idle/absolute expiry, and revocation.
-- [ ] Forward access tokens to the API and derive tenant selection from authorized membership.
-- [ ] Treat `CONSOLE_NAMESPACE` only as an optional deployment upper bound.
-- [ ] Add CSRF and same-origin foundations before Slice 19 enables mutations.
+- [x] Forward access tokens to the API and derive tenant selection from authorized membership.
+- [x] Treat `CONSOLE_NAMESPACE` only as an optional deployment upper bound.
+- [x] Add CSRF and same-origin foundations before Slice 19 enables mutations.
 
 ## 4. Tenant and Role Administration
 
