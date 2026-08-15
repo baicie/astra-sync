@@ -244,19 +244,19 @@ func productionConfigValues(t *testing.T) map[string]string {
 	t.Helper()
 	caFile := writeTempFile(t, "testdata", "production-client-ca.crt", []byte(testPEM))
 	return map[string]string{
-		"DATABASE_URL":                            "postgresql://example/astrasync",
-		"APP_ENV":                                 "production",
-		"AUTH_MODE":                               "oidc",
-		"OIDC_ISSUER":                             "https://issuer.example",
-		"OIDC_AUDIENCE":                           "astrasync",
-		"TLS_CERTIFICATE_FILE":                    "server.crt",
-		"TLS_PRIVATE_KEY_FILE":                    "server.key",
-		"CATALOG_TOKEN_KEY":                       "0123456789abcdef0123456789abcdef",
-		"TRUSTED_PROXY_CIDRS":                     "10.0.0.0/8",
+		"DATABASE_URL":         "postgresql://example/astrasync",
+		"APP_ENV":              "production",
+		"AUTH_MODE":            "oidc",
+		"OIDC_ISSUER":          "https://issuer.example",
+		"OIDC_AUDIENCE":        "astrasync",
+		"TLS_CERTIFICATE_FILE": "server.crt",
+		"TLS_PRIVATE_KEY_FILE": "server.key",
+		"CATALOG_TOKEN_KEY":    "0123456789abcdef0123456789abcdef",
+		"TRUSTED_PROXY_CIDRS":  "10.0.0.0/8",
 		"COMPILER_VALIDATION_TLS_CERTIFICATE_FILE": "client.crt",
 		"COMPILER_VALIDATION_TLS_PRIVATE_KEY_FILE": "client.key",
 		"COMPILER_VALIDATION_TLS_CA_FILE":          "ca.crt",
-		"MTLS_CLIENT_CA_FILE":                     caFile,
+		"MTLS_CLIENT_CA_FILE":                      caFile,
 	}
 }
 
@@ -311,7 +311,7 @@ func TestLoadConfigEnforcesTrustedProxyCIDRs(t *testing.T) {
 		"COMPILER_VALIDATION_TLS_PRIVATE_KEY_FILE": "client.key",
 		"COMPILER_VALIDATION_TLS_CA_FILE":          "ca.crt",
 		"MTLS_REQUIRE_CLIENT_CERT":                 "true",
-		"MTLS_CLIENT_CA_FILE": writeTempFile(t, "testdata", "trusted-proxy-ca.crt", []byte(testPEM)),
+		"MTLS_CLIENT_CA_FILE":                      writeTempFile(t, "testdata", "trusted-proxy-ca.crt", []byte(testPEM)),
 	}
 	if _, err := loadConfig(func(key string) string { return values[key] }); err == nil {
 		t.Fatal("expected production TRUSTED_PROXY_CIDRS gate")

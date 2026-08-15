@@ -65,7 +65,7 @@ func TestLoadConfigEnforcesProductionTLSAndTrustedProxy(t *testing.T) {
 		"CONSOLE_SESSION_KEY":     strings.Repeat("k", 32),
 		"CONSOLE_API_TLS_CA_FILE": "api-ca.crt",
 	}
-if _, err := loadConfig(func(key string) string { return values[key] }); err == nil ||
+	if _, err := loadConfig(func(key string) string { return values[key] }); err == nil ||
 		!strings.Contains(err.Error(), "CONSOLE_API_CLIENT_CERT_FILE") {
 		t.Fatalf("expected production Console client certificate gate, got %v", err)
 	}

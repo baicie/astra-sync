@@ -273,7 +273,7 @@ type certificatePair struct {
 	certificate string
 	privateKey  string
 	clientCA    string
-	clientCert string
+	clientCert  string
 	clientKey   string
 }
 
