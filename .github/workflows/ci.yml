@@ -311,6 +311,30 @@ jobs:
             --set jobSpec.existingSecret=job-spec \
             --set coordinator.progress.existingClaim=progress > /dev/null
 
+  security:
+    name: Repository security checks
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: '1.22.x'
+          cache: true
+          cache-dependency-path: |
+            control-plane/go.mod
+            control-plane/api-server/go.mod
+            control-plane/auth/go.mod
+            console/go.mod
+
+      - name: Run transport security gate
+        run: make check-security
+
   container-images:
     name: Build ${{ matrix.name }} image
     runs-on: ubuntu-latest
