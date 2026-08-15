@@ -28,6 +28,7 @@ workflow layer rather than another Job model.
 - [Workflow matrix](workflow-matrix.md)
 - [Validation and secrets](validation-and-secrets.md)
 - [Implementation plan](implementation-plan.md)
+- [Operator enablement](enablement.md)
 - [Design verification](verification.md)
 - [ADR-038: Desired-state Job Mutation Workflows](../../adr/adr-038-desired-state-job-mutation-workflows.md)
 - [ADR-039: Canonical Side-effect-free JobSpec Validation](../../adr/adr-039-canonical-side-effect-free-jobspec-validation.md)

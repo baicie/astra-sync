@@ -59,6 +59,7 @@ type grpcBackend struct {
 	validation  jobv1.JobValidationServiceClient
 	catalog     jobv1.ConnectorCatalogServiceClient
 	connections jobv1.ConnectionServiceClient
+	audit       jobv1.AuditServiceClient
 }
 
 func (b grpcBackend) ListJobs(ctx context.Context, request *jobv1.ListJobsRequest) (*jobv1.ListJobsResponse, error) {
@@ -123,6 +124,9 @@ func (b grpcBackend) TestConnection(ctx context.Context, request *jobv1.TestConn
 }
 func (b grpcBackend) GetConnectionTest(ctx context.Context, request *jobv1.GetConnectionTestRequest) (*jobv1.ConnectionTest, error) {
 	return b.connections.GetConnectionTest(ctx, request)
+}
+func (b grpcBackend) ListAuditEvents(ctx context.Context, request *jobv1.ListAuditEventsRequest) (*jobv1.ListAuditEventsResponse, error) {
+	return b.audit.ListAuditEvents(ctx, request)
 }
 
 func main() {
@@ -210,7 +214,8 @@ func run(ctx context.Context, configuration config) error {
 	}
 	defer connection.Close()
 	backend := grpcBackend{jobs: jobv1.NewJobServiceClient(connection), validation: jobv1.NewJobValidationServiceClient(connection),
-		catalog: jobv1.NewConnectorCatalogServiceClient(connection), connections: jobv1.NewConnectionServiceClient(connection)}
+		catalog: jobv1.NewConnectorCatalogServiceClient(connection), connections: jobv1.NewConnectionServiceClient(connection),
+		audit: jobv1.NewAuditServiceClient(connection)}
 
 	var sessionManager server.SessionManager
 	var authRepository *authpostgres.Repository
@@ -342,3 +347,4 @@ var _ server.JobMutationClient = grpcBackend{}
 var _ server.JobValidator = grpcBackend{}
 var _ server.CatalogReader = grpcBackend{}
 var _ server.ConnectionClient = grpcBackend{}
+var _ server.AuditReader = grpcBackend{}

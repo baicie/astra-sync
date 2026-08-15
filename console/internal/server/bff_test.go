@@ -51,7 +51,10 @@ func (f *fakeSessions) BeginLogin(context.Context, string) (authflow.LoginStart,
 func (f *fakeSessions) CompleteLogin(context.Context, string, string, string) (authflow.Session, string, error) {
 	return authflow.Session{}, "", status.Error(codes.Unimplemented, "not used")
 }
-func (f *fakeSessions) Resolve(context.Context, string) (authflow.Session, error) {
+func (f *fakeSessions) Resolve(_ context.Context, sessionID string) (authflow.Session, error) {
+	if sessionID == "" {
+		return authflow.Session{}, auth.ErrUnauthenticated
+	}
 	return f.session, nil
 }
 func (f *fakeSessions) ValidateCSRF(session authflow.Session, token string) bool {
@@ -62,6 +65,7 @@ func (f *fakeSessions) Logout(context.Context, authflow.Session) error { return 
 type fakeBFFBackend struct {
 	createRequest *jobv1.CreateConnectionRequest
 	updateRequest *jobv1.UpdateConnectionRequest
+	auditRequest  *jobv1.ListAuditEventsRequest
 	updateError   error
 	authorization string
 }
@@ -148,6 +152,13 @@ func (f *fakeBFFBackend) TestConnection(context.Context, *jobv1.TestConnectionRe
 func (f *fakeBFFBackend) GetConnectionTest(context.Context, *jobv1.GetConnectionTestRequest) (*jobv1.ConnectionTest, error) {
 	return &jobv1.ConnectionTest{}, nil
 }
+func (f *fakeBFFBackend) ListAuditEvents(ctx context.Context, request *jobv1.ListAuditEventsRequest) (*jobv1.ListAuditEventsResponse, error) {
+	f.capture(ctx)
+	f.auditRequest = request
+	return &jobv1.ListAuditEventsResponse{Events: []*jobv1.AuditEvent{{
+		EventId: "event-1", EventType: "job.start", ActorId: "principal-1", Outcome: "CHANGED",
+	}}}, nil
+}
 
 func testDescriptor() *jobv1.ConnectorDescriptor {
 	return &jobv1.ConnectorDescriptor{Name: "jdbc", Options: []*jobv1.ConnectorOptionDefinition{
@@ -229,8 +240,50 @@ func TestBFFRejectsRawSecretAndMapsCASConflict(t *testing.T) {
 	}
 }
 
+func TestBFFAuditQueryDerivesTenantAndForwardsBoundedFilters(t *testing.T) {
+	backend := &fakeBFFBackend{}
+	handler := newBFFHandler(t, backend)
+	response := bffRequest(handler, http.MethodGet,
+		"/api/audit-events?from=2026-08-09T00%3A00%3A00Z&event_type=job.start&outcome=CHANGED&page_size=25", "",
+		map[string]string{"X-Astra-Tenant-ID": testTenantID})
+	if response.Code != http.StatusOK || backend.auditRequest == nil ||
+		backend.auditRequest.GetTenantId() != testTenantID || backend.auditRequest.GetPageSize() != 25 ||
+		len(backend.auditRequest.GetEventTypes()) != 1 || backend.authorization != "Bearer access-token-sentinel" {
+		t.Fatalf("unexpected audit BFF request: code=%d body=%s request=%+v", response.Code, response.Body.String(), backend.auditRequest)
+	}
+	response = bffRequest(handler, http.MethodGet,
+		"/api/audit-events?page_token=opaque&outcome=CHANGED", "",
+		map[string]string{"X-Astra-Tenant-ID": testTenantID})
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("expected mixed audit token/filter rejection, got %d", response.Code)
+	}
+}
+
+func TestBFFAuditQueryRejectsMembershipWithoutAuditPermission(t *testing.T) {
+	backend := &fakeBFFBackend{}
+	sessions := newFakeSessions(t)
+	membership, err := auth.NewMembership(testTenantID, true, auth.PermissionJobsRead)
+	if err != nil {
+		t.Fatalf("create restricted membership: %v", err)
+	}
+	membership.TenantNamespace = testNamespace
+	sessions.session.Principal.Memberships[testTenantID] = membership
+	console, err := server.NewWithConfig(server.Config{
+		Backend: backend, Sessions: sessions, AuthMode: "oidc", PublicOrigin: "https://console.example",
+	})
+	if err != nil {
+		t.Fatalf("create restricted BFF server: %v", err)
+	}
+	response := bffRequest(console.Handler(), http.MethodGet, "/api/audit-events", "",
+		map[string]string{"X-Astra-Tenant-ID": testTenantID})
+	if response.Code != http.StatusForbidden || backend.auditRequest != nil {
+		t.Fatalf("audit request bypassed BFF permission check: code=%d request=%+v", response.Code, backend.auditRequest)
+	}
+}
+
 func bffRequest(handler http.Handler, method, path, body string, headers map[string]string) *httptest.ResponseRecorder {
 	request := httptest.NewRequest(method, path, strings.NewReader(body))
+	request.AddCookie(&http.Cookie{Name: "__Host-astra_session", Value: "opaque-session"})
 	for key, value := range headers {
 		request.Header.Set(key, value)
 	}

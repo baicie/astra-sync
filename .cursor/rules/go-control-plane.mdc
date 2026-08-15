@@ -1,0 +1,125 @@
+---
+description: AstraSync 控制面 Go 代码质量与结构约定(适用于 control-plane、console、auth、api-server 等所有 Go 模块)
+globs:
+  - control-plane/**/*.go
+  - control-plane/**/go.mod
+  - console/**/*.go
+  - control-plane/auth/**/*.sql
+alwaysApply: false
+---
+
+# AstraSync Go 控制面规则
+
+本规则仅适用于 AstraSync 控制面 Go 代码。进入相关目录前请先阅读根 `AGENTS.md`,
+冲突时以根文件为准。
+
+## 1. 模块与包
+
+- 每个子模块都是 **独立 Go module**(各自 `go.mod`),不要跨模块用 `replace` 引用非发布版本。
+- 包名小写、不带下划线(如 `service`、`auth`、`repository`、`audit`),命名要与目录名一致。
+- 业务逻辑放在 `internal/<bounded-context>/...`,对外可见入口在 `<module>/cmd/...` 或 `pkg/...`。
+- 新增公共类型 / 接口前先在 `docs/adr/` 检索是否已有对应决策,没有就 **先写 ADR 再写代码**。
+
+## 2. 命名 / 风格
+
+- `NewXxx` 构造函数 + `WithXxx` 函数式选项(参考 `service.NewAccessService`、
+  `service.WithAccessClock`),不要造 setter 风格构造器。
+- 错误类型必须 **可包装、可比较**:
+  - 领域错误使用 `var ErrXxx = errors.New(...)` 或自定义类型实现 `Is`/`Unwrap`。
+  - 不得把 `fmt.Errorf("...%v", err)` 字符串化掉上下文,使用 `%w`。
+- gRPC 错误一律走 `status.Error(codes.X, msg)` 或 `status.Errorf(...)`,**禁止**返回 `errors.New` / `fmt.Errorf` 给 handler。
+- 字段、变量使用 **驼峰**;常量使用 **驼峰或 SCREAMING_SNAKE**(项目惯例:`accessPageSizeDefault`,
+  `RoleTenantAdmin`)。同一个包内必须保持一致。
+- 接口命名以行为描述为后缀:`Repository`、`Authorizer`、`AuditWriter`、`IdentityServiceRepository`;
+  不要用 `I*` 前缀。
+- 公开类型必须带 **godoc 注释**(以类型名开头)。
+- ctx 必须是函数第一个参数,名为 `ctx`。
+
+## 3. 错误处理与状态码
+
+| 场景 | gRPC code |
+| --- | --- |
+| 参数非法 / 缺失 / 越界 | `codes.InvalidArgument` |
+| 主体未认证 | `codes.Unauthenticated` |
+| 已认证但无权 | `codes.PermissionDenied` |
+| 找不到资源 | `codes.NotFound` |
+| 主体存在但状态不允许操作 | `codes.FailedPrecondition` |
+| 资源冲突(幂等键重复但语义不同) | `codes.AlreadyExists` |
+| 数据库/下游内部故障 | `codes.Internal` 且必须 **脱敏** 内部细节 |
+| 主动取消 | `codes.Canceled` |
+| 操作尚未实现 | `codes.Unimplemented` |
+
+- 不要把 `pq`、`pgx`、`etcd clientv3` 之类的内部错误细节直接返回给调用方;写一个 wrapper
+  把消息替换为稳定的对外文案,内部错误通过 zap / structured log 输出。
+- `context.DeadlineExceeded` / `context.Canceled` 直接透传,不要重新包装为 `Internal`。
+
+## 4. 依赖注入与可测试性
+
+- 任何需要 **时钟**、**UUID 生成**、**随机源**、**外部 client** 的组件,都必须允许通过函数式选项或
+  构造函数参数注入 fake;测试用 `service.WithAccessClock(...)`、`service.WithAccessUIDSource(...)`。
+- 测试中使用 **fake repository / fake clock** 优于 mock 框架,只在跨边界(gRPC client)处使用 mock。
+- repository 接口要 **只声明 service 真正用到的方法**,不要把全部仓储方法搬过来(ISP)。
+- 不要在 service 内直接 `os.Getenv` / `time.Now` / `uuid.New()`;通过 ctx、option、注入函数传入。
+
+## 5. 事务与一致性
+
+- 任何写 RBAC / membership / role / connection / secret 的 service,必须保证
+  "数据行 + 审计行" 同事务原子化(参考 ADR-037、ADR-041)。
+- 涉及 **幂等键** 的写入:
+  - 长度下限 16 字符、上限 128 字符;
+  - 必须存储在唯一约束列,重复键视为同请求直接返回前次结果;
+  - 失败原因不同(语义冲突)返回 `codes.AlreadyExists`。
+- 凭证(密码、token、cookie)不进数据库明文;外部 secret 走外部系统(ADR-041)。
+
+## 6. 日志与可观测性
+
+- 使用 zap(`go.uber.org/zap`),logger 在 `cmd/<service>/main.go` 中创建并注入。
+- 业务错误统一通过 `status.FromError(...)` 提取 code,日志中携带 `request_id`、`tenant_id`、
+  `principal_id`、`job_id`、`connection_id`(如有)。
+- 不要在日志中打印:
+  - 完整 HTTP body / SQL / protobuf payload
+  - 密码、token、cookie、idempotency key 原文
+  - JDBC URL 中的 password 段(应先 redact)
+
+## 8. 并发
+
+- 长生命周期对象(`AccessService`、`Scheduler`、`Controller`)持有 mutex 时遵守
+  `sync.Mutex`;不要在持锁时调用外部 RPC。
+- goroutine 必须可追踪:启动时记录 `task="..."` 字段,关闭时通过 `defer` 收尾。
+- `errgroup.Group` 用于 fan-out + cancel 传播;`context.CancelCauseFunc` 写入可读原因。
+
+## 9. 测试约定
+
+- 测试文件命名:`<source>_test.go`,包名 `service_test`(black-box)优先,白盒测试使用同包名 `service`。
+- 表驱动 `t.Run("case_name", func(t *testing.T) {...})`,case 名小写下划线。
+- 使用 `t.Cleanup(...)` 而非 `defer ...(t)`。
+- 期望错误统一通过 `status.Code(err)` 判断,不要字符串匹配。
+- 数据库相关测试放进 `*_integration_test.go`(build tag `//go:build integration`,
+  与单元测试隔离),CI 单独跑。
+
+## 10. 禁止
+
+- 在 control-plane 中依赖 `engine`、`formats`、`connectors` 任何包(方向性:控制面不引用数据面)。
+- 把秘密写进 repo 或 fixture(`change-me` 这样的占位文本必须配套 README 提示,不要让它流入任何线上 yaml)。
+- 直接 panic 处理业务错误。
+- 使用 `reflect.DeepEqual` 比较包含 unexported 字段的结构体;暴露比较字段或写专门的 `Equal` 方法。
+- 使用 `time.Sleep` 同步等待异步事件 — 用 channel / `errgroup.Wait`。
+- 在 service 中做 HTTP/gRPC client 调用且没有超时;所有外部 client 必须有 `WithTimeout`。
+
+## 11. 提交前自检
+
+```bash
+cd control-plane/<module>
+go vet ./...
+go test ./...
+go mod tidy
+```
+
+根目录再跑:
+
+```bash
+make vet-go
+make check
+```
+
+`catalog-check` 在改动 `deployment/catalog/` 或 connector descriptor 时必须通过。

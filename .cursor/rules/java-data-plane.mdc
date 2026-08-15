@@ -1,0 +1,153 @@
+---
+description: AstraSync 数据面 Java 21 代码质量、运行时与有界执行约定(适用于 engine、connectors、formats、transforms、cli 等)
+globs:
+  - engine/**/*.java
+  - connectors/**/*.java
+  - formats/**/*.java
+  - transforms/**/*.java
+  - cli/**/*.java
+  - protocol/**/*.java
+  - connector-api/**/*.java
+alwaysApply: false
+---
+
+# AstraSync Java 数据面规则
+
+本规则适用于 AstraSync 数据面全部 Java 21 模块(配合 Spotless + palantir-java-format)。
+进入相关目录前请先阅读根 `AGENTS.md`,冲突时以根文件为准。
+
+## 1. 语言与构建
+
+- 必须 Java 21(`java.version=21`)。允许使用:
+  - `record`、`sealed class`、`pattern matching`、`switch expressions`。
+  - 虚拟线程(`Thread.ofVirtual()`) — 仅在 I/O 密集型路径使用,且必须配合 `try-with-resources` 关闭。
+- **禁止**使用:
+  - `sun.*` 私有 API;
+  - 过时 API(`new Date()`,`SimpleDateFormat`,`Thread.stop` 等);
+  - 反射访问未导出包(除非有 `@SuppressWarnings("removal")` 并在 ADR 中记录)。
+- 构建通过 `make build-java` / `make test-java`;CI 等价命令是 `mvn -B verify`。
+
+## 2. 包结构与模块
+
+- 每个模块通过 `<parent>` 引用根 `pom.xml`;**禁止**在子模块 hardcode 版本。
+- 包命名:`io.astrasync.<module>.<bounded-context>`。
+- SPI 类(`Source`、`Sink`、`SourceSplit`、`BatchSource`…)只允许放在 `connector-api` 及其子模块。
+  数据面实现模块禁止反过来引用 `connector-api` 测试用例以外的内部类。
+
+## 3. 命名与风格
+
+- 类名 `PascalCase`、方法 / 字段 `camelCase`、常量 `SCREAMING_SNAKE_CASE`。
+- 公共 API 必须 Javadoc,以 **动词或名词短语** 开头,并写明线程安全语义("not thread-safe"
+  / "thread-safe; calls must ...")。
+- `record` 的 compact constructor 用于参数校验,例如:
+
+  ```java
+  public record BatchTask(...) {
+      public BatchTask {
+          Objects.requireNonNull(split, "split must not be null");
+          if (maxBatchRecords <= 0) {
+              throw new IllegalArgumentException("maxBatchRecords must be positive");
+          }
+      }
+  }
+  ```
+- 不允许魔法数字;常量提到常量类或枚举。
+- 私有构造器工具类必须显式 `private` 构造并抛 `UnsupportedOperationException`。
+
+## 4. 不可变 + 有界 + 显式背压(架构强制)
+
+- 数据流的每个对象都应当 **不可变**(record、不可变集合、`Collections.unmodifiableXxx`)。
+- 队列、batch、内存缓冲必须 **有界**(`BlockingQueue` / 固定大小数组 / `AdaptiveBatchPolicy`)。
+  无界集合(`new ArrayList<>()` 累计)禁止出现在生产路径。
+- 背压必须 **显式**:拒绝策略、超时取消、丢弃 metrics,不要靠"线程够多就能撑住"。
+- 每个执行路径必须能在指定时间内被 **cooperative cancel**(`CooperativeCancellable`,
+  ADR-019):轮询 `Thread.interrupted()` 或 `Future` cancel,不要 `Thread.stop`。
+
+## 5. 错误处理
+
+| 场景 | 处理 |
+| --- | --- |
+| 参数非法 | `IllegalArgumentException` + 明确 message |
+| 状态不允许 | `IllegalStateException` |
+| 外部不可恢复 | 包装为领域异常(如 `ExchangeFailureException`、`EpochFencedException`) |
+| 预期可重试 | 重试策略 + metric;不要无限重试 |
+| catch 后什么都不做 | **禁止** |
+
+- 不要 `catch (Throwable t)` 后吞掉;若必须 catch(如顶层 runnable),要 log + rethrow。
+- 异常 message 不允许出现密码、连接串、敏感 PII。
+
+## 6. 并发
+
+- `ExecutorService` 必须显式 shutdown(`try-with-resources` 或 `shutdown()` +
+  `awaitTermination(timeout)`);拒绝处理用 `AbortPolicy` 或自定义 reject handler。
+- 共享状态用 `AtomicReference`、`VarHandle` 或 `ReentrantLock`;不要靠 `volatile` 做复合操作。
+- `synchronized` 仅用于短临界区;不要在持锁时调用外部 IO。
+- `ThreadLocal` 必须 `try-finally remove()`。
+
+## 7. 资源管理
+
+- JDBC / Netty / FS / Arrow Vector 全部 **try-with-resources**。
+- RocksDB、Netty `EventLoopGroup`、`ScheduledExecutorService` 必须在 `close()` /
+  `shutdown()` 中按反向顺序释放。
+- I/O 路径必须设置 **超时**(Socket / JDBC / HTTP),不允许无限阻塞。
+
+## 8. Checkpoint / Exactly-Once(架构强制)
+
+- 任何 sink 实现必须满足 **transactional** 或 **idempotent** 之一(ADR-027)。
+- Checkpoint barrier 必须沿所有 channel 传播,不能跳过 channel(违反 ADR-026)。
+- 一旦 `EpochFencedException` 抛出,worker 立即停止写并上报 coordinator;不允许继续用旧 epoch 提交。
+- Idempotent commit 必须显式记录 commit token,token 必须单调、可重放检测。
+
+## 9. CDC 边界(架构强制)
+
+- CDC source 仅允许是 native(基于 binlog / logical replication)的,不允许 polling 伪装成 CDC。
+- Snapshot → CDC handoff 期间必须保留 **low-watermark + schema history**,切换前后事务
+  边界必须明确;不允许出现"重放历史变更"。
+- Debezium / PG logical decoding 配置必须走项目封装(`connector-debezium`)。
+
+## 10. Arrow / 序列化
+
+- `VectorSchemaRoot`、`ArrowRecordBatch`、`ChannelBuffer` 都 **受原生内存** 管理,使用完必须 close;
+  跨方法传递时要写明 owner 转移语义("caller takes ownership" 等)。
+- 不允许在 `for` 循环中反复 `new FieldVector`;使用 Allocator + 复用。
+- Scalar mapping 走项目既定的 `ArrowValueMapper`,禁止把 Arrow 字段直接暴露到 SPI。
+
+## 11. 日志与可观测性
+
+- SLF4J + 项目约定的 `LoggerFactory.getLogger(<class>.class)`;**禁止** System.out / e.printStackTrace。
+- 日志格式由 `logback.xml` 统一控制;在业务代码中只调用 `logger.info("msg", arg1, arg2, ...)`,
+  不要 `String.format` 后再传。
+- 关键指标走 Micrometer / Prometheus:`checkpoint_duration_seconds`、`sink_commits_total` 等。
+
+## 12. 测试
+
+- JUnit 5 + AssertJ + Mockito(项目约定);不要引入新的测试框架除非 ADR 允许。
+- 测试类命名 `<Class>Test`;测试方法命名 `methodName_should_<expected>_when_<condition>`。
+- 集成测试包名 `...it`,Junit `@Tag("integration")`,Maven Failsafe 跑。
+- 不允许 `Thread.sleep` 在测试中等待异步事件 — 用 `Awaitility`。
+
+## 13. 禁止
+
+- 在数据面依赖控制面 Go 代码 / proto-gen-go。
+- 任何 `System.out.println`、`System.err.println`、`new RuntimeException().printStackTrace()`。
+- 把 sink / source 实现耦合到具体网络层(Netty / gRPC),必须通过 SPI 接口。
+- 在生产路径使用 `java.util.Random` — 改用 `ThreadLocalRandom` 或注入 `RandomGenerator`。
+- 引入新的 JSON 库(项目已用 Jackson);使用 `jackson` 既定模块。
+- 在 `record` 中持有可变引用(`List`、`Map`、`Date`、`VectorSchemaRoot`)。
+- 直接 `new Thread()` 启动长任务 — 走 `ExecutorService`。
+
+## 14. 提交前自检
+
+```bash
+mvn -B spotless:check
+mvn -B test
+mvn -B verify -Pintegration-tests   # 涉及 IT 时
+```
+
+根目录等价为:
+
+```bash
+make check
+make test-java
+make test-integration    # 可选
+```

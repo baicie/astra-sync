@@ -25,8 +25,62 @@ func TestRegistryCoversEveryPublicMethodExactly(t *testing.T) {
 		controlv1.JobValidationService_ServiceDesc,
 		controlv1.ConnectorCatalogService_ServiceDesc,
 		controlv1.ConnectionService_ServiceDesc,
+		controlv1.AuditService_ServiceDesc,
+		controlv1.IdentityService_ServiceDesc,
+		controlv1.AccessService_ServiceDesc,
 	); err != nil {
 		t.Fatalf("validate public method policy registry: %v", err)
+	}
+}
+
+func TestRegistryPublicMethodSkipsAuthorization(t *testing.T) {
+	const fullMethod = "/grpc.health.v1.Health/Check"
+	registry := authn.NewRegistry().PublicMethod(fullMethod)
+	if !registry.RequirePublicMethod(fullMethod) {
+		t.Fatalf("expected %s to be declared public", fullMethod)
+	}
+	membership, _ := auth.NewMembership(interceptorTenantID, true, auth.PermissionJobsRead)
+	principal := auth.Principal{ID: "p", Subject: "p", Active: true,
+		Memberships: map[string]auth.Membership{interceptorTenantID: membership}}
+	called := false
+	_, err := authn.Interceptor{
+		Authenticator: staticAuthenticator{principal: principal},
+		Authorizer:    auth.ContextAuthorizer{},
+		AuditWriter:   &memoryAudit{},
+		Registry:      registry,
+		Clock:         time.Now,
+		EventID:       func() string { return "ignored" },
+	}.Unary()(
+		context.Background(), nil,
+		&grpc.UnaryServerInfo{FullMethod: fullMethod},
+		func(context.Context, any) (any, error) { called = true; return nil, nil },
+	)
+	if err != nil || !called {
+		t.Fatalf("public method was not invoked: called=%v err=%v", called, err)
+	}
+}
+
+func TestRequestIDFromContextPropagatesAuditLabel(t *testing.T) {
+	registry := authn.NewRegistry()
+	audit := &memoryAudit{}
+	interceptor := authn.Interceptor{
+		Authenticator: staticAuthenticator{principal: auth.Principal{}},
+		Authorizer:    auth.ContextAuthorizer{},
+		AuditWriter:   audit,
+		Registry:      registry,
+		Clock:         time.Now,
+		EventID:       func() string { return "id" },
+	}
+	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs(
+		"x-request-id", "audit-7",
+	))
+	_, _ = interceptor.Unary()(
+		ctx, &controlv1.GetJobRequest{Name: "orders"},
+		&grpc.UnaryServerInfo{FullMethod: controlv1.JobService_GetJob_FullMethodName},
+		func(context.Context, any) (any, error) { return nil, nil },
+	)
+	if len(audit.events) != 1 || audit.events[0].RequestID != "audit-7" {
+		t.Fatalf("audit request ID not propagated: %+v", audit.events)
 	}
 }
 
@@ -105,6 +159,72 @@ func TestInterceptorDeniesCrossTenantBeforeHandlerAndAuditsSynchronously(t *test
 		t.Fatalf("cross-tenant request was not denied before handler: called=%v err=%v", called, err)
 	}
 	if len(audit.events) != 1 || audit.events[0].Outcome != "TENANT_DENIED" || audit.events[0].TenantID != "" {
+		t.Fatalf("unexpected denial audit: %+v", audit.events)
+	}
+}
+
+func TestInterceptorSelfScopeAcceptsCallerWithMatchingPermission(t *testing.T) {
+	membership, err := auth.NewMembership(interceptorTenantID, true, auth.PermissionDiagnosticsRead)
+	if err != nil {
+		t.Fatalf("membership: %v", err)
+	}
+	membership.TenantNamespace = "tenant-a"
+	principal := auth.Principal{
+		ID: "principal-1", Subject: "operator-1", Active: true, PolicyRevision: "1",
+		Memberships: map[string]auth.Membership{interceptorTenantID: membership},
+	}
+	audit := &memoryAudit{}
+	interceptor := authn.Interceptor{
+		Authenticator: staticAuthenticator{principal: principal},
+		Authorizer:    auth.ContextAuthorizer{},
+		AuditWriter:   audit,
+		Registry:      authn.NewRegistry(),
+		Clock:         time.Now,
+		EventID:       func() string { return "self-ok" },
+	}
+	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs("authorization", "Bearer valid-token"))
+	called := false
+	_, err = interceptor.Unary()(
+		ctx,
+		&controlv1.GetCurrentPrincipalRequest{},
+		&grpc.UnaryServerInfo{FullMethod: controlv1.IdentityService_GetCurrentPrincipal_FullMethodName},
+		func(context.Context, any) (any, error) { called = true; return nil, nil },
+	)
+	if err != nil || !called {
+		t.Fatalf("self-scope call was not allowed: called=%v err=%v", called, err)
+	}
+}
+
+func TestInterceptorSelfScopeRejectsCallerWithoutPermission(t *testing.T) {
+	membership, err := auth.NewMembership(interceptorTenantID, true, auth.PermissionJobsRead)
+	if err != nil {
+		t.Fatalf("membership: %v", err)
+	}
+	principal := auth.Principal{
+		ID: "principal-2", Subject: "viewer-1", Active: true, PolicyRevision: "1",
+		Memberships: map[string]auth.Membership{interceptorTenantID: membership},
+	}
+	audit := &memoryAudit{}
+	interceptor := authn.Interceptor{
+		Authenticator: staticAuthenticator{principal: principal},
+		Authorizer:    auth.ContextAuthorizer{},
+		AuditWriter:   audit,
+		Registry:      authn.NewRegistry(),
+		Clock:         time.Now,
+		EventID:       func() string { return "self-deny" },
+	}
+	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs("authorization", "Bearer valid-token"))
+	called := false
+	_, err = interceptor.Unary()(
+		ctx,
+		&controlv1.GetCurrentPrincipalRequest{},
+		&grpc.UnaryServerInfo{FullMethod: controlv1.IdentityService_GetCurrentPrincipal_FullMethodName},
+		func(context.Context, any) (any, error) { called = true; return nil, nil },
+	)
+	if status.Code(err) != codes.PermissionDenied || called {
+		t.Fatalf("self-scope call without permission was not denied: called=%v err=%v", called, err)
+	}
+	if len(audit.events) != 1 || audit.events[0].Outcome != "PERMISSION_DENIED" {
 		t.Fatalf("unexpected denial audit: %+v", audit.events)
 	}
 }

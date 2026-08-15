@@ -1,0 +1,117 @@
+---
+description: 仓库治理与流程 — Git 提交、ADR、文档、CI 与发布相关规则
+globs:
+  - .gitmessage
+  - .commitlintrc
+  - .githooks/**
+  - .github/**/*.yml
+  - .github/**/*.yaml
+  - docs/adr/**
+  - docs/**/*.md
+  - CHANGELOG.md
+  - README.md
+  - CONTRIBUTING.md
+alwaysApply: false
+---
+
+# AstraSync 仓库治理与流程规则
+
+适用于所有 git 提交、PR、ADR、文档改动与 GitHub Actions / 部署脚本。
+
+## 1. 提交
+
+- 严格遵循 **Conventional Commits**(`.commitlintrc` + `.githooks/commit-msg` 已强制)。
+- 允许 type:`build chore ci docs feat fix perf refactor revert style test`。
+- Subject:
+  - 小写、祈使句、不加句号、≤ 100 字符;
+  - 必须以 `revert:`、`type:` 或 `type(scope):` 开头。
+- Body:
+  - 解释 **为什么** 而不是做了什么;
+  - 段落 ≤ 100 字符宽;
+  - 引用 issue / ADR(例:`Refs ADR-038`)。
+- Breaking change:在 type/scope 后加 `!` 或 footer `BREAKING CHANGE: <说明>`。
+- Merge / Revert 自动提交跳过校验(hook 跳过 `Merge *` / `Revert *`)。
+
+## 2. 分支与 PR
+
+- 工作分支:`feature/<scope>-<short-desc>`、`fix/<scope>-<short-desc>`、
+  `chore/<scope>-<short-desc>`、`docs/<scope>`。
+- 主干:`main`(稳定) / `develop`(日常);`release/<version>` 用于发布准备。
+- PR 必须:
+  - 关联 issue / ADR 编号;
+  - 勾选 `CONTRIBUTING.md` PR Checklist;
+  - 通过 CI(单元 + 集成 + lint + catalog-check);
+  - 至少 1 名 code owner 评审。
+
+## 3. ADR(架构决策记录)
+
+- 任何架构级改动 → 新建 ADR(`docs/adr/adr-XXX-title.md`),并在 `docs/adr/README.md` 索引。
+- 模板:
+  ```markdown
+  # ADR-XXX: Title
+
+  ## Status
+  Proposed | Accepted | Deprecated | Superseded by ADR-YYY
+
+  ## Context
+  ...问题背景、约束、备选方案...
+
+  ## Decision
+  ...我们决定了什么以及为什么...
+
+  ## Consequences
+  ...带来的取舍...
+  ```
+- 状态变更(Accepted → Superseded / Deprecated)必须显式标注替代 ADR。
+- ADR 与代码互相引用:代码注释 / commit / PR 必须 cite ADR 编号。
+
+## 4. 文档
+
+- `docs/architecture.md` 是 **baseline**,任何不一致要先改 baseline 再改实现。
+- `docs/phase<N>/README.md` 描述当前阶段交付;每完成一个 MVP slice 必须更新对应 phase 文档。
+- `docs/connector-dev.md` 是新增 connector 的对外契约文档;任何 connector SPI 变更必须同步更新。
+- `README.md`、`CONTRIBUTING.md` 在发布窗口才允许结构性更新;平时只追加。
+
+## 5. CHANGELOG
+
+- 顶层 `CHANGELOG.md`(如不存在则引导创建)按 **Keep a Changelog** 风格组织:
+  `Added / Changed / Deprecated / Removed / Fixed / Security`。
+- PR title 必须能在 CHANGELOG 段落里被识别(type + scope);release 阶段由 maintainer 统一归并。
+
+## 6. CI / GitHub Actions
+
+- `.github/workflows/` 必须保留:
+  - 单元测试(Java + Go);
+  - `spotless:check`、`go vet`、Buf lint;
+  - `catalog-check`;
+  - Docker 镜像构建(`docker-build`);
+  - Helm chart lint(`helm-lint`)。
+- 第三方 actions 必须 pin 到 **commit SHA**(非 tag),理由写在 `dependabot.yml` 注释。
+- 不允许在 workflow 中 inline 执行 `curl | sh` 之类命令,必须下载带 checksum 的二进制。
+- dependabot.yml 更新依赖后,合并前需验证 Maven `mvn -B verify` / `go test ./...`。
+
+## 7. Git hooks
+
+- 本地开发必须安装 `.githooks/`:
+
+  ```bash
+  ./scripts/install-git-hooks.sh     # Linux / WSL
+  ./scripts/install-git-hooks.ps1    # PowerShell
+  ```
+
+- 不要修改 `core.hooksPath` 指向其他目录;CI 通过 commitlint + lint 兜底。
+- hook 跳过 `Merge *` / `Revert *` / 自动机器人提交。
+
+## 8. 部署制品
+
+- `deployment/helm/<chart>/Chart.yaml` 版本字段在 release 时由 maintainer 统一 bump。
+- `deployment/operator/config/crd/bases/**` 由 `make crd-generate` 生成,**禁止**手改。
+- 任何 Docker 镜像 tag 默认跟随 git tag;只允许 `latest`(dev) / `<version>`(release)。
+
+## 9. 治理禁止
+
+- 直推 `main` / `develop`(必须走 PR + review)。
+- 在 PR 中混和不相关改动(请拆分多个 PR,使用 `split-to-prs` skill)。
+- 关闭失败 CI 后强行合入(`gh pr merge --admin` / squash 后 force push 修复)。
+- 删除其他作者的提交 / 注释而未征得同意。
+- 修改 `.gitignore` 忽略已有 tracked 文件;若必须,先 `git rm --cached` 并在 PR 中说明。

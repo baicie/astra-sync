@@ -3,7 +3,9 @@
 .PHONY: all build build-java build-go build-connectors test test-java test-go vet-go clean install format check verify catalog-check docker-build docker-push proto-generate proto-go-generate proto-lint crd-generate install-hooks
 
 GO_MODULES := control-plane control-plane/api-server control-plane/controller control-plane/scheduler control-plane/catalog control-plane/auth console
+JAVA_PROTO_MODULES := connector-api,protocol/data-protocol,protocol/connector-protocol,protocol/worker-protocol,control-plane/compiler-validation
 CONTROLLER_GEN_VERSION := v0.15.0
+ADMIN_BIN := control-plane/auth/cmd/admin
 
 # Default target
 all: build
@@ -118,7 +120,7 @@ docker-push:
 # Generate protobuf
 proto-generate:
 	@echo "Generating protobuf code..."
-	mvn protobuf:compile protobuf:compile-custom
+	mvn -B -ntp -pl $(JAVA_PROTO_MODULES) -am compile -DskipTests
 	$(MAKE) proto-go-generate
 
 proto-go-generate:
@@ -131,6 +133,14 @@ proto-lint:
 crd-generate:
 	@echo "Generating CRD manifests..."
 	cd control-plane/controller && GOTOOLCHAIN=go1.22.12 go run sigs.k8s.io/controller-tools/cmd/controller-gen@$(CONTROLLER_GEN_VERSION) crd paths=./api/v1 output:crd:artifacts:config=../../deployment/operator/config/crd/bases
+
+## Build the offline Slice 18 authentication administrator tool (astra-auth-admin).
+build-auth-admin:
+	cd $(ADMIN_BIN) && go build -o ../../../bin/astra-auth-admin .
+
+## Run the offline Slice 18 authentication administrator tests.
+test-auth-admin:
+	cd $(ADMIN_BIN) && go test ./...
 
 # Create a new connector
 new-connector:

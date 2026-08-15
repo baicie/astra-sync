@@ -28,6 +28,7 @@
         <button class="tab active" type="button" data-view="jobs">Jobs</button>
         <button class="tab" type="button" data-view="connections">Connections</button>
         <button class="tab" type="button" data-view="catalog">Connector catalog</button>
+        <button class="tab" id="audit-tab" type="button" data-view="audit" hidden>Activity</button>
       </nav>
 
       <main class="content" id="application" hidden>
@@ -91,6 +92,38 @@
               <div class="error-state" id="catalog-error" hidden></div>
             </section>
             <aside class="detail-panel" id="connector-detail"><div class="detail-placeholder"><strong>Select a connector</strong></div></aside>
+          </div>
+        </section>
+
+        <section class="view" id="audit-view" data-view-panel="audit" hidden>
+          <div class="page-heading">
+            <div><p class="eyebrow">SECURITY ACTIVITY</p><h1>Activity</h1></div>
+            <div class="heading-actions"><span class="summary" id="audit-summary"></span><button class="button button-quiet" id="audit-refresh-button" type="button">Refresh activity</button></div>
+          </div>
+          <div class="audit-workspace">
+            <section class="list-panel" aria-label="Tenant activity">
+              <div class="panel-heading audit-heading">
+                <h2>Audit events</h2>
+                <div class="audit-filters">
+                  <select class="compact-select" id="audit-range-filter" aria-label="Activity time range">
+                    <option value="24h">Last 24 hours</option><option value="7d">Last 7 days</option><option value="30d">Last 30 days</option>
+                  </select>
+                  <select class="compact-select" id="audit-outcome-filter" aria-label="Activity outcome">
+                    <option value="">All outcomes</option><option value="changed">Changed</option><option value="no-change">No change</option><option value="replayed">Replayed</option><option value="allowed">Allowed</option><option value="denied">Denied</option>
+                  </select>
+                </div>
+              </div>
+              <div class="table-wrap">
+                <table class="audit-table">
+                  <thead><tr><th>Time</th><th>Event</th><th>Outcome</th><th>Actor</th><th>Resource</th></tr></thead>
+                  <tbody id="audit-body"></tbody>
+                </table>
+              </div>
+              <div class="empty-state" id="audit-empty" hidden><strong>No activity</strong></div>
+              <div class="error-state" id="audit-error" hidden></div>
+              <div class="audit-pagination"><button class="button button-quiet" id="audit-load-older" type="button" hidden>Load older events</button></div>
+            </section>
+            <aside class="detail-panel" id="audit-detail"><div class="detail-placeholder"><strong>Select an event</strong></div></aside>
           </div>
         </section>
       </main>

@@ -25,6 +25,12 @@ type Policy struct {
 	Permission        auth.Permission
 	ResolvePermission func(any) (auth.Permission, error)
 	Scope             func(any) (string, error)
+	// SelfScope indicates the method targets the caller itself rather than a
+	// tenant-scoped resource. The interceptor skips the tenant membership
+	// check for self-scope methods; the service handler is responsible for
+	// enforcing platform/role-specific authorization using the principal that
+	// is propagated through the context.
+	SelfScope bool
 }
 
 func (p Policy) permission(request any) (auth.Permission, error) {
@@ -38,7 +44,34 @@ func (p Policy) permission(request any) (auth.Permission, error) {
 }
 
 type Registry struct {
-	policies map[string]Policy
+	policies      map[string]Policy
+	publicMethods map[string]struct{}
+	anonymousOK   map[string]struct{}
+}
+
+// PublicMethod registers a gRPC method as reachable without authentication and
+// without an authorization policy check. The only intended use is the
+// gRPC health probe contract and platform-defined diagnostics endpoints that
+// the deployment exposes via a dedicated permission.
+//
+// Use of PublicMethod is rejected by ValidateServices when the registry's
+// RequireAuthenticated flag is true in production.
+func (r Registry) PublicMethod(fullMethod string) Registry {
+	if r.publicMethods == nil {
+		r.publicMethods = make(map[string]struct{})
+	}
+	r.publicMethods[fullMethod] = struct{}{}
+	return r
+}
+
+// RequirePublicMethod returns true when the supplied method has been declared
+// as publicly reachable.
+func (r Registry) RequirePublicMethod(fullMethod string) bool {
+	if len(r.publicMethods) == 0 {
+		return false
+	}
+	_, found := r.publicMethods[fullMethod]
+	return found
 }
 
 func NewRegistry() Registry {
@@ -122,6 +155,33 @@ func NewRegistry() Registry {
 		controlv1.ConnectionService_GetConnectionTest_FullMethodName: {
 			Permission: auth.PermissionConnectionsTest, Scope: tenantIDScope,
 		},
+		controlv1.AuditService_ListAuditEvents_FullMethodName: {
+			Permission: auth.PermissionAuditRead, Scope: tenantIDScope,
+		},
+		controlv1.IdentityService_GetCurrentPrincipal_FullMethodName: {
+			Permission: auth.PermissionDiagnosticsRead, SelfScope: true,
+		},
+		controlv1.IdentityService_ListTenants_FullMethodName: {
+			Permission: auth.PermissionDiagnosticsRead, SelfScope: true,
+		},
+		controlv1.AccessService_ListMembers_FullMethodName: {
+			Permission: auth.PermissionMembersRead, Scope: tenantIDScope,
+		},
+		controlv1.AccessService_GrantTenantRole_FullMethodName: {
+			Permission: auth.PermissionMembersManage, Scope: tenantIDScope,
+		},
+		controlv1.AccessService_RevokeTenantRole_FullMethodName: {
+			Permission: auth.PermissionMembersManage, Scope: tenantIDScope,
+		},
+		controlv1.AccessService_ListRoles_FullMethodName: {
+			Permission: auth.PermissionMembersRead, SelfScope: true,
+		},
+		controlv1.AccessService_GrantPlatformRole_FullMethodName: {
+			Permission: auth.PermissionPlatformRoles, SelfScope: true,
+		},
+		controlv1.AccessService_RevokePlatformRole_FullMethodName: {
+			Permission: auth.PermissionPlatformRoles, SelfScope: true,
+		},
 	}}
 }
 
@@ -176,11 +236,16 @@ func (i Interceptor) Unary() grpc.UnaryServerInterceptor {
 		if err := i.Validate(); err != nil {
 			return nil, status.Error(codes.Internal, "authentication policy is unavailable")
 		}
+		if i.Registry.RequirePublicMethod(info.FullMethod) {
+			return handler(ctx, request)
+		}
 		policy, found := i.Registry.Policy(info.FullMethod)
 		if !found {
 			i.auditDenied(ctx, auth.Principal{}, "", info.FullMethod, "UNMAPPED_METHOD")
 			return nil, status.Error(codes.PermissionDenied, "request is not authorized")
 		}
+		requestID := requestIDFromMetadata(ctx)
+		ctx = withRequestID(ctx, requestID)
 		token, err := bearerToken(ctx)
 		if err != nil {
 			i.auditDenied(ctx, auth.Principal{}, "", info.FullMethod, "UNAUTHENTICATED")
@@ -191,24 +256,34 @@ func (i Interceptor) Unary() grpc.UnaryServerInterceptor {
 			i.auditDenied(ctx, auth.Principal{}, "", info.FullMethod, "UNAUTHENTICATED")
 			return nil, status.Error(codes.Unauthenticated, "authentication required")
 		}
-		scope, err := policy.Scope(request)
-		if err != nil {
-			i.auditDenied(ctx, principal, "", info.FullMethod, "INVALID_SCOPE")
-			return nil, status.Error(codes.InvalidArgument, "tenant scope is required")
-		}
 		permission, err := policy.permission(request)
 		if err != nil {
 			i.auditDenied(ctx, principal, "", info.FullMethod, "INVALID_POLICY_INPUT")
 			return nil, status.Error(codes.InvalidArgument, "request purpose is invalid")
 		}
+		principalContext, err := auth.WithPrincipal(ctx, principal)
+		if err != nil {
+			return nil, status.Error(codes.Internal, "authenticated principal is invalid")
+		}
+		if policy.SelfScope {
+			// Self-scope methods authorize against the resolved principal
+			// directly. The service handler is responsible for any platform
+			// role or membership filtering.
+			if !principalHasPermission(principal, permission) {
+				i.auditDenied(ctx, principal, "", info.FullMethod, "PERMISSION_DENIED")
+				return nil, status.Error(codes.PermissionDenied, "tenant access denied")
+			}
+			return handler(principalContext, request)
+		}
+		scope, err := policy.Scope(request)
+		if err != nil {
+			i.auditDenied(ctx, principal, "", info.FullMethod, "INVALID_SCOPE")
+			return nil, status.Error(codes.InvalidArgument, "tenant scope is required")
+		}
 		membership, found := principal.MembershipForScope(scope)
 		if !found {
 			i.auditDenied(ctx, principal, "", info.FullMethod, "TENANT_DENIED")
 			return nil, status.Error(codes.PermissionDenied, "tenant access denied")
-		}
-		principalContext, err := auth.WithPrincipal(ctx, principal)
-		if err != nil {
-			return nil, status.Error(codes.Internal, "authenticated principal is invalid")
 		}
 		if _, err := i.Authorizer.Authorize(principalContext, membership.TenantID, permission); err != nil {
 			i.auditDenied(ctx, principal, membership.TenantID, info.FullMethod, denialOutcome(err))
@@ -216,6 +291,24 @@ func (i Interceptor) Unary() grpc.UnaryServerInterceptor {
 		}
 		return handler(principalContext, request)
 	}
+}
+
+// principalHasPermission returns true when any active tenant membership for
+// the principal grants the supplied permission. Platform administrators are
+// always considered to hold every permission.
+func principalHasPermission(principal auth.Principal, permission auth.Permission) bool {
+	if principal.PlatformAdmin {
+		return true
+	}
+	for _, membership := range principal.Memberships {
+		if !membership.Active {
+			continue
+		}
+		if membership.Has(permission) {
+			return true
+		}
+	}
+	return false
 }
 
 func (i Interceptor) auditDenied(
@@ -251,6 +344,25 @@ func requestIDFromMetadata(ctx context.Context) string {
 		return values[0]
 	}
 	return "missing-request-id"
+}
+
+// requestIDContextKey is the unexported key under which the interceptor stores
+// the validated request ID for downstream handlers and audit emitters. The
+// value is always a non-empty ASCII string no longer than 128 bytes.
+type requestIDContextKey struct{}
+
+func withRequestID(ctx context.Context, requestID string) context.Context {
+	return context.WithValue(ctx, requestIDContextKey{}, requestID)
+}
+
+// RequestIDFromContext returns the validated request ID attached by the
+// authentication interceptor, or the empty string when no interceptor has run.
+func RequestIDFromContext(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	value, _ := ctx.Value(requestIDContextKey{}).(string)
+	return value
 }
 
 func denialOutcome(err error) string {

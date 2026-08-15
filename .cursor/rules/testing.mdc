@@ -1,0 +1,89 @@
+---
+description: 测试约定 — Go (testing) 与 Java (JUnit 5) 编写风格、覆盖范围与 CI 集成
+globs:
+  - "**/*_test.go"
+  - "**/src/test/**/*.java"
+  - "tests/**/*.java"
+  - "tests/**/*.go"
+  - "tests/**/*.sh"
+  - "tests/**/*.yaml"
+alwaysApply: false
+---
+
+# AstraSync 测试约定
+
+AstraSync 把测试视为产品代码:任何新增功能必须 **先** 写测试(失败用例 → 实现 → 重构)。
+
+## 1. 覆盖率目标
+
+| 模块 | 最低行覆盖 | 备注 |
+| --- | --- | --- |
+| `control-plane/api-server/internal/service` | 80% | 含 happy + 拒绝路径 |
+| `control-plane/auth` | 85% | 安全关键 |
+| `engine/runtime` | 70% | 含 batch、CDC、checkpoint 路径 |
+| `engine/checkpoint` | 75% | 一致性关键 |
+| `engine/network` | 65% | |
+| `connectors/*` | 60% | 集成测试补充 |
+| `formats/*` | 70% | 双向 parse/format 对称 |
+| `transforms/*` | 65% | |
+
+集成 / e2e 不计入行覆盖但必须存在。
+
+## 2. Go 测试
+
+- 包风格:优先 black-box(`<pkg>_test` 包名),白盒测试使用同包名。
+- 表驱动 + `t.Run("case_name", ...)`,case 名用 snake_case。
+- 时间相关测试必须用注入 clock(参考 `WithAccessClock`),不允许 `time.Sleep`。
+- 错误检查通过 `status.Code(err) == codes.X`,**禁止** `strings.Contains(err.Error(), ...)`。
+- 用 `t.Cleanup(...)` 代替 `defer` 做资源回收。
+- 数据库 / etcd / OIDC 集成测试放进 `*_integration_test.go` 并加 build tag:
+
+  ```go
+  //go:build integration
+  ```
+
+  或在文件名末尾 `_integration_test.go`。本地默认不跑;CI 单独跑。
+- 不允许跳过关键不变量测试(`t.Skip`)。
+
+## 3. Java 测试
+
+- JUnit 5 + AssertJ + Mockito(项目约定)。
+- 命名:`<Class>Test`;方法 `methodName_should_<expected>_when_<condition>`。
+- 异步测试使用 `Awaitility.await().atMost(Duration.ofSeconds(...)).untilAsserted(...)`,**禁止** `Thread.sleep`。
+- 参数化测试用 `@ParameterizedTest` + `@MethodSource` / `@CsvSource`,不要在测试内 `for` 循环断言。
+- 集成测试包名 `...it` 或 `@Tag("integration")`,Maven Failsafe 跑(`make test-integration`)。
+- 单元测试禁止引用外部数据库 / 网络;必须使用 in-memory fake 或 testcontainers(已在 `tests/` 工具)。
+
+## 4. 数据准备与 fixture
+
+- 不允许 inline 大对象 fixture;写到 `tests/fixtures/<module>/...`。
+- 数据库迁移 / OIDC mock 等公共 setup 写到 `test/test-support/`。
+- 测试用凭证使用明显占位符(`change-me`、`sk_test_*` 等),CI 通过 pre-commit 拒绝真实凭证。
+
+## 5. E2E / 集成
+
+- `tests/e2e/` 跑 `docker compose up` + 真正 job 启动;只能本地或 CI runner 跑。
+- `tests/compatibility/` 验证 connector 与上游版本兼容;按需更新。
+- `tests/chaos/` 注入故障(进程 kill、网络分区)并验证恢复;每次新增 fault 类型需要 ADR。
+- `tests/benchmark/` 跑 perf regression;输出到 `target/benchmarks.json` 由 CI 收集对比。
+
+## 6. 断言与快照
+
+- 不引入新的快照框架(Snapshot、JsonUnit 等)除非 ADR 允许。
+- 复杂结构比较优先用 AssertJ `usingRecursiveComparison()`、或在 Go 中暴露 `Equal(T) bool` 方法。
+- 浮点比较必须指定 `within(delta)`。
+
+## 7. CI 行为
+
+- 单元测试必须 **deterministic** — 不允许依赖外部时间、随机种子、文件顺序。
+- `make test` / `mvn -B test` 必须可重复运行且不退化。
+- 任何测试新增的依赖必须落入根 `pom.xml` 版本或 `go.mod` 显式版本。
+
+## 8. 禁止
+
+- `t.Skip(...)` / `@Disabled` 跳过不变量测试。
+- `Thread.sleep`、`time.Sleep` 在测试同步等待事件。
+- 在测试中启动真实网络服务(直接监听端口);用 TestContainers / in-memory server。
+- 把 production secret 用作测试 fixture。
+- 测试方法中调用 `System.out.println` 代替断言。
+- 在 commit 信息中包含敏感 fixture 内容(密码、JWT 等)。

@@ -47,6 +47,7 @@ This directory contains the Architecture Decision Records (ADRs) for AstraSync.
 | [ADR-039](adr-039-canonical-side-effect-free-jobspec-validation.md) | Canonical Side-effect-free JobSpec Validation | Accepted | 2026-08-08 |
 | [ADR-040](adr-040-deployment-authoritative-connector-catalog.md) | Deployment-authoritative Connector Descriptor Catalog | Accepted | 2026-08-08 |
 | [ADR-041](adr-041-external-secrets-epoch-credential-materialization.md) | External Secret References and Epoch-scoped Credential Materialization | Accepted | 2026-08-08 |
+| [ADR-042](adr-042-tenant-scoped-audited-security-event-queries.md) | Tenant-scoped Audited Security Event Queries | Accepted | 2026-08-10 |
 
 ## Template
 
