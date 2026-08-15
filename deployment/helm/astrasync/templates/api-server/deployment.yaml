@@ -1,4 +1,7 @@
 {{- if .Values.apiServer.enabled }}
+{{- if and (eq .Values.apiServer.environment "production") (not .Values.apiServer.mtls.enabled) -}}
+{{- fail "production API server requires apiServer.mtls.enabled=true" -}}
+{{- end -}}
 {{- if and .Values.apiServer.connectionRollout.runtimeEnabled (not .Values.scheduler.enabled) }}
 {{- fail "apiServer.connectionRollout.runtimeEnabled requires scheduler.enabled=true" }}
 {{- end }}
@@ -126,6 +129,12 @@ spec:
               value: /app/tls/tls.key
             - name: TLS_SERVER_NAME
               value: {{ .Values.apiServer.tlsServerName | quote }}
+            {{- if .Values.apiServer.mtls.enabled }}
+            - name: MTLS_CLIENT_CA_FILE
+              value: /app/mtls/{{ .Values.apiServer.mtls.clientCAKey }}
+            - name: MTLS_REQUIRE_CLIENT_CERT
+              value: {{ .Values.apiServer.mtls.requireClientCert | quote }}
+            {{- end }}
             {{- end }}
             - name: ETCD_ENDPOINTS
               value: {{ include "astrasync.etcd.endpoints" . }}
@@ -151,6 +160,11 @@ spec:
               mountPath: /app/compiler-tls
               readOnly: true
             {{- end }}
+            {{- if and .Values.tls.enabled .Values.apiServer.mtls.enabled }}
+            - name: api-mtls
+              mountPath: /app/mtls
+              readOnly: true
+            {{- end }}
       volumes:
         - name: config
           configMap:
@@ -164,6 +178,11 @@ spec:
         - name: compiler-validation-tls
           secret:
             secretName: {{ required "apiServer.compilerValidation.tls.secretName is required when TLS is enabled" .Values.apiServer.compilerValidation.tls.secretName | quote }}
+        {{- end }}
+        {{- if and .Values.tls.enabled .Values.apiServer.mtls.enabled }}
+        - name: api-mtls
+          secret:
+            secretName: {{ required "apiServer.mtls.secretName is required when API server mTLS is enabled" .Values.apiServer.mtls.secretName | quote }}
         {{- end }}
       affinity:
         {{- toYaml .Values.affinity | nindent 8 }}

@@ -9,6 +9,9 @@
 {{- if and (eq .Values.console.environment "production") (not .Values.console.api.tls.enabled) -}}
 {{- fail "production Console requires console.api.tls.enabled=true" -}}
 {{- end -}}
+{{- if and (eq .Values.console.environment "production") (not .Values.console.api.clientCert.enabled) -}}
+{{- fail "production Console requires console.api.clientCert.enabled=true" -}}
+{{- end -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -112,6 +115,12 @@ spec:
               value: /app/api-tls/{{ .Values.console.api.tls.caKey }}
             - name: CONSOLE_API_TLS_SERVER_NAME
               value: {{ .Values.console.api.tls.serverName | quote }}
+            {{- if .Values.console.api.clientCert.enabled }}
+            - name: CONSOLE_API_CLIENT_CERT_FILE
+              value: /app/api-tls/{{ .Values.console.api.clientCert.certKey }}
+            - name: CONSOLE_API_CLIENT_KEY_FILE
+              value: /app/api-tls/{{ .Values.console.api.clientCert.keyKey }}
+            {{- end }}
             {{- end }}
           {{- if .Values.console.api.tls.enabled }}
           volumeMounts:
