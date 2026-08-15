@@ -1,0 +1,26 @@
+# Gitleaks allowlist for AstraSync.
+#
+# This file augments the upstream default rule set shipped by
+# gitleaks/gitleaks-action@v3. It exists only to suppress known
+# false positives in test fixtures; production code paths remain
+# under full default coverage.
+#
+# Reviewed alongside the slice 21 audit explorer PR (#35).
+title = "AstraSync gitleaks allowlist"
+
+# Test fixtures routinely embed deterministic, high-entropy values that
+# mimic real secrets (idempotency keys, signed request bodies, opaque
+# authorization tokens). The generic-api-key rule cannot distinguish
+# those from genuine credentials by entropy alone. We trust the test
+# fixtures because:
+#   * they are compiled into *Test.go black-box tests;
+#   * AGENTS.md §4.1 forbids committing real secrets to fixtures;
+#   * the values are visible in the test source and reproduced by the
+#     fixtureIdempotencyKey helper plus per-test literal strings.
+# Production paths (*.go, *.java, *.proto, etc.) keep the default rule.
+[[allowlists]]
+targetRules = ["generic-api-key"]
+description = "Test fixtures use high-entropy stand-ins for keys and tokens."
+paths = [
+  '''.*_test\.go$''',
+]
