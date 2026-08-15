@@ -38,6 +38,16 @@ func TestLoadConfigEnforcesProductionOIDCAndAPITLS(t *testing.T) {
 	values["CONSOLE_TLS_CERTIFICATE_FILE"] = "server.crt"
 	values["CONSOLE_TLS_PRIVATE_KEY_FILE"] = "server.key"
 	values["TRUSTED_PROXY_CIDRS"] = "10.0.0.0/8"
+	if _, err := loadConfig(func(key string) string { return values[key] }); err == nil ||
+		!strings.Contains(err.Error(), "CONSOLE_API_CLIENT_CERT_FILE") {
+		t.Fatalf("expected production Console client certificate gate, got %v", err)
+	}
+	values["CONSOLE_API_CLIENT_CERT_FILE"] = "client.crt"
+	if _, err := loadConfig(func(key string) string { return values[key] }); err == nil ||
+		!strings.Contains(err.Error(), "must be configured together") {
+		t.Fatalf("expected paired Console client certificate gate, got %v", err)
+	}
+	values["CONSOLE_API_CLIENT_KEY_FILE"] = "client.key"
 	configuration, err := loadConfig(func(key string) string { return values[key] })
 	if err != nil {
 		t.Fatalf("load production config: %v", err)
@@ -55,6 +65,16 @@ func TestLoadConfigEnforcesProductionTLSAndTrustedProxy(t *testing.T) {
 		"CONSOLE_SESSION_KEY":     strings.Repeat("k", 32),
 		"CONSOLE_API_TLS_CA_FILE": "api-ca.crt",
 	}
+if _, err := loadConfig(func(key string) string { return values[key] }); err == nil ||
+		!strings.Contains(err.Error(), "CONSOLE_API_CLIENT_CERT_FILE") {
+		t.Fatalf("expected production Console client certificate gate, got %v", err)
+	}
+	values["CONSOLE_API_CLIENT_CERT_FILE"] = "client.crt"
+	if _, err := loadConfig(func(key string) string { return values[key] }); err == nil ||
+		!strings.Contains(err.Error(), "must be configured together") {
+		t.Fatalf("expected paired Console client certificate gate, got %v", err)
+	}
+	values["CONSOLE_API_CLIENT_KEY_FILE"] = "client.key"
 	if _, err := loadConfig(func(key string) string { return values[key] }); err == nil ||
 		!strings.Contains(err.Error(), "CONSOLE_TLS_CERTIFICATE_FILE") {
 		t.Fatalf("expected Console TLS gate, got %v", err)
