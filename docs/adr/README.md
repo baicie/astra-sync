@@ -50,6 +50,7 @@ This directory contains the Architecture Decision Records (ADRs) for AstraSync.
 | [ADR-042](adr-042-tenant-scoped-audited-security-event-queries.md) | Tenant-scoped Audited Security Event Queries | Accepted | 2026-08-10 |
 | [ADR-043](adr-043-transport-hardening-and-trusted-proxy-boundary.md) | Transport Hardening and Trusted-Proxy Boundary | Accepted | 2026-08-15 |
 | [ADR-044](adr-044-phase6-closeout-and-phase7-entry-criteria.md) | Phase 6 Closeout and Phase 7 Entry Criteria | Accepted | 2026-08-15 |
+| [ADR-045](adr-045-control-plane-mtls-and-network-boundary.md) | Control-Plane Mutual TLS and Network Boundary | Accepted | 2026-08-15 |
 
 ## Template
 
