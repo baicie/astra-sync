@@ -21,6 +21,7 @@ not yet delivered.
 | Slice 19 | Job mutation workflows and operational actions | Implementation Complete; rollout gated |
 | Slice 20 | Connector catalog and tenant Connection references | Implementation Complete; rollout gated |
 | Slice 21 | Tenant audit explorer | Implementation Complete |
+| Slice 22 | Transport hardening and trusted-proxy boundary | Implementation Complete |
 
 ## Records
 
@@ -66,6 +67,12 @@ not yet delivered.
 - [Slice 21 Implementation Plan](21-audit-explorer/implementation-plan.md)
 - [Slice 21 Verification](21-audit-explorer/verification.md)
 - [ADR-042: Tenant-scoped Audited Security Event Queries](../adr/adr-042-tenant-scoped-audited-security-event-queries.md)
+- [Slice 22 README](22-transport-hardening/README.md)
+- [Slice 22 Design](22-transport-hardening/design.md)
+- [Slice 22 Implementation Plan](22-transport-hardening/implementation-plan.md)
+- [Slice 22 Verification](22-transport-hardening/verification.md)
+- [Slice 22 Threat-Model Delta](22-transport-hardening/threat-model-delta.md)
+- [ADR-043: Transport Hardening and Trusted-Proxy Boundary](../adr/adr-043-transport-hardening-and-trusted-proxy-boundary.md)
 
 ## Boundary
 
@@ -99,3 +106,8 @@ Slice 21 exposes only tenant-owned audit events through `audit.read`, fixed quer
 allowlisted scalar projection, and tenant/policy-fenced HMAC continuation tokens. Every successful
 read is synchronously audited. It does not provide platform-wide search, export, retention
 mutation, alerting, or tenant and membership administration.
+
+Slice 22 closes the transport-hardening gap explicitly tracked by the Slice 18 implementation
+plan §6. It requires production TLS on every public listener and adopts a strict, deployment-
+declared trusted-proxy boundary that governs `X-Forwarded-*` interpretation. It does not change
+authentication, authorization, or audit semantics.

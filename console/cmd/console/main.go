@@ -10,6 +10,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
 	"os/signal"
@@ -28,6 +29,7 @@ import (
 	jobv1 "io.astrasync/control-plane/api-server/gen/go/v1"
 	"io.astrasync/control-plane/auth"
 	authpostgres "io.astrasync/control-plane/auth/postgres"
+	"io.astrasync/control-plane/auth/transport"
 )
 
 const shutdownTimeout = 10 * time.Second
@@ -52,6 +54,9 @@ type config struct {
 	loginTTL           time.Duration
 	apiTLSCAFile       string
 	apiTLSServerName   string
+	tlsCertificateFile string
+	tlsPrivateKeyFile  string
+	trustedProxyCIDRs  string
 }
 
 type grpcBackend struct {
@@ -161,9 +166,12 @@ func loadConfig(getenv func(string) string) (config, error) {
 		developmentTenant: valueOrDefault(getenv("CONSOLE_TENANT_ID"), "00000000-0000-4000-8000-000000000001"),
 		databaseURL:       getenv("DATABASE_URL"), oidcIssuer: getenv("OIDC_ISSUER"),
 		oidcAudience: getenv("OIDC_AUDIENCE"), oidcClientID: getenv("CONSOLE_OIDC_CLIENT_ID"),
-		oidcClientSecret: getenv("CONSOLE_OIDC_CLIENT_SECRET"),
-		apiTLSCAFile:     getenv("CONSOLE_API_TLS_CA_FILE"),
-		apiTLSServerName: valueOrDefault(getenv("CONSOLE_API_TLS_SERVER_NAME"), "api-server"),
+		oidcClientSecret:   getenv("CONSOLE_OIDC_CLIENT_SECRET"),
+		apiTLSCAFile:       getenv("CONSOLE_API_TLS_CA_FILE"),
+		apiTLSServerName:   valueOrDefault(getenv("CONSOLE_API_TLS_SERVER_NAME"), "api-server"),
+		tlsCertificateFile: strings.TrimSpace(getenv("CONSOLE_TLS_CERTIFICATE_FILE")),
+		tlsPrivateKeyFile:  strings.TrimSpace(getenv("CONSOLE_TLS_PRIVATE_KEY_FILE")),
+		trustedProxyCIDRs:  strings.TrimSpace(getenv("TRUSTED_PROXY_CIDRS")),
 	}
 	configuration.oidcScopes = strings.Fields(valueOrDefault(getenv("CONSOLE_OIDC_SCOPES"), "openid profile"))
 	var err error
@@ -198,6 +206,20 @@ func loadConfig(getenv func(string) string) (config, error) {
 		}
 		if configuration.apiTLSCAFile == "" {
 			return config{}, fmt.Errorf("production requires Console-to-API TLS")
+		}
+		if (configuration.tlsCertificateFile == "") != (configuration.tlsPrivateKeyFile == "") {
+			return config{}, fmt.Errorf("CONSOLE_TLS_CERTIFICATE_FILE and CONSOLE_TLS_PRIVATE_KEY_FILE must be configured together")
+		}
+		if configuration.tlsCertificateFile == "" {
+			return config{}, fmt.Errorf("production requires CONSOLE_TLS_CERTIFICATE_FILE and CONSOLE_TLS_PRIVATE_KEY_FILE")
+		}
+		if configuration.trustedProxyCIDRs == "" {
+			return config{}, fmt.Errorf("production requires TRUSTED_PROXY_CIDRS")
+		}
+	}
+	if configuration.trustedProxyCIDRs != "" {
+		if _, err := transport.ParseCIDRList(configuration.trustedProxyCIDRs); err != nil {
+			return config{}, fmt.Errorf("TRUSTED_PROXY_CIDRS: %w", err)
 		}
 	}
 	return configuration, nil
@@ -257,6 +279,10 @@ func run(ctx context.Context, configuration config) error {
 		}
 		return nil
 	}
+	trustedProxyPrefixes, err := loadTrustedProxyPrefixes(configuration)
+	if err != nil {
+		return fmt.Errorf("configure trusted-proxy boundary: %w", err)
+	}
 	console, err := server.NewWithConfig(server.Config{Backend: backend, Sessions: sessionManager,
 		Namespace: configuration.namespace, PublicOrigin: configuration.publicOrigin, AuthMode: configuration.authMode, Ready: ready})
 	if err != nil {
@@ -266,10 +292,19 @@ func run(ctx context.Context, configuration config) error {
 	if err != nil {
 		return fmt.Errorf("listen for Console HTTP: %w", err)
 	}
-	httpServer := &http.Server{Handler: console.Handler(), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second}
+	handler := transport.TrustedProxyMiddleware(trustedProxyPrefixes)(
+		transport.SecurityHeaders()(console.Handler()),
+	)
+	httpServer := &http.Server{Handler: handler, ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second}
 	errorsChannel := make(chan error, 1)
 	go func() {
-		if serveErr := httpServer.Serve(listener); serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
+		var serveErr error
+		if configuration.tlsCertificateFile != "" {
+			serveErr = httpServer.ServeTLS(listener, configuration.tlsCertificateFile, configuration.tlsPrivateKeyFile)
+		} else {
+			serveErr = httpServer.Serve(listener)
+		}
+		if serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
 			errorsChannel <- fmt.Errorf("serve Console HTTP: %w", serveErr)
 		}
 	}()
@@ -302,6 +337,13 @@ func apiDialOptions(configuration config) ([]grpc.DialOption, error) {
 	return []grpc.DialOption{grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{
 		MinVersion: tls.VersionTLS12, RootCAs: pool, ServerName: configuration.apiTLSServerName,
 	}))}, nil
+}
+
+func loadTrustedProxyPrefixes(configuration config) ([]netip.Prefix, error) {
+	if configuration.trustedProxyCIDRs == "" {
+		return nil, nil
+	}
+	return transport.ParseCIDRList(configuration.trustedProxyCIDRs)
 }
 
 func publicOrigin(value string) (string, error) {
