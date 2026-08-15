@@ -29,6 +29,7 @@ import (
 
 	jobv1 "io.astrasync/control-plane/api-server/gen/go/v1"
 	"io.astrasync/control-plane/api-server/internal/service"
+	"io.astrasync/control-plane/auth/transport"
 	catalogmemory "io.astrasync/control-plane/catalog/memory"
 	"io.astrasync/control-plane/job/memory"
 )
@@ -88,6 +89,7 @@ func TestLoadConfigEnforcesProductionAndCompilerMTLSGates(t *testing.T) {
 	values["TLS_CERTIFICATE_FILE"] = "server.crt"
 	values["TLS_PRIVATE_KEY_FILE"] = "server.key"
 	values["CATALOG_TOKEN_KEY"] = "0123456789abcdef0123456789abcdef"
+	values["TRUSTED_PROXY_CIDRS"] = "10.0.0.0/8"
 	if _, err := loadConfig(func(key string) string { return values[key] }); err == nil {
 		t.Fatal("expected production compiler mTLS gate")
 	}
@@ -194,6 +196,94 @@ func writeTestCertificate(t *testing.T) (string, string) {
 		t.Fatalf("write test private key: %v", err)
 	}
 	return certificateFile, keyFile
+}
+
+func TestLoadConfigEnforcesTrustedProxyCIDRs(t *testing.T) {
+	values := map[string]string{
+		"DATABASE_URL":         "postgresql://example/astrasync",
+		"APP_ENV":              "production",
+		"AUTH_MODE":            "oidc",
+		"OIDC_ISSUER":          "https://issuer.example",
+		"OIDC_AUDIENCE":        "astrasync",
+		"TLS_CERTIFICATE_FILE": "server.crt", "TLS_PRIVATE_KEY_FILE": "server.key",
+		"CATALOG_TOKEN_KEY":                        "0123456789abcdef0123456789abcdef",
+		"COMPILER_VALIDATION_TLS_CERTIFICATE_FILE": "client.crt",
+		"COMPILER_VALIDATION_TLS_PRIVATE_KEY_FILE": "client.key",
+		"COMPILER_VALIDATION_TLS_CA_FILE":          "ca.crt",
+	}
+	if _, err := loadConfig(func(key string) string { return values[key] }); err == nil {
+		t.Fatal("expected production TRUSTED_PROXY_CIDRS gate")
+	}
+	values["TRUSTED_PROXY_CIDRS"] = "10.0.0.0/8"
+	if _, err := loadConfig(func(key string) string { return values[key] }); err != nil {
+		t.Fatalf("expected production config with trusted CIDRs to load: %v", err)
+	}
+	values["TRUSTED_PROXY_CIDRS"] = "10.0.0.0/8, not-a-cidr"
+	if _, err := loadConfig(func(key string) string { return values[key] }); err == nil {
+		t.Fatal("expected invalid TRUSTED_PROXY_CIDRS to be rejected")
+	}
+	values["APP_ENV"] = "development"
+	delete(values, "TRUSTED_PROXY_CIDRS")
+	if _, err := loadConfig(func(key string) string { return values[key] }); err != nil {
+		t.Fatalf("development profile should accept missing TRUSTED_PROXY_CIDRS: %v", err)
+	}
+}
+
+func TestAPIHandlerEmitsSecurityHeadersAndHonoursTrustedProxy(t *testing.T) {
+	cidrs, err := transport.ParseCIDRList("10.0.0.0/8")
+	if err != nil {
+		t.Fatalf("parse trusted CIDRs: %v", err)
+	}
+	gateway := http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+		response.WriteHeader(http.StatusTeapot)
+	})
+	handler := apiHandler(
+		transport.TrustedProxyMiddleware(cidrs)(transport.SecurityHeaders()(gateway)),
+		func(context.Context) error { return nil },
+	)
+
+	request := httptest.NewRequest(http.MethodGet, "http://api.example.com/v1/jobs", nil)
+	request.RemoteAddr = "10.0.0.5:51234"
+	request.Header.Set("X-Forwarded-For", "203.0.113.7")
+	request.Header.Set("X-Forwarded-Proto", "https")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusTeapot {
+		t.Fatalf("unexpected status: %d", response.Code)
+	}
+	if got := response.Header().Get(transport.HeaderXContentTypeOptions); got != transport.ValueNoSniff {
+		t.Fatalf("unexpected X-Content-Type-Options: %q", got)
+	}
+	if got := response.Header().Get(transport.HeaderReferrerPolicy); got != transport.ValueReferrerPolicy {
+		t.Fatalf("unexpected Referrer-Policy: %q", got)
+	}
+	if got := response.Header().Get(transport.HeaderStrictTransportSecurity); got != transport.ValueStrictTransportSecurity {
+		t.Fatalf("expected HSTS via trusted-proxy https, got %q", got)
+	}
+
+	request2 := httptest.NewRequest(http.MethodGet, "http://api.example.com/v1/jobs", nil)
+	request2.RemoteAddr = "203.0.113.42:51234"
+	request2.Header.Set("X-Forwarded-For", "127.0.0.1")
+	request2.Header.Set("X-Forwarded-Proto", "https")
+	response2 := httptest.NewRecorder()
+	handler.ServeHTTP(response2, request2)
+	if got := response2.Header().Get(transport.HeaderStrictTransportSecurity); got != "" {
+		t.Fatalf("expected no HSTS from untrusted peer, got %q", got)
+	}
+}
+
+func TestLoadTrustedProxyPrefixes(t *testing.T) {
+	if prefixes, err := loadTrustedProxyPrefixes(config{}); err != nil || prefixes != nil {
+		t.Fatalf("expected nil prefixes without configuration: prefixes=%v err=%v", prefixes, err)
+	}
+	configuration := config{trustedProxyCIDRs: "10.0.0.0/8, 192.168.0.0/16"}
+	prefixes, err := loadTrustedProxyPrefixes(configuration)
+	if err != nil || len(prefixes) != 2 {
+		t.Fatalf("parse configured prefixes: prefixes=%v err=%v", prefixes, err)
+	}
+	if _, err := loadTrustedProxyPrefixes(config{trustedProxyCIDRs: "garbage"}); err == nil {
+		t.Fatal("expected invalid prefix to be rejected")
+	}
 }
 
 func TestAPIHealthAndReadiness(t *testing.T) {

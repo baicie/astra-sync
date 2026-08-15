@@ -10,6 +10,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/netip"
 	"os"
 	"os/signal"
 	"strings"
@@ -31,6 +32,7 @@ import (
 	"io.astrasync/control-plane/api-server/internal/service"
 	"io.astrasync/control-plane/auth"
 	authpostgres "io.astrasync/control-plane/auth/postgres"
+	"io.astrasync/control-plane/auth/transport"
 	"io.astrasync/control-plane/catalog"
 	catalogpostgres "io.astrasync/control-plane/catalog/postgres"
 	"io.astrasync/control-plane/connection"
@@ -61,6 +63,7 @@ type config struct {
 	tlsCertificateFile         string
 	tlsPrivateKeyFile          string
 	tlsServerName              string
+	trustedProxyCIDRs          string
 	connectionTestDeadline     time.Duration
 	connectionTestPolicies     map[string]connection.TestEgressPolicy
 	connectionMutationsEnabled bool
@@ -106,6 +109,10 @@ func loadConfig(getenv func(string) string) (config, error) {
 	if authMode == "oidc" && (getenv("OIDC_ISSUER") == "" || getenv("OIDC_AUDIENCE") == "") {
 		return config{}, fmt.Errorf("OIDC_ISSUER and OIDC_AUDIENCE are required in oidc mode")
 	}
+	trustedProxyCIDRs := strings.TrimSpace(getenv("TRUSTED_PROXY_CIDRS"))
+	if environment == "production" && trustedProxyCIDRs == "" {
+		return config{}, fmt.Errorf("production requires TRUSTED_PROXY_CIDRS")
+	}
 	if environment == "production" {
 		if authMode != "oidc" {
 			return config{}, fmt.Errorf("production requires AUTH_MODE=oidc")
@@ -115,6 +122,11 @@ func loadConfig(getenv func(string) string) (config, error) {
 		}
 		if tokenKeyValue == "" {
 			return config{}, fmt.Errorf("production requires CATALOG_TOKEN_KEY")
+		}
+	}
+	if trustedProxyCIDRs != "" {
+		if _, err := transport.ParseCIDRList(trustedProxyCIDRs); err != nil {
+			return config{}, fmt.Errorf("TRUSTED_PROXY_CIDRS: %w", err)
 		}
 	}
 	compilerTimeout, err := boundedDuration(
@@ -185,6 +197,7 @@ func loadConfig(getenv func(string) string) (config, error) {
 		compilerServerName:         valueOrDefault(getenv("COMPILER_VALIDATION_TLS_SERVER_NAME"), "compiler-validation"),
 		tlsPrivateKeyFile:          privateKeyFile,
 		tlsServerName:              valueOrDefault(getenv("TLS_SERVER_NAME"), "localhost"),
+		trustedProxyCIDRs:          trustedProxyCIDRs,
 		connectionTestDeadline:     connectionTestDeadline,
 		connectionTestPolicies:     connectionTestPolicies,
 		connectionMutationsEnabled: connectionMutationsEnabled,
@@ -335,7 +348,15 @@ func run(ctx context.Context, configuration config) error {
 	if err != nil {
 		return fmt.Errorf("create access service: %w", err)
 	}
-	if configuration.tlsCertificateFile != "" {
+	trustedProxyPrefixes, err := loadTrustedProxyPrefixes(configuration)
+	if err != nil {
+		return fmt.Errorf("configure trusted-proxy boundary: %w", err)
+	}
+	if configuration.tlsCertificateFile == "" {
+		if configuration.environment == "production" {
+			return fmt.Errorf("production requires TLS certificate and private key for the gRPC listener")
+		}
+	} else {
 		serverCredentials, err := credentials.NewServerTLSFromFile(
 			configuration.tlsCertificateFile, configuration.tlsPrivateKeyFile,
 		)
@@ -380,17 +401,22 @@ func run(ctx context.Context, configuration config) error {
 	}
 	httpServer := &http.Server{
 		Addr: configuration.httpListen,
-		Handler: apiHandler(gateway, func(ctx context.Context) error {
-			for _, check := range []func(context.Context) error{
-				jobRepository.Ping, authRepository.Ping, catalogRepository.Ping, connectionRepository.Ping,
-			} {
-				if err := check(ctx); err != nil {
-					return err
+		Handler: apiHandler(
+			transport.TrustedProxyMiddleware(trustedProxyPrefixes)(
+				transport.SecurityHeaders()(gateway),
+			),
+			func(ctx context.Context) error {
+				for _, check := range []func(context.Context) error{
+					jobRepository.Ping, authRepository.Ping, catalogRepository.Ping, connectionRepository.Ping,
+				} {
+					if err := check(ctx); err != nil {
+						return err
+					}
 				}
-			}
-			_, err := catalogRepository.Current(ctx, configuration.executionProfile)
-			return err
-		}),
+				_, err := catalogRepository.Current(ctx, configuration.executionProfile)
+				return err
+			},
+		),
 		ReadHeaderTimeout: 5 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
@@ -603,6 +629,17 @@ func reconcileDeploymentCatalog(
 		return fmt.Errorf("reconcile deployment connector inventory: %w", err)
 	}
 	return nil
+}
+
+func loadTrustedProxyPrefixes(configuration config) ([]netip.Prefix, error) {
+	if configuration.trustedProxyCIDRs == "" {
+		return nil, nil
+	}
+	prefixes, err := transport.ParseCIDRList(configuration.trustedProxyCIDRs)
+	if err != nil {
+		return nil, err
+	}
+	return prefixes, nil
 }
 
 func gatewayDialOptions(configuration config) ([]grpc.DialOption, error) {

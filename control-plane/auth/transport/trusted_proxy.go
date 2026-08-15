@@ -79,10 +79,10 @@ func TrustedProxy(request *http.Request, trusted []netip.Prefix) ClientAddress {
 	}
 	peerAddr, peerPort := parsePeer(request.RemoteAddr)
 	address := ClientAddress{
-		IP:     peerAddr,
-		Port:   peerPort,
-		Scheme: schemeFromRequest(request),
-		Host:   request.Host,
+		IP:      peerAddr,
+		Port:    peerPort,
+		Scheme:  schemeFromRequest(request),
+		Host:    request.Host,
 		Trusted: false,
 	}
 	if peerAddr.IsValid() && len(trusted) > 0 {
