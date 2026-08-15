@@ -333,6 +333,8 @@ jobs:
             console/go.mod
 
       - name: Run transport security gate
+        # Runs check-security, which depends on check-mtls for Phase 7
+        # Slice 23 control-plane mutual TLS verification.
         run: make check-security
 
   container-images:
