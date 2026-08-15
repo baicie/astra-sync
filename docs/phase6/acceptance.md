@@ -10,7 +10,7 @@ authoritative.
 
 ## Scope
 
-Phase 6 covers Slices 17 through 21:
+Phase 6 covers Slices 17 through 22:
 
 | Slice | Focus | Verification record |
 |---|---|---|
@@ -19,6 +19,7 @@ Phase 6 covers Slices 17 through 21:
 | Slice 19 | Job mutation workflows and operational actions | [Slice 19 verification](19-job-operations/verification.md) |
 | Slice 20 | Connector catalog and tenant Connection references | [Slice 20 verification](20-connector-catalog-connections/verification.md) |
 | Slice 21 | Tenant audit explorer | [Slice 21 verification](21-audit-explorer/verification.md) |
+| Slice 22 | Transport hardening and trusted-proxy boundary | [Slice 22 verification](22-transport-hardening/verification.md) |
 
 Phase 6 is accepted at the repository level when every slice above carries its own
 verification status. Production enablement is a separate operator-controlled step
