@@ -1,23 +1,21 @@
 # Phase 6: Platform
 
-Phase 6 turns the control plane into an operator-facing platform. Slice 17 establishes a usable
-read-only Web Console. Slice 18 supplies authentication, tenant RBAC, and transactional audit
-including the IdentityService/AccessService administration surface. Slice 19 adds versioned
-Job mutations, canonical validation, concurrency recovery, and operational feedback. Slice 20
-delivers the deployment-owned Connector Catalog and tenant Connection boundary required to
-replace persisted raw credentials with auditable, epoch-fenced external Secret references.
-The Slice 18 runtime foundation used by Slices 19 and 20 is implemented; production
-enablement remains guarded by explicit operator-controlled rollout gates. Slice 21 closes the
-tenant audit investigation loop with a bounded, read-audited API and Console activity view.
-Phase 6 remains in progress because transport hardening and production identity rollout are
-not yet delivered.
+**Status: Complete.** Phase 6 closes once Slice 22 (transport hardening and
+trusted-proxy boundary) lands. The Slice 18 implementation plan §6 ("Transport,
+Deployment, and Rollout") is the only remaining repository-side work and is
+delivered by ADR-043 and the `phase6/slice22-transport-hardening` branch.
 
-## Roadmap
+Production enablement remains operator-controlled. Deployment-side artefacts
+(IdP registration, key rotation, session revocation, audit retention, backup,
+and rollback runbooks) are not repository deliverables and are tracked in
+ADR-044 as Phase 7 entry criteria.
+
+The Phase 6 deliverable matrix:
 
 | Slice | Focus | Status |
 |---|---|---|
 | Slice 17 | Web Console and namespace-scoped read-only Job operations | Complete |
-| Slice 18 | Authentication, tenant identity, RBAC, and audit policy | Foundation and administration complete; rollout gated |
+| Slice 18 | Authentication, tenant identity, RBAC, audit policy, and tenant / role administration | Foundation and administration complete; rollout gated |
 | Slice 19 | Job mutation workflows and operational actions | Implementation Complete; rollout gated |
 | Slice 20 | Connector catalog and tenant Connection references | Implementation Complete; rollout gated |
 | Slice 21 | Tenant audit explorer | Implementation Complete |
