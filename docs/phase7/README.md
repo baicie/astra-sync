@@ -12,12 +12,15 @@ and Slice 26 (observability handbook) are implementation complete.
 Slice 26 follow-up slices F1–F5 (SLF4J + Prometheus client) are
 implementation complete and recorded in
 [`docs/observability/changelog.md`](../observability/changelog.md).
-Slice 25 (multi-region) is in design. Phase 7 admission is recorded
-by ADR-044; the entry criteria are cross-cluster control-plane mTLS,
-operational runbook templates, multi-region standby semantics, and
-observability consolidation. Slice 23 closed the first criterion
-(ADR-045), Slice 24 closed the second (ADR-046), and Slice 26 closed
-the fourth (ADR-047).
+Slice 25 (multi-region) has shipped its design cluster
+(ADR-048, ADR-049, ADR-050) and is in **ADR Review** status; the
+implementation is deferred to Phase 8+ on the user's prior guidance.
+Phase 7 admission is recorded by ADR-044; the entry criteria are
+cross-cluster control-plane mTLS, operational runbook templates,
+multi-region standby semantics, and observability consolidation.
+Slice 23 closed the first criterion (ADR-045), Slice 24 closed the
+second (ADR-046), Slice 25 closed the third (ADR-048/049/050),
+and Slice 26 closed the fourth (ADR-047).
 
 ## Goals
 
@@ -62,7 +65,7 @@ the fourth (ADR-047).
 |---|---|---|
 | Slice 23 | Control-plane mutual TLS between API Server and Console BFF (the only in-cluster gRPC channel today) | Implementation Complete |
 | Slice 24 | Operational runbook templates | Implementation Complete |
-| Slice 25 | Multi-region standby, failover, and recovery semantics | Design |
+| Slice 25 | Multi-region standby, failover, and recovery semantics | ADR Review |
 | Slice 26 | Observability handbook and dashboard consolidation | Implementation Complete |
 | Slice 26.F1–F5 | SLF4J + Prometheus client implementation of ADR-047 (changelog) | Implementation Complete |
 
@@ -78,6 +81,10 @@ by Kubernetes NetworkPolicy.
 - [ADR-045: Control-Plane Mutual TLS and Network Boundary](../adr/adr-045-control-plane-mtls-and-network-boundary.md)
 - [ADR-046: Operational Runbook Templates](../adr/adr-046-operational-runbook-templates.md)
 - [ADR-047: Observability Handbook and Dashboard Consolidation](../adr/adr-047-observability-handbook-and-dashboard-consolidation.md)
+- [ADR-048: Multi-Region Control-Plane Replication Model](../adr/adr-048-multi-region-control-plane-replication.md)
+- [ADR-049: Region-pinned Data-Plane Failover with Epoch Fencing](../adr/adr-049-region-pinned-data-plane-failover.md)
+- [ADR-050: Tenant Identifier and Audit Cross-Region Semantics](../adr/adr-050-tenant-identifier-and-audit-cross-region.md)
+- [Slice 25 design cluster](25-multi-region/README.md)
 - [Operational runbook templates](../runbooks/README.md)
 - [Observability handbook](../observability/README.md)
 - [Phase 6 closeout reference](../phase6/README.md)
