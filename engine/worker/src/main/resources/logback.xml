@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Logback configuration for the Worker binary.
+
+  Identical convention to engine/coordinator/src/main/resources/logback.xml.
+  Each binary ships its own copy so the runtime is self-contained; the
+  deployment overrides the appender or the pattern via
+  -Dlogback.configurationFile=<path> or LOG_LEVEL=<level>.
+
+  Structured fields and the request_id join key follow the convention
+  documented at docs/observability/log-conventions.md.
+-->
+<configuration>
+    <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+        <target>System.out</target>
+        <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+            <includeContext>false</includeContext>
+            <includeMdc>true</includeMdc>
+            <customFields>{"component":"worker"}</customFields>
+        </encoder>
+    </appender>
+
+    <root level="${LOG_LEVEL:-INFO}">
+        <appender-ref ref="STDOUT"/>
+    </root>
+
+</configuration>

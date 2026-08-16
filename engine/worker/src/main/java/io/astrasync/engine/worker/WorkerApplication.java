@@ -4,9 +4,13 @@ import io.astrasync.engine.runtime.BatchTaskFactory;
 import java.lang.reflect.InvocationTargetException;
 import java.util.Map;
 import java.util.Objects;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /** Executable entry point for a configured Worker protocol service. */
 public final class WorkerApplication {
+    private static final Logger LOG = LoggerFactory.getLogger(WorkerApplication.class);
+
     private WorkerApplication() {}
 
     public static void main(String[] args) {
@@ -21,6 +25,7 @@ public final class WorkerApplication {
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
         } catch (RuntimeException exception) {
+            LOG.error("worker failed to start", exception);
             System.err.println("FAILED to start Worker: " + message(exception));
             System.exit(1);
         }

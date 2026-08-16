@@ -16,6 +16,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/signal"
 	"strings"
@@ -88,7 +89,12 @@ func main() {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	logger := newComponentLogger("astra-auth-admin", command.stderr, os.Getenv("LOG_LEVEL"))
+	slog.SetDefault(logger)
 	if err := command.run(ctx, os.Args[2:]); err != nil {
+		logger.Error("astra-auth-admin operation failed",
+			"operation", string(operation),
+			"error", err.Error())
 		fmt.Fprintf(command.stderr, "astra-auth-admin: %s: %v\n", operation, err)
 		os.Exit(1)
 	}

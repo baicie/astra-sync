@@ -19,14 +19,15 @@ The Go control plane uses the standard library `log/slog` package or
   framework, `controller` for the AstraSync-specific calls.
 - The API Server, the Console, the Scheduler, the Connection Test
   Executor, and the auth admin CLI use the standard library `log/slog`
-  package through the `io.astrasync/control-plane/observability`
-  helper module. The helper installs a JSON handler that emits the
+  package. Each executable owns a module-local `newComponentLogger`
+  constructor; there is no cross-module helper module or local Go
+  `replace`. The constructor installs a JSON handler that emits the
   `component` field on every record. The component value matches the
   deployment name: `apiserver`, `console`, `scheduler`,
   `connection-test-executor`, `astra-auth-admin`.
 
 The migration to `slog` is recorded in [`changelog.md`](changelog.md)
-together with the source commit `818ef64` (F3).
+as F3.
 
 ### Java data plane
 
@@ -36,13 +37,13 @@ class. The convention is the SLF4J default; the handbook records
 the rule so the migration follow-up can adopt it without overriding
 the SLF4J default.
 
-The current state is that the Java executables (Coordinator, Worker)
-use `System.out.printf` and `System.err.printf` for their CLI output
+The Java executables (Coordinator, Worker) retain selected
+`System.out.printf` and `System.err.printf` calls for stable CLI output
 and Kubernetes liveness probes. As of Phase 7 Slice 26 follow-up
 (F2), the error path of `CoordinatorApplication`,
 `WorkerApplication`, and `ExecutionHeartbeat` is routed through SLF4J
-`Logger.error(...)` calls; the CLI output and liveness probe calls
-are preserved verbatim. The Logback configuration file shipped under
+`Logger.error(...)` calls; the stable output calls are preserved. The
+Logback configuration file shipped under
 `engine/coordinator/src/main/resources/logback.xml` and
 `engine/worker/src/main/resources/logback.xml` installs the
 `LogstashEncoder` from `logstash-logback-encoder` so every record
@@ -53,8 +54,10 @@ and `7556e0a` (F1 and F2).
 
 ## Structured fields
 
-Every log record carries the following structured fields where
-applicable:
+The table below is the stable field contract. A call site emits a field
+only when that context is available; the current closeout guarantees
+`component` at each migrated entry point but does not yet propagate all
+request-, tenant-, job-, epoch-, or stage-scoped fields.
 
 | Field | Type | Description |
 |---|---|---|
@@ -66,11 +69,10 @@ applicable:
 | `stage` | string | Lifecycle stage (`read`, `transform`, `write`, `checkpoint`). Used by the dashboard recipes. |
 | `outcome` | string | Outcome label (`success`, `failure`, `rejected`). Used by the dashboard recipes. |
 
-The structured fields are emitted in addition to the unstructured
-message. The deployment log store (Loki, Elasticsearch, etc.)
-ingests the structured fields as labels or columns; the populated
-dashboard joins the fields to the Prometheus metrics by the
-`request_id` key.
+Structured fields are emitted in addition to the message. The deployment
+log store (Loki, Elasticsearch, etc.) can ingest them as labels or columns.
+Direct `request_id` correlation becomes available only after the relevant
+request interceptors and business call sites attach that field.
 
 The fields are stable. A change to a field name or type is a
 breaking change and requires a corresponding update to the
@@ -87,8 +89,9 @@ The control plane and the data plane use the standard log levels:
   page.
 - `ERROR` — fault that requires operator attention. The page
   threshold.
-- `FATAL` — fault that requires the process to terminate. The
-  page-after-restart threshold.
+
+Process-terminating faults are logged at `ERROR` before exit; neither
+SLF4J nor `slog` defines a portable `FATAL` level.
 
 The Helm chart exposes `logging.level: INFO` as the default. The
 operator can override the level per component through the chart
@@ -97,16 +100,13 @@ records the values.
 
 ## Message format
 
-The default message format is line-delimited JSON. The Helm chart
-exposes `logging.pattern` for the operator to override the format
-to a human-readable template. The data plane Java executables
-follow the SLF4J + Logback default; the JSON layout is the
-`logstash-logback-encoder` default.
-
-The handbook rule is: a deployment that uses a structured log store
-(Loki, Elasticsearch) must override the pattern to JSON. A
-deployment that uses a human-readable store (plain text files,
-syslog) can keep the human-readable pattern.
+The migrated Go entry points use `slog.NewJSONHandler`. Coordinator and
+Worker use Logback's `LogstashEncoder`; both defaults are line-delimited
+JSON. `logging.level` is wired to `LOG_LEVEL` independently of the metrics
+toggle. The chart's legacy `logging.pattern` value is not consumed by these
+entry points. A Java deployment can replace the Logback configuration with
+`-Dlogback.configurationFile=<path>`; changing the Go format requires a
+code or log-shipping configuration change.
 
 ## Sensitive fields
 
@@ -185,15 +185,14 @@ join procedure.
 
 ## Follow-up migration
 
-The Java data plane migration to SLF4J is complete as of Phase 7
-Slice 26 follow-up (F2). The implementation satisfies the three
-follow-up expectations recorded in the §"Logger naming / Java data
-plane" section:
+The Java data plane error-path migration to SLF4J is complete as of
+Phase 7 Slice 26 follow-up F2:
 
-1. Every `System.err.printf` call in `CoordinatorApplication`,
-   `WorkerApplication`, and `ExecutionHeartbeat` is replaced with a
-   SLF4J `Logger.error(...)` call. The logger name is the calling
-   class's fully qualified name.
+1. Failures in `CoordinatorApplication`, `WorkerApplication`, and
+   `ExecutionHeartbeat` emit SLF4J `Logger.error(...)` events. Stable CLI
+   summaries and liveness output remain on `stdout`/`stderr` for
+   compatibility. The logger name is the calling class's fully qualified
+   name.
 2. The Logback configuration in
    `engine/{coordinator,worker}/src/main/resources/logback.xml`
    installs the `LogstashEncoder` from `logstash-logback-encoder`
@@ -204,14 +203,12 @@ plane" section:
    through the SLF4J + Logback test layout that the JUnit 5 test
    framework expects.
 
-The Go control plane migration to `slog` is complete as of Phase 7
-Slice 26 follow-up (F3). Every `log.Printf` call in
-`api-server`, `console`, `scheduler`, `connection-test-executor`,
-and the `astra-auth-admin` CLI is replaced with a `slog.Logger`
-call. The structured field emitters (`component`, `request_id`,
-`tenant_id`, `job_id`) are present in the call sites; the
-`request_id` wiring through the gRPC interceptor is recorded in
-§"Request ID wiring".
+The Go entry-point migration to `slog` is complete as of F3. Existing
+startup, shutdown, and error records in `api-server`, `console`,
+`scheduler`, `connection-test-executor`, and `astra-auth-admin` use JSON
+loggers with `component`. Request-scoped `request_id`, `tenant_id`, and
+`job_id` propagation remains follow-up instrumentation; logger tests only
+verify that supplied structured fields are preserved.
 
 The implementation commits are recorded in
 [`changelog.md`](changelog.md).

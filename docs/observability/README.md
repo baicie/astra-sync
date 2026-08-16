@@ -18,14 +18,22 @@ must combine all three to reach a root cause.
 
 | Signal | Source | Format | Sample destination |
 |---|---|---|---|
-| Metrics | Prometheus client library calls in the control plane Go binaries | Prometheus text exposition | `monitoring.prometheus.port: 9090` (deployment-side rewrite) |
-| Logs | SLF4J in the Java data plane, zap in the controller, stdlib `log` in the API Server and Console | line-delimited JSON or pattern-formatted text | Loki / stdout / deployment log store |
+| Metrics | Prometheus descriptor packages in the Go control plane; sampled business observations are pending | Prometheus text exposition | `monitoring.prometheus.port: 9090` (deployment-side rewrite) |
+| Logs | SLF4J + Logback in Java error paths, zap in the Controller, and `log/slog` in the other migrated Go entry points | line-delimited JSON | Loki / stdout / deployment log store |
 | Audit | PostgreSQL `audit_events` table (Slice 18) | relational rows | PostgreSQL → deployment audit store |
 
-The data plane Java executables currently use `System.out.printf`
-and `System.err.printf`. The migration to SLF4J is a follow-up slice
-that the handbook's [`log-conventions.md`](log-conventions.md) §"Java
-data plane" section pre-records.
+The closeout implementation installs the logging backends and the
+Prometheus exposition surface. Coordinator and Worker error paths use
+SLF4J while their stable CLI and liveness summaries remain on
+`stdout`/`stderr`. The Go API Server, Console, Scheduler, Connection Test
+Executor, and auth admin CLI use module-local `slog` JSON loggers.
+
+Prometheus descriptors and dedicated `/metrics` listeners are wired for
+the long-running Go executables. Business call sites do not yet call the
+counter or histogram APIs, and no call site uses
+`ObserveWithExemplar`/`AddWithExemplar`. The catalog and dashboard recipes
+therefore describe the target metric contract, not a currently populated
+per-tenant SLO dashboard.
 
 ## Documents
 
@@ -87,17 +95,18 @@ The handbook does not:
   sections. The chart exposes the knobs the operator uses to wire
   the platform's signal store; the handbook documents the
   conventions the wire must follow.
-- Migrate the Java data plane to SLF4J. The migration is a
-  follow-up slice; the handbook documents the convention.
+- Claim that descriptor registration produces business samples. Business
+  call-site instrumentation and exemplar correlation remain follow-up work.
 
 The handbook does:
 
-- Record every metric name, log field, and audit column that the
-  production code currently emits.
+- Distinguish implemented logging/exposition infrastructure from reserved
+  metric names and fields that still need business call-site wiring.
 - Provide the per-tenant SLI/SLO definitions and the reference
   queries that the operator uses to derive an SLO dashboard.
 - Document the `request_id` join key that links the three signals.
-- Record the data-plane SLF4J migration as a follow-up slice.
+- Record the completed Java error-path migration and the remaining stable
+  CLI output boundary.
 
 ## CI guard
 

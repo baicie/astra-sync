@@ -51,16 +51,20 @@ locally and the CI run on the PR passes.
 
 | Risk | Mitigation |
 |---|---|
-| The handbook documents a metric name that the production code does not emit. | The follow-up slice that registers the Prometheus client in the control plane Go modules and the Java module must emit the metrics documented in the catalog. The handbook references the metric names today so the follow-up is mechanical. |
-| The follow-up migration breaks the existing production behaviour. | The follow-up slice is gated by the Phase 7 acceptance document. The slice is documented in the Phase 7 ADR-047 Consequences section so the boundary between the documentation-only Slice 26 and the code-migration follow-up stays clear. |
+| The handbook documents a metric name that the production code does not emit. | The catalog labels each family as emitted, descriptor-only, or reserved. Descriptor registration is verified separately from future business call-site instrumentation. |
+| The follow-up migration breaks the existing production behaviour. | F1/F2 preserve stable CLI and liveness output while routing error paths through SLF4J. F3 uses module-local loggers and F4/F5 keep metrics fail-closed when disabled. |
 | The handbook drifts from the Helm chart. | The Helm chart exposes the `monitoring.prometheus.port` and `logging.pattern` knobs; the handbook records the convention that the operator uses to wire the platform's signal store. A change to the chart values requires a corresponding update to the handbook. |
 | The check-runbooks guard rejects a populated document. | The guard is best-effort. A false positive is fixable by removing the production hostname pattern or by adding a placeholder. The guard is consistent with the Slice 24 guard. |
 
 ## Rollout
 
-The slice does not require a deployment rollout. The handbook is
-documentation. The slice ships when the PR merges.
+The closeout requires no automatic rollout. Helm renders the optional
+metrics listeners and ServiceMonitor resources only when enabled; the
+default-disabled listener path remains unchanged. The implementation ships
+when the closeout PR merges.
 
 ## Open questions
 
-None. The slice scope is documented in ADR-047 and the design.
+Business metric observations, bounded exemplars, and Java data-plane metric
+families are intentionally deferred. The boundary is documented in ADR-047
+and the observability handbook.

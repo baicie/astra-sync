@@ -7,7 +7,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/netip"
@@ -47,6 +47,7 @@ type config struct {
 	grpcListen                 string
 	grpcEndpoint               string
 	httpListen                 string
+	metricsListen              string
 	environment                string
 	authMode                   string
 	oidcIssuer                 string
@@ -74,14 +75,23 @@ type config struct {
 }
 
 func main() {
+	logger := newComponentLogger("apiserver", os.Stdout, os.Getenv("LOG_LEVEL"))
+	slog.SetDefault(logger)
+
 	configuration, err := loadConfig(os.Getenv)
 	if err != nil {
-		log.Fatal(err)
+		logger.Error("failed to load configuration", "error", err.Error())
+		os.Exit(1)
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	if _, err := metricsServer(ctx, logger, configuration.metricsListen); err != nil {
+		logger.Error("metrics listener failed to start", "error", err.Error())
+		os.Exit(1)
+	}
 	if err := run(ctx, configuration); err != nil {
-		log.Fatal(err)
+		logger.Error("api-server terminated with error", "error", err.Error())
+		os.Exit(1)
 	}
 }
 
@@ -199,9 +209,10 @@ func loadConfig(getenv func(string) string) (config, error) {
 	}
 	return config{
 		databaseURL: databaseURL, grpcListen: valueOrDefault(getenv("GRPC_LISTEN_ADDRESS"), ":50051"),
-		grpcEndpoint: valueOrDefault(getenv("GRPC_GATEWAY_ENDPOINT"), "127.0.0.1:50051"),
-		httpListen:   valueOrDefault(getenv("HTTP_LISTEN_ADDRESS"), ":8080"),
-		environment:  environment, authMode: authMode,
+		grpcEndpoint:  valueOrDefault(getenv("GRPC_GATEWAY_ENDPOINT"), "127.0.0.1:50051"),
+		httpListen:    valueOrDefault(getenv("HTTP_LISTEN_ADDRESS"), ":8080"),
+		metricsListen: strings.TrimSpace(getenv("METRICS_LISTEN_ADDRESS")),
+		environment:   environment, authMode: authMode,
 		oidcIssuer: getenv("OIDC_ISSUER"), oidcAudience: getenv("OIDC_AUDIENCE"),
 		catalogPath:      valueOrDefault(getenv("CONNECTOR_INVENTORY_PATH"), defaultCatalogPath()),
 		executionProfile: valueOrDefault(getenv("CONNECTOR_EXECUTION_PROFILE"), "standard"),
@@ -560,7 +571,7 @@ func reconcileCompilerCatalog(
 	inventory, err := compiler.Inventory(ctx, configuration.executionProfile)
 	if err != nil {
 		if _, retainedErr := repository.Current(ctx, configuration.executionProfile); retainedErr == nil {
-			log.Printf("compiler inventory publisher unavailable; serving last verified snapshot")
+			slog.Default().Warn("compiler inventory publisher unavailable; serving last verified snapshot")
 			return nil
 		}
 		return fmt.Errorf("read deployment connector inventory from compiler: %w", err)
@@ -632,7 +643,7 @@ func reconcileDeploymentCatalog(
 	payload, err := os.ReadFile(configuration.catalogPath)
 	if err != nil {
 		if _, retainedErr := repository.Current(ctx, configuration.executionProfile); retainedErr == nil {
-			log.Printf("connector inventory publisher unavailable; serving last verified snapshot")
+			slog.Default().Warn("connector inventory publisher unavailable; serving last verified snapshot")
 			return nil
 		}
 		return fmt.Errorf("read deployment connector inventory: %w", err)

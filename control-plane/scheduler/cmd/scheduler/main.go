@@ -32,7 +32,7 @@ import (
 const shutdownTimeout = 10 * time.Second
 
 func main() {
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	logger := newComponentLogger("scheduler", os.Stdout, os.Getenv("LOG_LEVEL"))
 	slog.SetDefault(logger)
 	configuration, err := loadConfig(os.Getenv)
 	if err != nil {
@@ -41,6 +41,10 @@ func main() {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	if _, err := metricsServer(ctx, logger, os.Getenv("METRICS_LISTEN_ADDRESS")); err != nil {
+		logger.Error("metrics listener failed to start", "error", err)
+		os.Exit(1)
+	}
 	if err := run(ctx, configuration, logger); err != nil {
 		logger.Error("scheduler stopped", "error", err)
 		os.Exit(1)

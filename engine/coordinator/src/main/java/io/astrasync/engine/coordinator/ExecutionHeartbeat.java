@@ -9,9 +9,13 @@ import java.util.Optional;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /** Sends authenticated liveness while the Coordinator owns an execution. */
 final class ExecutionHeartbeat implements AutoCloseable {
+    private static final Logger LOG = LoggerFactory.getLogger(ExecutionHeartbeat.class);
+
     private final ExecutionHeartbeatConfiguration configuration;
     private final HttpClient client;
     private final ScheduledExecutorService executor;
@@ -57,7 +61,7 @@ final class ExecutionHeartbeat implements AutoCloseable {
         try {
             send();
         } catch (RuntimeException exception) {
-            System.err.println("execution heartbeat failed: " + exception.getMessage());
+            LOG.error("execution heartbeat failed", exception);
         }
     }
 

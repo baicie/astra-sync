@@ -48,11 +48,12 @@ This slice does not:
 
 ## Follow-up records
 
-The Phase 7 Slice 26 follow-up slices (F1–F5) close the gap between
-the documentation and the implementation. They are recorded in
+The Phase 7 Slice 26 follow-up slices (F1–F5) provide the logging,
+descriptor, exposition, and deployment foundation. They are recorded in
 [`../../observability/changelog.md`](../../observability/changelog.md)
-together with their source commits. The follow-up slices satisfy
-the §"Boundary / Does not" section of this README.
+together with their source commits and closeout PR. Business metric
+observations and Prometheus exemplars remain a separate follow-up; descriptor
+registration alone is not treated as emitted SLO data.
 
 - F1: SLF4J + Logback + Logstash JSON foundation for the Java data
   plane (coordinator + worker).
@@ -60,13 +61,19 @@ the §"Boundary / Does not" section of this README.
   `WorkerApplication`, and `ExecutionHeartbeat` error paths.
 - F3: `log/slog` migration of the API Server, Console, Scheduler,
   Connection Test Executor, and the auth admin CLI.
-- F4: Prometheus client registration in the API Server, Scheduler,
-  Connection Test Executor, auth library, and Console, plus the
-  dedicated `/metrics` HTTP listener on port `9090`.
+- F4: Prometheus descriptor packages in the API Server, Scheduler,
+  Connection Test Executor, auth library, and Console, plus dedicated
+  `/metrics` listeners for the long-running executables. The one-shot auth
+  CLI has no listener, and business call sites are not instrumented yet.
 - F5: Helm chart wire-up of `monitoring.prometheus.enabled`,
   `METRICS_LISTEN_ADDRESS`, the `metrics` Service port, and the
   `ServiceMonitor` CRD. CI render guard verifies the toggle is
   fail-closed.
+
+The next observability implementation slice must add business call-site
+counter/histogram updates, bounded `request_id` exemplars, and Java
+data-plane metrics before the reference dashboard queries can be used as
+live SLO evidence.
 
 ## Records
 

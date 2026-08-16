@@ -24,7 +24,7 @@ import (
 const shutdownTimeout = 10 * time.Second
 
 func main() {
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	logger := newComponentLogger("connection-test-executor", os.Stdout, os.Getenv("LOG_LEVEL"))
 	configuration, err := loadConfig(os.Getenv)
 	if err != nil {
 		logger.Error("invalid Connection test executor configuration", "error", err)
@@ -32,6 +32,10 @@ func main() {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	if _, err := metricsServer(ctx, logger, os.Getenv("METRICS_LISTEN_ADDRESS")); err != nil {
+		logger.Error("metrics listener failed to start", "error", err)
+		os.Exit(1)
+	}
 	if err := run(ctx, configuration, logger); err != nil {
 		logger.Error("Connection test executor stopped", "error", err)
 		os.Exit(1)

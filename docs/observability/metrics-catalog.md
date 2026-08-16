@@ -8,46 +8,34 @@ and the dashboard recipes can reference them without ambiguity.
 ## Current state
 
 The Helm chart exposes `monitoring.prometheus.enabled: true` and
-`monitoring.prometheus.port: 9090`. The `serviceMonitor` resource
-default is disabled. The control plane Go modules (`api-server`,
-`auth`, `console`) declare the Prometheus client library as a direct
-dependency as of Phase 7 Slice 26 follow-up (F4); the `controller`
-module uses the metrics endpoint exposed by `controller-runtime`.
+`monitoring.prometheus.port: 9090`; `serviceMonitor` remains disabled by
+default. The API Server, Scheduler, Connection Test Executor, and Console
+declare the Prometheus client directly, register metric descriptors, and
+bind a dedicated `/metrics` listener when `METRICS_LISTEN_ADDRESS` is set.
+An empty address disables that listener. The auth module contains a
+descriptor package, but its one-shot admin CLI neither imports it nor binds
+an endpoint. The Controller continues to use controller-runtime's endpoint.
 
-The catalog is no longer forward-looking. The metrics the catalog
-documents are emitted by the components listed in
-[§"Implementation status"](#implementation-status). The follow-up
-slices that land the registration and the deployment surface are
-recorded in [`changelog.md`](changelog.md).
+This is registration and exposition wiring, not business instrumentation.
+No production call site currently calls these CounterVec/HistogramVec
+instances, and no call site uses `AddWithExemplar` or
+`ObserveWithExemplar`. A scrape exposes Go/process collectors immediately;
+the catalogued business series appear only after a future call site creates
+a labelled sample.
 
 ## Implementation status
 
-The table records the slice that registers each metric and the source
-commit on the slice's branch. The `controller_*` metrics are emitted
-by `controller-runtime`'s built-in Prometheus collector; the
-`apiserver_*`, `scheduler_*`, `connection_test_*`, and `console_*`
-metrics are emitted by the dedicated `internal/metrics` packages
-introduced in F4. The `coordinator_*` and `worker_*` metrics remain
-forward-looking; the Java data plane Micrometer migration is not in
-scope for this PR cluster.
+The table separates descriptor availability from sampled runtime data.
 
-| Metric | Component | Slice | Commit |
+| Metric family | Component | Registration/exposition | Business samples |
 |---|---|---|---|
-| `apiserver_auth_request_total` | api-server | F4 | `2d9debe` |
-| `apiserver_auth_request_duration_seconds` | api-server | F4 | `2d9debe` |
-| `apiserver_sign_in_total` | api-server | F4 | `2d9debe` |
-| `apiserver_session_revoke_total` | api-server | F4 | `2d9debe` |
-| `apiserver_audit_query_duration_seconds` | api-server | F4 | `2d9debe` |
-| `apiserver_trusted_proxy_hsts_total` | api-server | F4 | `2d9debe` |
-| `scheduler_job_assignment_total` | scheduler | F4 | `7e463bb` |
-| `scheduler_lease_takeover_total` | scheduler | F4 | `7e463bb` |
-| `scheduler_job_reconcile_duration_seconds` | scheduler | F4 | `7e463bb` |
-| `connection_test_total` | connection-test-executor | F4 | `abf48c9` |
-| `auth_sign_in_total` | auth library | F4 | `5e216db` |
-| `auth_session_revoke_total` | auth library | F4 | `5e216db` |
-| `console_request_total` | console | F4 | `4336d4e` |
-| `console_render_duration_seconds` | console | F4 | `4336d4e` |
-| `controller_*` | controller | controller-runtime | upstream collector |
+| `apiserver_*` listed below | api-server | F4 descriptor + `/metrics` | pending |
+| `scheduler_*` listed below | scheduler | F4 descriptor + `/metrics` | pending |
+| `connection_test_total` | connection-test-executor | F4 descriptor + `/metrics` | pending |
+| `console_*` listed below | console | F4 descriptor + `/metrics` | pending |
+| `auth_*` listed below | auth library | descriptor package only | pending |
+| controller-runtime built-ins | controller | upstream endpoint | emitted by controller-runtime |
+| `coordinator_*`, `worker_*` listed below | Java data plane | not registered | pending |
 
 ## Naming convention
 
@@ -87,6 +75,9 @@ Every metric carries the following labels where applicable:
 | `namespace` | Kubernetes namespace. | constant |
 | `component` | Component name (`apiserver`, `controller`, etc.). | constant |
 | `outcome` | Outcome label (`success`, `failure`, `rejected`). | constant |
+| `actor_id` | Principal UUID for actor-scoped operations. | bounded by active principals |
+| `worker_id` | Worker identifier for assignment operations. | bounded by worker count |
+| `handler` | Stable Console handler name. | constant allowlist |
 
 Histogram metrics add a `le` label that Prometheus computes
 automatically. The catalog does not enumerate the buckets; the
@@ -95,9 +86,8 @@ specification overrides them.
 
 ## Authentication and authorization metrics
 
-The API Server and the Slice 18 authentication service emit metrics
-that join the audit table. The metric names align with the audit
-event types.
+The API Server and auth descriptor packages reserve metrics that align with
+the audit event types. Their business call sites are not instrumented yet.
 
 | Metric | Type | Labels | Description |
 |---|---|---|---|
@@ -106,14 +96,19 @@ event types.
 | `apiserver_sign_in_total` | counter | `tenant_id`, `outcome` | Sign-in events, including denied sign-ins. |
 | `apiserver_session_revoke_total` | counter | `tenant_id`, `actor_id` | Sessions revoked by the admin CLI or by the audit-driven revocation path. |
 | `apiserver_audit_query_duration_seconds` | histogram | `tenant_id` | Time to fulfil a single audit query. |
+| `apiserver_trusted_proxy_hsts_total` | counter | `tenant_id` | HSTS responses reserved for trusted-proxy middleware instrumentation. |
+| `auth_sign_in_total` | counter | `tenant_id`, `outcome` | Auth-library sign-in descriptor; the admin CLI does not expose it. |
+| `auth_session_revoke_total` | counter | `tenant_id` | Auth-library revoke descriptor; the admin CLI does not expose it. |
 
 The histogram metrics emit `le` buckets; the dashboard recipes
 compose the P50, P95, and P99 from the buckets.
 
 ## Job lifecycle metrics
 
-The Controller and the Scheduler emit metrics that reflect the
-phase-4 control-plane lifecycle (ADR-029, ADR-031).
+The table reserves lifecycle metrics for the Controller and Scheduler
+(ADR-029, ADR-031). The F4 Scheduler descriptors exist but are not observed;
+the named custom Controller metrics are not implemented by
+controller-runtime's generic collector.
 
 | Metric | Type | Labels | Description |
 |---|---|---|---|
@@ -122,16 +117,27 @@ phase-4 control-plane lifecycle (ADR-029, ADR-031).
 | `controller_epoch_fence_total` | counter | `tenant_id`, `outcome` | Epoch-fence attempts from the Scheduler. |
 | `scheduler_job_assignment_total` | counter | `tenant_id`, `worker_id`, `outcome` | Job assignment attempts from the Scheduler. |
 | `scheduler_lease_takeover_total` | counter | `tenant_id`, `outcome` | Leader-lease takeover events. |
+| `scheduler_job_reconcile_duration_seconds` | histogram | `tenant_id` | Time to reconcile one scheduled Job. |
 
-The Controller metrics are joined to the audit table by the
-`request_id` field recorded in the audit row. The
-[`audit-correlation.md`](audit-correlation.md) document records the
-join procedure.
+Future call-site instrumentation can correlate these metrics to audit rows
+through exemplars; that wiring is not present in the current implementation.
+
+## Connection test and Console metrics
+
+F4 registers the following descriptors and exposes them from the owning
+long-running executable. Their business call sites remain unwired.
+
+| Metric | Type | Labels | Description |
+|---|---|---|---|
+| `connection_test_total` | counter | `tenant_id`, `outcome` | Connection-test outcomes. |
+| `console_request_total` | counter | `tenant_id`, `outcome`, `handler` | Console request outcomes by stable handler name. |
+| `console_render_duration_seconds` | histogram | `handler` | Console rendering duration. |
 
 ## Data plane metrics
 
-The Coordinator and the Worker emit metrics that reflect the
-phase-5 Arrow batch and the checkpoint lifecycle (ADR-032, ADR-033).
+The following names are reserved for future Coordinator and Worker
+instrumentation of the Phase 5 Arrow batch and checkpoint lifecycle
+(ADR-032, ADR-033). They are not registered or emitted today.
 
 | Metric | Type | Labels | Description |
 |---|---|---|---|
@@ -143,11 +149,8 @@ phase-5 Arrow batch and the checkpoint lifecycle (ADR-032, ADR-033).
 | `worker_records_written_total` | counter | `tenant_id`, `job_id` | Records written by the Worker. |
 | `worker_records_rejected_total` | counter | `tenant_id`, `job_id`, `reason` | Records rejected by the sink writer; the `reason` is a stable code, not a free-form message. |
 
-The `coordinator_*` and `worker_*` metrics are emitted by the Java
-data plane. The Java module import of the Prometheus client is
-expected to land in the SLF4J migration follow-up slice; the
-handbook references the metrics today so the dashboard recipes can
-be authored against the eventual shape.
+The Java data plane has no Prometheus/Micrometer client wiring. These names
+remain a dashboard contract for a future implementation slice.
 
 ## CLI metrics
 
@@ -186,11 +189,10 @@ duplicate the shape.
 
 ## Follow-up
 
-The Slice 26 follow-up slices (F1–F5) are the implementation that
-backs the catalog. They are recorded in [`changelog.md`](changelog.md)
-together with their source commits. The Java data plane Micrometer
-migration that emits the `coordinator_*` and `worker_*` metrics is
-deferred to a future slice.
+F4 and F5 provide descriptor packages, HTTP exposition, and Helm discovery.
+Business call-site observations, request exemplars, and Java data-plane
+metrics are deferred. The landed infrastructure is recorded in
+[`changelog.md`](changelog.md).
 
 ## Inline placeholders for the populated handbook
 

@@ -69,9 +69,9 @@ spec:
             {{- if .Values.monitoring.prometheus.enabled }}
             - name: METRICS_LISTEN_ADDRESS
               value: {{ include "astrasync.metricsListenAddress" . | quote }}
+            {{- end }}
             - name: LOG_LEVEL
               value: {{ .Values.logging.level | quote }}
-            {{- end }}
             - name: SCHEDULER_DISPATCH_NAMESPACE
               valueFrom:
                 fieldRef:

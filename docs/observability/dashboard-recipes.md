@@ -15,6 +15,15 @@ The recipes use Prometheus as the query language. The companion
 queries for the audit table are SQL recipes that the operator runs
 against the PostgreSQL audit database.
 
+## Implementation status
+
+These PromQL expressions are target contracts. F4/F5 register the Go
+descriptors, expose `/metrics`, and wire Prometheus discovery, but production
+business call sites do not yet create the referenced samples. The
+`coordinator_*` and `worker_*` families are not registered at all. Operators
+must not use these recipes as live SLO evidence until the corresponding
+call-site instrumentation has landed.
+
 ## Availability recipes
 
 ### Sign-in success rate (per tenant)
@@ -161,22 +170,17 @@ sum by (tenant_id) (
 )
 ```
 
-The metric is emitted by the Slice 22 transport hardening
-middleware. The recipe is a placeholder for the follow-up slice
-that registers the Prometheus client in the API Server.
+F4 registers this descriptor, but the Slice 22 middleware does not yet
+increment it. The recipe remains inactive until that call site is wired.
 
 ## Join with the audit table
 
-The recipes that join the metric to the audit table use the
-`request_id` field. The join procedure is documented in the
-[`audit-correlation.md`](audit-correlation.md) document. The
-populated dashboard joins the exemplar to the matching log record
-when the operator clicks the `request_id` value in the panel.
-
-The recipes that do not join to the audit table stand alone. The
-operator who needs to investigate a regression starts at the
-metric, follows the `request_id` to the audit row, and follows the
-`request_id` to the log record.
+The target join uses a `request_id` exemplar as documented in
+[`audit-correlation.md`](audit-correlation.md). Exemplars are not currently
+emitted, so the populated dashboard cannot yet offer a direct request link.
+Until that follow-up lands, operators correlate by tenant, component, and
+timestamp and use `request_id` only where the log call site already supplies
+it.
 
 ## What the recipes do not record
 
@@ -191,16 +195,11 @@ metric, follows the `request_id` to the audit row, and follows the
 
 ## Follow-up
 
-The follow-up slice that registers the Prometheus client in the
-API Server, the Console, and the auth module must ensure that the
-metrics referenced by the recipes are emitted. The follow-up slice
-that migrates the Java data plane to SLF4J and registers the
-Prometheus client must ensure that the freshness and deliverability
-metrics are emitted.
-
-The follow-up slices are recorded in the Phase 7 ADR-047
-Consequences section so the boundary between the documentation-only
-Slice 26 and the code-migration follow-ups stays clear.
+The remaining implementation must instrument the API Server, Console,
+Scheduler, Connection Test Executor, and server-side auth call sites; add
+bounded exemplars; and register the Java data-plane metric families. This is
+separate from the completed descriptor and endpoint foundation recorded in
+ADR-047.
 
 ## Inline placeholders for the populated handbook
 

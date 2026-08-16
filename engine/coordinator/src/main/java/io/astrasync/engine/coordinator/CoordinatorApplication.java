@@ -23,9 +23,13 @@ import java.nio.file.Files;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /** Executable Coordinator for the operational JDBC full-load path. */
 public final class CoordinatorApplication {
+    private static final Logger LOG = LoggerFactory.getLogger(CoordinatorApplication.class);
+
     private CoordinatorApplication() {}
 
     public static void main(String[] args) {
@@ -50,9 +54,14 @@ public final class CoordinatorApplication {
                         result.metrics().writtenCount());
             }
         } catch (RuntimeException exception) {
+            logFailure(exception);
             System.err.println("FAILED to start or execute Coordinator: " + message(exception));
             System.exit(1);
         }
+    }
+
+    static void logFailure(RuntimeException exception) {
+        LOG.error("coordinator failed to start or execute", exception);
     }
 
     @SuppressWarnings("try")
