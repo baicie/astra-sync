@@ -5,7 +5,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/netip"
@@ -28,6 +28,7 @@ import (
 	"io.astrasync/control-plane/auth"
 	authpostgres "io.astrasync/control-plane/auth/postgres"
 	"io.astrasync/control-plane/auth/transport"
+	"io.astrasync/control-plane/observability"
 )
 
 const shutdownTimeout = 10 * time.Second
@@ -135,14 +136,19 @@ func (b grpcBackend) ListAuditEvents(ctx context.Context, request *jobv1.ListAud
 }
 
 func main() {
+	logger := observability.NewComponentLogger("console")
+	slog.SetDefault(logger)
+
 	configuration, err := loadConfig(os.Getenv)
 	if err != nil {
-		log.Fatal(err)
+		logger.Error("failed to load configuration", "error", err.Error())
+		os.Exit(1)
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	if err := run(ctx, configuration); err != nil {
-		log.Fatal(err)
+		logger.Error("console terminated with error", "error", err.Error())
+		os.Exit(1)
 	}
 }
 
