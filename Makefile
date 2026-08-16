@@ -84,6 +84,7 @@ check: vet-go check-runbooks
 check-runbooks:
 	@echo "Checking runbook templates..."
 	@python scripts/check-runbook-templates.py
+	@python scripts/check-runbook-templates.py --root docs/observability
 
 # Run the Python script unit tests. The tests live alongside the scripts
 # they exercise; the make target is intentionally narrow so the Java and Go
