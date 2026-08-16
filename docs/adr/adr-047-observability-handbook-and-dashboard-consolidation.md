@@ -2,13 +2,14 @@
 
 ## Status
 
-Accepted (F1–F5 foundation complete; business instrumentation deferred).
+Accepted (F1–F7 complete; API Server SLO instrumentation active).
 Implements Phase 7 Slice 26 and closes the documentation and exposition
 portion of the "Observability consolidation" entry criterion recorded by
 ADR-044 §"Phase 7 entry criteria" §4. The landed logging, descriptor,
 endpoint, and Helm work is recorded in
-[`../observability/changelog.md`](../observability/changelog.md). Business
-metric observations and Prometheus exemplars are explicitly not complete.
+[`../observability/changelog.md`](../observability/changelog.md). F7 activates
+authentication and audit-query observations with bounded exemplars; other Go
+business call sites and Java metric families remain deferred.
 
 ## Context
 
@@ -104,6 +105,26 @@ between the documentation-only Slice 26 and the code-migration
 follow-up stays clear. The repository does not ship the migration in
 Slice 26.
 
+### F7 API Server SLO instrumentation
+
+F7 activates the handbook's first production SLO families without changing
+their names or labels. A shared injectable recorder observes authentication
+decisions and authorized audit queries. Authentication uses three stable
+outcomes: `success` for admitted requests, `rejected` for caller input or
+permission rejection, and `failure` for internal authentication or policy
+faults. The availability SLO includes `success|failure` and excludes
+`rejected`.
+
+Tenant labels are derived from authenticated membership state. Decisions made
+before tenant resolution use `_unknown`; self-scope methods use `_platform`.
+Audit queries are observed only after authorization returns a trusted tenant
+decision. This prevents arbitrary request scope from creating time series.
+
+The recorder attaches one `request_id` exemplar only when the value is a
+canonical lowercase UUID. It never adds request IDs to normal metric labels.
+The API Server metrics handler enables OpenMetrics negotiation because the
+legacy Prometheus text format cannot transmit exemplars.
+
 ### Verification
 
 The slice is verified by:
@@ -135,8 +156,9 @@ The slice is verified by:
 - F3 uses module-local `slog` JSON logger constructors in the migrated Go
   executables; no cross-module helper or local `replace` is introduced.
 - F4/F5 register Go metric descriptors, expose optional `/metrics`
-  listeners, and wire Helm discovery. Business observations, request
-  exemplars, and Java data-plane metric families remain future work.
+  listeners, and wire Helm discovery. F7 activates the authentication and
+  audit-query SLO families with bounded request exemplars. Remaining Go
+  business observations and Java data-plane metric families stay future work.
 - The audit-correlation document becomes a pre-requisite for any
   log-side or metric-side change. Future slices that add a log
   field or a metric label must update the corresponding document

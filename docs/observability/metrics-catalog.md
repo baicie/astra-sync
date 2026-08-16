@@ -16,12 +16,13 @@ An empty address disables that listener. The auth module contains a
 descriptor package, but its one-shot admin CLI neither imports it nor binds
 an endpoint. The Controller continues to use controller-runtime's endpoint.
 
-This is registration and exposition wiring, not business instrumentation.
-No production call site currently calls these CounterVec/HistogramVec
-instances, and no call site uses `AddWithExemplar` or
-`ObserveWithExemplar`. A scrape exposes Go/process collectors immediately;
-the catalogued business series appear only after a future call site creates
-a labelled sample.
+F7 adds business instrumentation for API Server authentication decisions and
+authorized audit queries. Those call sites update three families and attach a
+canonical UUID `request_id` through `AddWithExemplar` or
+`ObserveWithExemplar`. The API Server handler enables OpenMetrics content
+negotiation, which is required to transmit those exemplars. The remaining
+descriptors are still registration-only; a scrape exposes their business
+series only after a future call site creates a labelled sample.
 
 ## Implementation status
 
@@ -29,7 +30,9 @@ The table separates descriptor availability from sampled runtime data.
 
 | Metric family | Component | Registration/exposition | Business samples |
 |---|---|---|---|
-| `apiserver_*` listed below | api-server | F4 descriptor + `/metrics` | pending |
+| `apiserver_auth_request_total`, `apiserver_auth_request_duration_seconds` | api-server | F4 descriptor + `/metrics` | emitted by F7 authentication interceptor |
+| `apiserver_audit_query_duration_seconds` | api-server | F4 descriptor + `/metrics` | emitted by F7 authorized audit-query path |
+| remaining `apiserver_*` listed below | api-server | F4 descriptor + `/metrics` | pending |
 | `scheduler_*` listed below | scheduler | F4 descriptor + `/metrics` | pending |
 | `connection_test_total` | connection-test-executor | F4 descriptor + `/metrics` | pending |
 | `console_*` listed below | console | F4 descriptor + `/metrics` | pending |
@@ -70,7 +73,7 @@ Every metric carries the following labels where applicable:
 
 | Label | Description | Cardinality |
 |---|---|---|
-| `tenant_id` | Tenant UUID. Dropped on metrics that are not tenant-scoped. | bounded by tenant count |
+| `tenant_id` | Trusted tenant UUID. Authentication decisions before tenant resolution use `_unknown`; self-scope methods use `_platform`. | bounded by tenant count plus two fixed values |
 | `job_id` | Job UUID. Dropped on metrics that are not job-scoped. | bounded by active job count |
 | `namespace` | Kubernetes namespace. | constant |
 | `component` | Component name (`apiserver`, `controller`, etc.). | constant |
@@ -86,22 +89,44 @@ specification overrides them.
 
 ## Authentication and authorization metrics
 
-The API Server and auth descriptor packages reserve metrics that align with
-the audit event types. Their business call sites are not instrumented yet.
+The API Server and auth descriptor packages define metrics that align with
+the audit event types. F7 activates the authentication decision counter and
+histogram plus the authorized audit-query histogram. The other rows remain
+descriptor-only.
 
 | Metric | Type | Labels | Description |
 |---|---|---|---|
-| `apiserver_auth_request_total` | counter | `tenant_id`, `outcome` | Authentication requests received by the API Server. |
-| `apiserver_auth_request_duration_seconds` | histogram | `tenant_id`, `outcome` | Time to authenticate a request, including OIDC validation. |
+| `apiserver_auth_request_total` | counter | `tenant_id`, `outcome` | Completed API Server authentication and authorization decisions. |
+| `apiserver_auth_request_duration_seconds` | histogram | `tenant_id`, `outcome` | Decision time through authorization, excluding business-handler execution. |
 | `apiserver_sign_in_total` | counter | `tenant_id`, `outcome` | Sign-in events, including denied sign-ins. |
 | `apiserver_session_revoke_total` | counter | `tenant_id`, `actor_id` | Sessions revoked by the admin CLI or by the audit-driven revocation path. |
-| `apiserver_audit_query_duration_seconds` | histogram | `tenant_id` | Time to fulfil a single audit query. |
+| `apiserver_audit_query_duration_seconds` | histogram | `tenant_id` | Time to fulfil one authorized audit query, including failures after authorization. |
 | `apiserver_trusted_proxy_hsts_total` | counter | `tenant_id` | HSTS responses reserved for trusted-proxy middleware instrumentation. |
 | `auth_sign_in_total` | counter | `tenant_id`, `outcome` | Auth-library sign-in descriptor; the admin CLI does not expose it. |
 | `auth_session_revoke_total` | counter | `tenant_id` | Auth-library revoke descriptor; the admin CLI does not expose it. |
 
-The histogram metrics emit `le` buckets; the dashboard recipes
-compose the P50, P95, and P99 from the buckets.
+The authentication `outcome` allowlist is:
+
+- `success`: authentication and authorization completed and the request was
+  admitted to its business handler.
+- `rejected`: invalid credentials, invalid request scope, or insufficient
+  permission. Caller-controlled rejection traffic does not consume the
+  service availability error budget.
+- `failure`: an authentication dependency, policy state, or authenticated
+  principal invariant failed internally.
+
+Before authentication resolves a membership, the recorder uses the fixed
+`_unknown` tenant value rather than caller input. Self-scope methods use the
+fixed `_platform` value. Once a membership is resolved, only its validated
+tenant UUID is used. Audit-query observations begin only after authorization
+returns a trusted tenant decision, so unauthorized requests cannot create
+tenant series.
+
+F7 attaches `request_id` exemplars to the authentication counter and
+histogram and to the audit-query histogram only when the value is a canonical
+lowercase UUID. Other values still produce the bounded metric sample but no
+exemplar. `request_id` is never a normal time-series label. Histogram metrics
+emit `le` buckets; the dashboard recipes compose P50, P95, and P99 from them.
 
 ## Job lifecycle metrics
 
@@ -189,9 +214,11 @@ duplicate the shape.
 
 ## Follow-up
 
-F4 and F5 provide descriptor packages, HTTP exposition, and Helm discovery.
-Business call-site observations, request exemplars, and Java data-plane
-metrics are deferred. The landed infrastructure is recorded in
+F4 and F5 provide descriptor packages, HTTP exposition, and Helm discovery;
+F7 activates the three API Server SLO families documented above. Business
+observations for the remaining API Server, Console, Scheduler, Connection
+Test Executor, and auth-library descriptors, plus Java data-plane metrics,
+remain deferred. The landed work is recorded in
 [`changelog.md`](changelog.md).
 
 ## Inline placeholders for the populated handbook

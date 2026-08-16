@@ -43,13 +43,34 @@ type AuditRepository interface {
 	auth.AuditWriter
 }
 
+// AuditQueryMetrics records authorized audit-query latency with bounded
+// request correlation.
+type AuditQueryMetrics interface {
+	ObserveAuditQuery(tenantID, requestID string, duration time.Duration)
+}
+
+// AuditServiceOption configures optional AuditService dependencies.
+type AuditServiceOption func(*AuditService) error
+
+// WithAuditQueryMetrics installs the observer for authorized audit queries.
+func WithAuditQueryMetrics(observer AuditQueryMetrics) AuditServiceOption {
+	return func(service *AuditService) error {
+		if observer == nil {
+			return fmt.Errorf("audit query metrics must not be nil")
+		}
+		service.queryMetrics = observer
+		return nil
+	}
+}
+
 type AuditService struct {
 	controlv1.UnimplementedAuditServiceServer
-	repository AuditRepository
-	authorizer auth.Authorizer
-	tokenKey   []byte
-	clock      func() time.Time
-	uid        func() string
+	repository   AuditRepository
+	authorizer   auth.Authorizer
+	tokenKey     []byte
+	clock        func() time.Time
+	uid          func() string
+	queryMetrics AuditQueryMetrics
 }
 
 func NewAuditService(
@@ -58,6 +79,7 @@ func NewAuditService(
 	tokenKey []byte,
 	clock func() time.Time,
 	uid func() string,
+	options ...AuditServiceOption,
 ) (*AuditService, error) {
 	if repository == nil || authorizer == nil || clock == nil || uid == nil {
 		return nil, fmt.Errorf("audit service dependencies must not be nil")
@@ -65,21 +87,41 @@ func NewAuditService(
 	if len(tokenKey) < 32 {
 		return nil, fmt.Errorf("audit page-token key must contain at least 32 bytes")
 	}
-	return &AuditService{
+	service := &AuditService{
 		repository: repository, authorizer: authorizer,
 		tokenKey: append([]byte(nil), tokenKey...), clock: clock, uid: uid,
-	}, nil
+	}
+	for _, option := range options {
+		if option == nil {
+			return nil, fmt.Errorf("audit service option must not be nil")
+		}
+		if err := option(service); err != nil {
+			return nil, err
+		}
+	}
+	return service, nil
 }
 
 func (s *AuditService) ListAuditEvents(
 	ctx context.Context, request *controlv1.ListAuditEventsRequest,
 ) (*controlv1.ListAuditEventsResponse, error) {
+	startedAt := s.clock()
 	if request == nil {
 		return nil, status.Error(codes.InvalidArgument, "request must not be nil")
 	}
 	decision, err := s.authorize(ctx, request.GetTenantId())
 	if err != nil {
 		return nil, err
+	}
+	queryRequestID := requestID(ctx, s.uid)
+	if s.queryMetrics != nil {
+		defer func() {
+			duration := s.clock().Sub(startedAt)
+			if duration < 0 {
+				duration = 0
+			}
+			s.queryMetrics.ObserveAuditQuery(decision.TenantID, queryRequestID, duration)
+		}()
 	}
 	pageSize := request.GetPageSize()
 	if pageSize == 0 && request.GetPageToken() == "" {
@@ -130,7 +172,7 @@ func (s *AuditService) ListAuditEvents(
 	}
 	if err := s.repository.WriteSecurityAudit(ctx, auth.SecurityAuditEvent{
 		EventID: s.uid(), EventType: "audit.list", ActorID: actorID,
-		TenantID: request.GetTenantId(), RequestID: requestID(ctx, s.uid), Outcome: "ALLOWED",
+		TenantID: request.GetTenantId(), RequestID: queryRequestID, Outcome: "ALLOWED",
 		Attributes: map[string]any{
 			"pageSize": int(pageSize), "eventTypeCount": len(query.EventTypes),
 			"outcomeCount": len(query.Outcomes), "hasPageToken": request.GetPageToken() != "",

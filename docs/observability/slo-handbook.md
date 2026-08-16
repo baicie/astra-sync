@@ -4,11 +4,12 @@ The SLO handbook records the per-tenant SLI and SLO definitions that
 the operator consumes through the populated dashboard. The handbook
 is a template; the populated SLO targets are deployment-owned.
 
-The PromQL definitions below are target contracts, not currently live SLOs.
-F4/F5 provide Go metric descriptors and scrape endpoints, but business
-call-site observations and exemplars remain pending. Java data-plane metric
-families are not registered. The SQL audit-completeness query is usable
-independently of that metrics work.
+F4/F5 provide Go metric descriptors and scrape endpoints. F7 makes the API
+Server availability and audit-query latency expressions live by instrumenting
+authentication decisions and authorized audit queries with bounded
+`request_id` exemplars. Freshness and deliverability remain target contracts
+because the Java data-plane metric families are not registered. The SQL
+audit-completeness query remains independently usable.
 
 ## SLI categories
 
@@ -18,7 +19,7 @@ dashboard.
 
 | Category | Description | Source metric |
 |---|---|---|
-| Availability | The control plane accepts sign-in requests and the API Server returns success responses. | `apiserver_auth_request_total` |
+| Availability | The API Server completes authentication and authorization without an internal failure. | `apiserver_auth_request_total` |
 | Freshness | The data plane processes records within the latency budget. | `coordinator_batch_duration_seconds` |
 | Deliverability | The Worker writes records to the sink without rejection. | `worker_records_rejected_total` |
 | Audit completeness | The audit table records every authenticated mutation. | `apiserver_audit_query_duration_seconds` |
@@ -31,15 +32,20 @@ follow-up.
 
 ### SLI
 
-The availability SLI is the ratio of successful sign-in requests to
-total sign-in requests over a rolling window.
+The availability SLI is the ratio of successful authentication decisions to
+all service-accountable authentication decisions over a rolling window.
 
 ```promql
 sum(rate(apiserver_auth_request_total{outcome="success"}[5m]))
 /
-sum(rate(apiserver_auth_request_total[5m]))
+sum(rate(apiserver_auth_request_total{outcome=~"success|failure"}[5m]))
 ```
 
+`rejected` is excluded from the denominator because invalid credentials,
+invalid scope, and insufficient permission are caller decisions rather than
+service downtime. Internal authentication, policy, and principal-state
+errors use `failure` and consume the error budget. Failures before trusted
+tenant resolution use `_unknown`; self-scope decisions use `_platform`.
 The dashboard records the SLI as a percentage. The target is the
 deployment-side SLO target.
 
@@ -174,10 +180,10 @@ follow-up migration slice lands.
 
 ## Follow-up
 
-The remaining follow-up must add business observations and bounded
-`request_id` exemplars to the Go control plane, then register and instrument
-the Java data-plane families used by freshness and deliverability. The
-completed F1–F5 foundation is recorded separately from this remaining work
-in ADR-047 and the observability changelog.
+F7 completes API Server authentication and audit-query observations with
+bounded `request_id` exemplars. Remaining follow-up work must instrument the
+other Go control-plane descriptors and register the Java data-plane families
+used by freshness and deliverability. The completed slices are recorded in
+ADR-047 and the observability changelog.
 
 <!-- placeholders: slo-availability-target, slo-freshness-budget, slo-deliverability-target, audit-retention-days -->

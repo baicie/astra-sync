@@ -48,12 +48,13 @@ This slice does not:
 
 ## Follow-up records
 
-The Phase 7 Slice 26 follow-up slices (F1–F5) provide the logging,
-descriptor, exposition, and deployment foundation. They are recorded in
+The Phase 7 Slice 26 follow-up slices (F1–F7) provide the logging,
+descriptor, exposition, deployment, closeout, and first business
+instrumentation layers. They are recorded in
 [`../../observability/changelog.md`](../../observability/changelog.md)
-together with their source commits and closeout PR. Business metric
-observations and Prometheus exemplars remain a separate follow-up; descriptor
-registration alone is not treated as emitted SLO data.
+together with their source commits and PRs. Descriptor registration alone is
+not treated as emitted SLO data; F7 explicitly identifies the three families
+whose business samples are active.
 
 - F1: SLF4J + Logback + Logstash JSON foundation for the Java data
   plane (coordinator + worker).
@@ -64,16 +65,20 @@ registration alone is not treated as emitted SLO data.
 - F4: Prometheus descriptor packages in the API Server, Scheduler,
   Connection Test Executor, auth library, and Console, plus dedicated
   `/metrics` listeners for the long-running executables. The one-shot auth
-  CLI has no listener, and business call sites are not instrumented yet.
+  CLI has no listener; F4 itself does not instrument business call sites.
 - F5: Helm chart wire-up of `monitoring.prometheus.enabled`,
   `METRICS_LISTEN_ADDRESS`, the `metrics` Service port, and the
   `ServiceMonitor` CRD. CI render guard verifies the toggle is
   fail-closed.
+- F6: Foundation status reconciliation after the F1–F5 closeout.
+- F7: API Server authentication decision counter/histogram and authorized
+  audit-query histogram observations, with OpenMetrics negotiation and
+  canonical UUID `request_id` exemplars.
 
-The next observability implementation slice must add business call-site
-counter/histogram updates, bounded `request_id` exemplars, and Java
-data-plane metrics before the reference dashboard queries can be used as
-live SLO evidence.
+The API Server availability and audit-query latency recipes can now be used as
+live SLO evidence. The next observability implementation slices must activate
+the remaining Go descriptors and add Java data-plane metrics before freshness
+and deliverability recipes become live.
 
 ## Records
 

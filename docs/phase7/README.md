@@ -9,10 +9,13 @@ recorded by ADR-001 through ADR-043.
 
 Slice 23 (control-plane mTLS), Slice 24 (operational runbook templates),
 and Slice 26 (observability handbook) are implementation complete.
-Slice 26 follow-up slices F1–F5 have completed the SLF4J/slog,
-Prometheus descriptor/exposition, and Helm discovery foundation recorded in
+Slice 26 follow-up slices F1–F7 have completed the SLF4J/slog,
+Prometheus descriptor/exposition, Helm discovery, status closeout, and API
+Server SLO instrumentation recorded in
 [`docs/observability/changelog.md`](../observability/changelog.md).
-Business metric observations, `request_id` exemplars, and Java data-plane
+Authentication decision and authorized audit-query observations now provide
+live API Server availability/latency samples with bounded `request_id`
+exemplars. Other control-plane business observations and Java data-plane
 metric families remain deferred and are not counted as live SLO coverage.
 Slice 25 (multi-region) has shipped its design cluster
 (ADR-048, ADR-049, ADR-050) and is in **ADR Review** status; the
@@ -70,6 +73,8 @@ and Slice 26 closed the fourth (ADR-047).
 | Slice 25 | Multi-region standby, failover, and recovery semantics | ADR Review |
 | Slice 26 | Observability handbook and dashboard consolidation | Implementation Complete |
 | Slice 26.F1–F5 | Logging + Prometheus descriptor/exposition foundation for ADR-047 (changelog) | Foundation Complete |
+| Slice 26.F6 | Foundation closeout and deferred-work reconciliation | Complete |
+| Slice 26.F7 | API Server authentication and audit-query SLO instrumentation | Implementation Complete |
 
 The first Phase 7 slice will be Slice 23 (control-plane mTLS) because the
 other three entry criteria depend on having an authenticated channel between

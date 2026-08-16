@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
@@ -19,8 +20,9 @@ import (
 )
 
 const (
-	auditTenantID      = "8d58d674-7cc7-4b15-a46c-9e7768bbf103"
-	otherAuditTenantID = "5cb7ba31-06c0-4aa6-a025-bfc17d14e73d"
+	auditTenantID        = "8d58d674-7cc7-4b15-a46c-9e7768bbf103"
+	otherAuditTenantID   = "5cb7ba31-06c0-4aa6-a025-bfc17d14e73d"
+	auditMetricRequestID = "d724ad9a-30a2-4dab-9704-2b01ea1f67e1"
 )
 
 func TestAuditServicePaginatesAndProjectsOnlyReviewedAttributes(t *testing.T) {
@@ -252,12 +254,107 @@ func TestAuditServiceRejectsUnorderedFiltersAndUnauthorizedReaders(t *testing.T)
 	}
 }
 
+func TestAuditServiceObservesAuthorizedQueryAndReusesRequestID(t *testing.T) {
+	now := time.Date(2026, 8, 10, 3, 0, 0, 0, time.UTC)
+	current := now
+	clock := func() time.Time {
+		value := current
+		current = current.Add(5 * time.Millisecond)
+		return value
+	}
+	repository := &fakeAuditRepository{}
+	metricRecorder := &memoryAuditQueryMetrics{}
+	serviceUnderTest, err := service.NewAuditService(
+		repository, auth.DevelopmentAuthorizer{}, []byte("01234567890123456789012345678901"),
+		clock, func() string { return "audit-event-id" },
+		service.WithAuditQueryMetrics(metricRecorder),
+	)
+	if err != nil {
+		t.Fatalf("new audit service: %v", err)
+	}
+	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs("x-request-id", auditMetricRequestID))
+	if _, err := serviceUnderTest.ListAuditEvents(ctx, &controlv1.ListAuditEventsRequest{
+		TenantId: auditTenantID,
+	}); err != nil {
+		t.Fatalf("list audit events: %v", err)
+	}
+	if len(metricRecorder.observations) != 1 {
+		t.Fatalf("audit query observation count = %d, want 1", len(metricRecorder.observations))
+	}
+	observation := metricRecorder.observations[0]
+	if observation.tenantID != auditTenantID || observation.requestID != auditMetricRequestID || observation.duration <= 0 {
+		t.Fatalf("unexpected audit query observation: %+v", observation)
+	}
+	if len(repository.writes) != 1 || repository.writes[0].RequestID != observation.requestID {
+		t.Fatalf("audit event and metric did not reuse request ID: writes=%+v metric=%+v", repository.writes, observation)
+	}
+}
+
+func TestAuditServiceDoesNotObserveUntrustedTenant(t *testing.T) {
+	metricRecorder := &memoryAuditQueryMetrics{}
+	serviceUnderTest, err := service.NewAuditService(
+		&fakeAuditRepository{}, auth.ContextAuthorizer{}, []byte("01234567890123456789012345678901"),
+		time.Now, func() string { return "audit-event-id" },
+		service.WithAuditQueryMetrics(metricRecorder),
+	)
+	if err != nil {
+		t.Fatalf("new audit service: %v", err)
+	}
+	_, err = serviceUnderTest.ListAuditEvents(context.Background(), &controlv1.ListAuditEventsRequest{
+		TenantId: "attacker-controlled",
+	})
+	if status.Code(err) != codes.Unauthenticated {
+		t.Fatalf("expected unauthenticated denial, got %v", err)
+	}
+	if len(metricRecorder.observations) != 0 {
+		t.Fatalf("unauthorized request created tenant observations: %+v", metricRecorder.observations)
+	}
+}
+
+func TestAuditServiceObservesAuthorizedQueryFailure(t *testing.T) {
+	metricRecorder := &memoryAuditQueryMetrics{}
+	serviceUnderTest, err := service.NewAuditService(
+		&fakeAuditRepository{readErr: errors.New("audit repository unavailable")},
+		auth.DevelopmentAuthorizer{}, []byte("01234567890123456789012345678901"),
+		time.Now, func() string { return "audit-event-id" },
+		service.WithAuditQueryMetrics(metricRecorder),
+	)
+	if err != nil {
+		t.Fatalf("new audit service: %v", err)
+	}
+	_, err = serviceUnderTest.ListAuditEvents(context.Background(), &controlv1.ListAuditEventsRequest{
+		TenantId: auditTenantID,
+	})
+	if status.Code(err) != codes.Internal {
+		t.Fatalf("expected repository failure, got %v", err)
+	}
+	if len(metricRecorder.observations) != 1 || metricRecorder.observations[0].tenantID != auditTenantID {
+		t.Fatalf("authorized failure observation = %+v, want one trusted tenant sample", metricRecorder.observations)
+	}
+}
+
 type fakeAuditRepository struct {
 	events   []auth.SecurityAuditEvent
 	queries  []auth.SecurityAuditQuery
 	writes   []auth.SecurityAuditEvent
 	readErr  error
 	writeErr error
+}
+
+type auditQueryObservation struct {
+	tenantID  string
+	requestID string
+	duration  time.Duration
+}
+
+type memoryAuditQueryMetrics struct {
+	observations []auditQueryObservation
+}
+
+func (m *memoryAuditQueryMetrics) ObserveAuditQuery(tenantID, requestID string, duration time.Duration) {
+	m.observations = append(m.observations, auditQueryObservation{
+		tenantID: tenantID, requestID: requestID, duration: duration,
+	})
 }
 
 type revisionAuditAuthorizer struct {

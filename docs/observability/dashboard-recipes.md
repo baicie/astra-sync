@@ -17,16 +17,15 @@ against the PostgreSQL audit database.
 
 ## Implementation status
 
-These PromQL expressions are target contracts. F4/F5 register the Go
-descriptors, expose `/metrics`, and wire Prometheus discovery, but production
-business call sites do not yet create the referenced samples. The
-`coordinator_*` and `worker_*` families are not registered at all. Operators
-must not use these recipes as live SLO evidence until the corresponding
-call-site instrumentation has landed.
+F4/F5 register the Go descriptors, expose `/metrics`, and wire Prometheus
+discovery. F7 activates the authentication availability/latency and audit
+query latency recipes. Other Go recipes remain descriptor-only, and the
+`coordinator_*` and `worker_*` families are not registered. Operators must
+check the status here before using a recipe as live SLO evidence.
 
 ## Availability recipes
 
-### Sign-in success rate (per tenant)
+### Authentication availability (per trusted tenant)
 
 ```promql
 sum by (tenant_id) (
@@ -34,13 +33,15 @@ sum by (tenant_id) (
 )
 /
 sum by (tenant_id) (
-  rate(apiserver_auth_request_total[5m])
+  rate(apiserver_auth_request_total{outcome=~"success|failure"}[5m])
 )
 ```
 
 Suggested visualisation: `stat` panel with the threshold colour
 encoded in the dashboard. The threshold is the deployment-side SLO
-target.
+target. Use the aggregate expression in `slo-handbook.md` for the service
+error budget so pre-tenant `_unknown` failures are included. `rejected`
+traffic is excluded from both expressions.
 
 ### Sign-in latency (per tenant)
 
@@ -48,7 +49,7 @@ target.
 histogram_quantile(
   0.95,
   sum by (tenant_id, le) (
-    rate(apiserver_auth_request_duration_seconds[5m])
+    rate(apiserver_auth_request_duration_seconds{outcome=~"success|failure"}[5m])
   )
 )
 ```
@@ -175,12 +176,12 @@ increment it. The recipe remains inactive until that call site is wired.
 
 ## Join with the audit table
 
-The target join uses a `request_id` exemplar as documented in
-[`audit-correlation.md`](audit-correlation.md). Exemplars are not currently
-emitted, so the populated dashboard cannot yet offer a direct request link.
-Until that follow-up lands, operators correlate by tenant, component, and
-timestamp and use `request_id` only where the log call site already supplies
-it.
+F7 emits a canonical UUID `request_id` exemplar on the authentication counter
+and histogram and on the authorized audit-query histogram, as documented in
+[`audit-correlation.md`](audit-correlation.md). A populated dashboard may
+offer a direct audit lookup from those samples. Other metric families still
+require tenant/component/timestamp correlation until their own bounded
+exemplar call sites land.
 
 ## What the recipes do not record
 
@@ -195,11 +196,11 @@ it.
 
 ## Follow-up
 
-The remaining implementation must instrument the API Server, Console,
-Scheduler, Connection Test Executor, and server-side auth call sites; add
-bounded exemplars; and register the Java data-plane metric families. This is
-separate from the completed descriptor and endpoint foundation recorded in
-ADR-047.
+The remaining implementation must instrument the other API Server, Console,
+Scheduler, Connection Test Executor, and auth-library call sites, then
+register the Java data-plane metric families. F7 already covers API Server
+authentication decisions and authorized audit queries with bounded
+exemplars.
 
 ## Inline placeholders for the populated handbook
 

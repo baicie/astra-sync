@@ -29,6 +29,7 @@ import (
 	"io.astrasync/control-plane/api-server/internal/authn"
 	"io.astrasync/control-plane/api-server/internal/catalogproto"
 	"io.astrasync/control-plane/api-server/internal/compilerclient"
+	"io.astrasync/control-plane/api-server/internal/metrics"
 	"io.astrasync/control-plane/api-server/internal/service"
 	"io.astrasync/control-plane/auth"
 	authpostgres "io.astrasync/control-plane/auth/postgres"
@@ -288,6 +289,7 @@ func run(ctx context.Context, configuration config) error {
 	}
 
 	var authorizer auth.Authorizer = auth.DevelopmentAuthorizer{}
+	metricRecorder := metrics.DefaultRecorder()
 	grpcOptions := make([]grpc.ServerOption, 0, 2)
 	registry := authn.NewRegistry()
 	if err := registry.ValidateServices(
@@ -314,7 +316,7 @@ func run(ctx context.Context, configuration config) error {
 		interceptor := authn.Interceptor{
 			Authenticator: auth.BearerAuthenticator{Validator: validator, Resolver: authRepository},
 			Authorizer:    contextAuthorizer, AuditWriter: authRepository, Registry: registry,
-			Clock: time.Now, EventID: uuid.NewString,
+			Metrics: metricRecorder, Clock: time.Now, EventID: uuid.NewString,
 		}
 		if err := interceptor.Validate(); err != nil {
 			return err
@@ -358,6 +360,7 @@ func run(ctx context.Context, configuration config) error {
 	}
 	auditService, err := service.NewAuditService(
 		authRepository, authorizer, configuration.catalogTokenKey, time.Now, uuid.NewString,
+		service.WithAuditQueryMetrics(metricRecorder),
 	)
 	if err != nil {
 		return fmt.Errorf("create audit service: %w", err)

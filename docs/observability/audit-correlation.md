@@ -8,12 +8,12 @@ This document makes the join reproducible.
 
 ## Join key
 
-The target join key is `request_id`. Audit rows already persist it. The log
-and Prometheus sides define the same field contract, but the current
-closeout does not yet propagate `request_id` through every migrated logger
-or attach it as a Prometheus exemplar. Correlation is therefore direct only
-for call sites that already supply the field; other investigations use the
-tenant and timestamp fallback below.
+The join key is `request_id`. Audit rows persist it, and F7 attaches it as a
+Prometheus exemplar for API Server authentication decisions and authorized
+audit queries. Log propagation and exemplar coverage are not yet universal,
+so correlation is direct for those F7 metric call sites and for logs that
+already carry the field; other investigations use the tenant and timestamp
+fallback below.
 
 ## Audit table columns
 
@@ -38,12 +38,17 @@ runbook (ADR-046) records the partition rollover.
 ## Prometheus exemplar
 
 Prometheus exemplars are not enabled merely by using
-`prometheus.DefaultRegisterer`. A business call site must explicitly call
-`AddWithExemplar` or `ObserveWithExemplar` with a bounded label set. No
-current AstraSync call site does so. The descriptor packages and `/metrics`
-listeners delivered by F4 are prerequisites; exemplar wiring remains a
-follow-up and the dashboard must not advertise clickable `request_id`
-correlation until it lands.
+`prometheus.DefaultRegisterer`. F7 calls `AddWithExemplar` or
+`ObserveWithExemplar` for `apiserver_auth_request_total`,
+`apiserver_auth_request_duration_seconds`, and
+`apiserver_audit_query_duration_seconds`, and enables OpenMetrics content
+negotiation on the API Server `/metrics` handler.
+
+The exemplar allowlist contains one label, `request_id`. The recorder accepts
+only the canonical lowercase UUID form; arbitrary, uppercase, compact, URN,
+or missing values create the normal metric sample without an exemplar. The
+ID is never copied into the normal metric label set, so exemplar correlation
+does not change time-series cardinality.
 
 ## Manual lookup procedure
 
@@ -57,8 +62,9 @@ signals manually. The procedure is:
    Do not query `request_id` as a metric label; it is intentionally absent
    from the bounded-cardinality metric labels.
 
-After exemplar wiring lands, step 3 can provide a direct link back to the
-matching request without adding `request_id` as a normal metric label.
+For the three F7 metric families, step 3 can provide a direct link back to the
+matching request without adding `request_id` as a normal metric label. Other
+families continue to use the timestamp fallback.
 
 ## Per-tenant join
 
@@ -91,8 +97,9 @@ and the metrics.
 
 ## What the correlation does not record
 
-- The Prometheus exemplar configuration. The exemplar is a
-  Prometheus client option; the follow-up slice records the option.
+- The deployment Prometheus exemplar retention and Grafana data-source
+  settings. F7 records the client-side exemplar contract; the deployment owns
+  storage and UI configuration.
 - The log store schema. The log store is a deployment-owned
   artefact; the correlation records the join key.
 - The audit query interface. The interface is the Slice 18 audit
@@ -100,9 +107,11 @@ and the metrics.
 
 ## Follow-up
 
-F1–F5 deliver logging, descriptor, exposition, and Helm foundations.
-Request-context propagation and Prometheus exemplars remain incomplete.
-The landed work is recorded in [`changelog.md`](changelog.md).
+F1–F5 deliver logging, descriptor, exposition, and Helm foundations. F7 adds
+API Server authentication and audit-query exemplars. Request-context and
+exemplar propagation for the remaining control-plane and data-plane call
+sites remains incomplete. The landed work is recorded in
+[`changelog.md`](changelog.md).
 
 ## Inline placeholders for the populated handbook
 
