@@ -8,6 +8,7 @@ require (
 	google.golang.org/protobuf v1.34.2
 	io.astrasync/control-plane/api-server v0.0.0
 	io.astrasync/control-plane/auth v0.0.0
+	io.astrasync/control-plane/observability v0.0.0-00010101000000-000000000000
 )
 
 require (
@@ -28,3 +29,5 @@ require (
 replace io.astrasync/control-plane/api-server => ../control-plane/api-server
 
 replace io.astrasync/control-plane/auth => ../control-plane/auth
+
+replace io.astrasync/control-plane/observability => ../control-plane/observability
