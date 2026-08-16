@@ -2,7 +2,7 @@
 
 .PHONY: all build build-java build-go build-connectors test test-java test-go vet-go check-security check-runbooks check clean install format check verify catalog-check docker-build docker-push proto-generate proto-go-generate proto-lint crd-generate install-hooks
 
-GO_MODULES := control-plane control-plane/api-server control-plane/controller control-plane/scheduler control-plane/catalog control-plane/auth console
+GO_MODULES := control-plane control-plane/api-server control-plane/controller control-plane/scheduler control-plane/catalog control-plane/auth control-plane/observability console
 JAVA_PROTO_MODULES := connector-api,protocol/data-protocol,protocol/connector-protocol,protocol/worker-protocol,control-plane/compiler-validation
 CONTROLLER_GEN_VERSION := v0.15.0
 ADMIN_BIN := control-plane/auth/cmd/admin
