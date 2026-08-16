@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Logback configuration for the Coordinator binary.
+
+  The deployment log store is a deployment-owned concern. This file is the
+  in-binary default. The deployment overrides the appender or the pattern
+  via -Dlogback.configurationFile=<path> or LOG_LEVEL=<level>.
+
+  Logback uses the LogstashEncoder so that the structured fields recorded
+  by the data plane match the convention documented at
+  docs/observability/log-conventions.md.
+-->
+<configuration>
+    <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+        <target>System.out</target>
+        <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+            <includeContext>false</includeContext>
+            <includeMdc>true</includeMdc>
+            <customFields>{"component":"coordinator"}</customFields>
+        </encoder>
+    </appender>
+
+    <root level="${LOG_LEVEL:-INFO}">
+        <appender-ref ref="STDOUT"/>
+    </root>
+
+    <logger name="io.astrasync" level="INFO"/>
+</configuration>
