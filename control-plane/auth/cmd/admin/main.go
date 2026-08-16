@@ -16,6 +16,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/signal"
 	"strings"
@@ -26,6 +27,7 @@ import (
 
 	"io.astrasync/control-plane/auth"
 	authpostgres "io.astrasync/control-plane/auth/postgres"
+	"io.astrasync/control-plane/observability"
 )
 
 type adminOperation string
@@ -88,7 +90,12 @@ func main() {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	logger := observability.NewComponentLogger("astra-auth-admin")
+	slog.SetDefault(logger)
 	if err := command.run(ctx, os.Args[2:]); err != nil {
+		logger.Error("astra-auth-admin operation failed",
+			"operation", string(operation),
+			"error", err.Error())
 		fmt.Fprintf(command.stderr, "astra-auth-admin: %s: %v\n", operation, err)
 		os.Exit(1)
 	}
