@@ -146,6 +146,10 @@ func main() {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	if _, err := metricsServer(ctx, logger, ":9090"); err != nil {
+		logger.Error("metrics listener failed to start", "error", err.Error())
+		os.Exit(1)
+	}
 	if err := run(ctx, configuration); err != nil {
 		logger.Error("console terminated with error", "error", err.Error())
 		os.Exit(1)
