@@ -33,6 +33,10 @@ func main() {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	if _, err := metricsServer(ctx, logger, ":9090"); err != nil {
+		logger.Error("metrics listener failed to start", "error", err)
+		os.Exit(1)
+	}
 	if err := run(ctx, configuration, logger); err != nil {
 		logger.Error("Connection test executor stopped", "error", err)
 		os.Exit(1)
