@@ -8,6 +8,7 @@ require (
 	io.astrasync/control-plane v0.0.0
 	io.astrasync/control-plane/auth v0.0.0-00010101000000-000000000000
 	io.astrasync/control-plane/catalog v0.0.0
+	io.astrasync/control-plane/observability v0.0.0-00010101000000-000000000000
 	k8s.io/api v0.30.0
 	k8s.io/apimachinery v0.30.0
 	k8s.io/client-go v0.30.0
@@ -67,3 +68,5 @@ replace io.astrasync/control-plane => ..
 replace io.astrasync/control-plane/auth => ../auth
 
 replace io.astrasync/control-plane/catalog => ../catalog
+
+replace io.astrasync/control-plane/observability => ../observability
