@@ -48,6 +48,7 @@ type config struct {
 	grpcListen                 string
 	grpcEndpoint               string
 	httpListen                 string
+	metricsListen              string
 	environment                string
 	authMode                   string
 	oidcIssuer                 string
@@ -85,6 +86,10 @@ func main() {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	if _, err := metricsServer(ctx, logger, configuration.metricsListen); err != nil {
+		logger.Error("metrics listener failed to start", "error", err.Error())
+		os.Exit(1)
+	}
 	if err := run(ctx, configuration); err != nil {
 		logger.Error("api-server terminated with error", "error", err.Error())
 		os.Exit(1)
@@ -205,9 +210,10 @@ func loadConfig(getenv func(string) string) (config, error) {
 	}
 	return config{
 		databaseURL: databaseURL, grpcListen: valueOrDefault(getenv("GRPC_LISTEN_ADDRESS"), ":50051"),
-		grpcEndpoint: valueOrDefault(getenv("GRPC_GATEWAY_ENDPOINT"), "127.0.0.1:50051"),
-		httpListen:   valueOrDefault(getenv("HTTP_LISTEN_ADDRESS"), ":8080"),
-		environment:  environment, authMode: authMode,
+		grpcEndpoint:  valueOrDefault(getenv("GRPC_GATEWAY_ENDPOINT"), "127.0.0.1:50051"),
+		httpListen:    valueOrDefault(getenv("HTTP_LISTEN_ADDRESS"), ":8080"),
+		metricsListen: valueOrDefault(getenv("METRICS_LISTEN_ADDRESS"), ":9090"),
+		environment:   environment, authMode: authMode,
 		oidcIssuer: getenv("OIDC_ISSUER"), oidcAudience: getenv("OIDC_AUDIENCE"),
 		catalogPath:      valueOrDefault(getenv("CONNECTOR_INVENTORY_PATH"), defaultCatalogPath()),
 		executionProfile: valueOrDefault(getenv("CONNECTOR_EXECUTION_PROFILE"), "standard"),
