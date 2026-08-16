@@ -10,16 +10,44 @@ and the dashboard recipes can reference them without ambiguity.
 The Helm chart exposes `monitoring.prometheus.enabled: true` and
 `monitoring.prometheus.port: 9090`. The `serviceMonitor` resource
 default is disabled. The control plane Go modules (`api-server`,
-`auth`, `console`) do not import the Prometheus client library as
-a direct dependency; the `controller` module declares it as an
-indirect dependency through `sigs.k8s.io/controller-runtime`.
+`auth`, `console`) declare the Prometheus client library as a direct
+dependency as of Phase 7 Slice 26 follow-up (F4); the `controller`
+module uses the metrics endpoint exposed by `controller-runtime`.
 
-The catalog is a forward-looking reference. The metrics the catalog
-documents are the metrics the SLO handbook and the dashboard recipes
-consume. The follow-up slice that registers the Prometheus client
-in the API Server, auth, and Console modules will register the
-metrics listed here. The handbook records the convention; the
-follow-up slice implements it.
+The catalog is no longer forward-looking. The metrics the catalog
+documents are emitted by the components listed in
+[§"Implementation status"](#implementation-status). The follow-up
+slices that land the registration and the deployment surface are
+recorded in [`changelog.md`](changelog.md).
+
+## Implementation status
+
+The table records the slice that registers each metric and the source
+commit on the slice's branch. The `controller_*` metrics are emitted
+by `controller-runtime`'s built-in Prometheus collector; the
+`apiserver_*`, `scheduler_*`, `connection_test_*`, and `console_*`
+metrics are emitted by the dedicated `internal/metrics` packages
+introduced in F4. The `coordinator_*` and `worker_*` metrics remain
+forward-looking; the Java data plane Micrometer migration is not in
+scope for this PR cluster.
+
+| Metric | Component | Slice | Commit |
+|---|---|---|---|
+| `apiserver_auth_request_total` | api-server | F4 | `2d9debe` |
+| `apiserver_auth_request_duration_seconds` | api-server | F4 | `2d9debe` |
+| `apiserver_sign_in_total` | api-server | F4 | `2d9debe` |
+| `apiserver_session_revoke_total` | api-server | F4 | `2d9debe` |
+| `apiserver_audit_query_duration_seconds` | api-server | F4 | `2d9debe` |
+| `apiserver_trusted_proxy_hsts_total` | api-server | F4 | `2d9debe` |
+| `scheduler_job_assignment_total` | scheduler | F4 | `7e463bb` |
+| `scheduler_lease_takeover_total` | scheduler | F4 | `7e463bb` |
+| `scheduler_job_reconcile_duration_seconds` | scheduler | F4 | `7e463bb` |
+| `connection_test_total` | connection-test-executor | F4 | `abf48c9` |
+| `auth_sign_in_total` | auth library | F4 | `5e216db` |
+| `auth_session_revoke_total` | auth library | F4 | `5e216db` |
+| `console_request_total` | console | F4 | `4336d4e` |
+| `console_render_duration_seconds` | console | F4 | `4336d4e` |
+| `controller_*` | controller | controller-runtime | upstream collector |
 
 ## Naming convention
 
@@ -158,10 +186,11 @@ duplicate the shape.
 
 ## Follow-up
 
-A follow-up slice registers the Prometheus client in the control
-plane Go modules and updates the Java data plane to SLF4J +
-Micrometer. The follow-up slice is recorded in
-[`log-conventions.md` §"Follow-up migration"](log-conventions.md).
+The Slice 26 follow-up slices (F1–F5) are the implementation that
+backs the catalog. They are recorded in [`changelog.md`](changelog.md)
+together with their source commits. The Java data plane Micrometer
+migration that emits the `coordinator_*` and `worker_*` metrics is
+deferred to a future slice.
 
 ## Inline placeholders for the populated handbook
 

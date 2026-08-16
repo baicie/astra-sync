@@ -46,6 +46,28 @@ This slice does not:
   chart exposes the knobs the operator uses to wire the platform's
   signal store.
 
+## Follow-up records
+
+The Phase 7 Slice 26 follow-up slices (F1–F5) close the gap between
+the documentation and the implementation. They are recorded in
+[`../../observability/changelog.md`](../../observability/changelog.md)
+together with their source commits. The follow-up slices satisfy
+the §"Boundary / Does not" section of this README.
+
+- F1: SLF4J + Logback + Logstash JSON foundation for the Java data
+  plane (coordinator + worker).
+- F2: SLF4J migration of `CoordinatorApplication`,
+  `WorkerApplication`, and `ExecutionHeartbeat` error paths.
+- F3: `log/slog` migration of the API Server, Console, Scheduler,
+  Connection Test Executor, and the auth admin CLI.
+- F4: Prometheus client registration in the API Server, Scheduler,
+  Connection Test Executor, auth library, and Console, plus the
+  dedicated `/metrics` HTTP listener on port `9090`.
+- F5: Helm chart wire-up of `monitoring.prometheus.enabled`,
+  `METRICS_LISTEN_ADDRESS`, the `metrics` Service port, and the
+  `ServiceMonitor` CRD. CI render guard verifies the toggle is
+  fail-closed.
+
 ## Records
 
 - [Slice 26 Design](design.md)

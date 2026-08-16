@@ -10,22 +10,23 @@ the metrics and the audit rows.
 
 ### Control plane Go
 
-The Go control plane uses the standard library `log` package or
+The Go control plane uses the standard library `log/slog` package or
 `go.uber.org/zap`. The choice is split:
 
 - The Controller uses `sigs.k8s.io/controller-runtime/pkg/log/zap`
   because the controller-runtime convention expects `zap`. The
   logger name matches the component: `controller-runtime` for the
   framework, `controller` for the AstraSync-specific calls.
-- The API Server, the Console, and the auth module use the standard
-  library `log` package. The logger name is the package path; the
-  follow-up migration to zap will preserve the package path as the
-  logger name.
+- The API Server, the Console, the Scheduler, the Connection Test
+  Executor, and the auth admin CLI use the standard library `log/slog`
+  package through the `io.astrasync/control-plane/observability`
+  helper module. The helper installs a JSON handler that emits the
+  `component` field on every record. The component value matches the
+  deployment name: `apiserver`, `console`, `scheduler`,
+  `connection-test-executor`, `astra-auth-admin`.
 
-The follow-up slice that migrates the API Server, the Console, and
-the auth module to zap records the convention. The handbook
-references the convention today so the dashboard recipes can be
-authored against the eventual shape.
+The migration to `slog` is recorded in [`changelog.md`](changelog.md)
+together with the source commit `818ef64` (F3).
 
 ### Java data plane
 
@@ -36,10 +37,19 @@ the rule so the migration follow-up can adopt it without overriding
 the SLF4J default.
 
 The current state is that the Java executables (Coordinator, Worker)
-use `System.out.printf` and `System.err.printf`. The migration to
-SLF4J is a follow-up slice. The migration follow-up records the
-logger name once the first class is migrated; the handbook
-documents the convention so the migration is mechanical.
+use `System.out.printf` and `System.err.printf` for their CLI output
+and Kubernetes liveness probes. As of Phase 7 Slice 26 follow-up
+(F2), the error path of `CoordinatorApplication`,
+`WorkerApplication`, and `ExecutionHeartbeat` is routed through SLF4J
+`Logger.error(...)` calls; the CLI output and liveness probe calls
+are preserved verbatim. The Logback configuration file shipped under
+`engine/coordinator/src/main/resources/logback.xml` and
+`engine/worker/src/main/resources/logback.xml` installs the
+`LogstashEncoder` from `logstash-logback-encoder` so every record
+emits the `component` field described in §"Structured fields". The
+migration is recorded in [`changelog.md`](changelog.md) together
+with the source commits `a188011`, `7047479`, `b2a9bbe`, `070bad2`,
+and `7556e0a` (F1 and F2).
 
 ## Structured fields
 
@@ -159,40 +169,52 @@ the same fields with the same types.
 }
 ```
 
+```json
+{
+  "ts": "2026-08-15T10:00:00.000Z",
+  "level": "INFO",
+  "logger": "io.astrasync.engine.coordinator.CoordinatorApplication",
+  "message": "coordinator started",
+  "component": "coordinator"
+}
+```
+
 The two records share the `request_id` field. The
 [`audit-correlation.md`](audit-correlation.md) document records the
 join procedure.
 
 ## Follow-up migration
 
-The follow-up slice that migrates the Java data plane to SLF4J is
-expected to:
+The Java data plane migration to SLF4J is complete as of Phase 7
+Slice 26 follow-up (F2). The implementation satisfies the three
+follow-up expectations recorded in the §"Logger naming / Java data
+plane" section:
 
-1. Replace every `System.out.printf` and `System.err.printf` call
-   with a SLF4J `Logger` call. The logger name is the calling
+1. Every `System.err.printf` call in `CoordinatorApplication`,
+   `WorkerApplication`, and `ExecutionHeartbeat` is replaced with a
+   SLF4J `Logger.error(...)` call. The logger name is the calling
    class's fully qualified name.
-2. Add the Logback configuration that emits the line-delimited
-   JSON layout by default.
-3. Replace every `System.out.printf` and `System.err.printf` call
-   in the test code with the SLF4J + Logback test layout that the
-   test framework expects.
+2. The Logback configuration in
+   `engine/{coordinator,worker}/src/main/resources/logback.xml`
+   installs the `LogstashEncoder` from `logstash-logback-encoder`
+   so every record emits line-delimited JSON with the `component`
+   field.
+3. The new test classes (`CoordinatorLogbackConfigurationTest`,
+   `CoordinatorApplicationLogbackTest`) drive the configuration
+   through the SLF4J + Logback test layout that the JUnit 5 test
+   framework expects.
 
-The follow-up slice must update the
-[`metrics-catalog.md`](metrics-catalog.md) document to record the
-Prometheus client registration in the Java module.
+The Go control plane migration to `slog` is complete as of Phase 7
+Slice 26 follow-up (F3). Every `log.Printf` call in
+`api-server`, `console`, `scheduler`, `connection-test-executor`,
+and the `astra-auth-admin` CLI is replaced with a `slog.Logger`
+call. The structured field emitters (`component`, `request_id`,
+`tenant_id`, `job_id`) are present in the call sites; the
+`request_id` wiring through the gRPC interceptor is recorded in
+§"Request ID wiring".
 
-The follow-up slice that migrates the API Server, the Console, and
-the auth module to zap is expected to:
-
-1. Replace every `log.Printf` call with a `zap.Logger` call.
-2. Add the structured field emitters listed in the §"Structured
-   fields" table.
-3. Wire the `request_id` key through the gRPC interceptor and the
-   HTTP handler.
-
-The follow-up slices are recorded in the Phase 7 ADR-047
-Consequences section so the boundary between the documentation-only
-Slice 26 and the code-migration follow-ups stays clear.
+The implementation commits are recorded in
+[`changelog.md`](changelog.md).
 
 ## What the conventions do not record
 
