@@ -7,13 +7,14 @@ recorded by ADR-001 through ADR-043.
 
 ## Status
 
-Slice 23 (control-plane mTLS) and Slice 24 (operational runbook templates)
-are implementation complete. Slice 25 (multi-region) and Slice 26
-(observability) are in design. Phase 7 admission is recorded by
-ADR-044; the entry criteria are cross-cluster control-plane mTLS,
+Slice 23 (control-plane mTLS), Slice 24 (operational runbook templates),
+and Slice 26 (observability handbook) are implementation complete.
+Slice 25 (multi-region) is in design. Phase 7 admission is recorded
+by ADR-044; the entry criteria are cross-cluster control-plane mTLS,
 operational runbook templates, multi-region standby semantics, and
 observability consolidation. Slice 23 closed the first criterion
-(ADR-045) and Slice 24 closed the second (ADR-046).
+(ADR-045), Slice 24 closed the second (ADR-046), and Slice 26 closed
+the fourth (ADR-047).
 
 ## Goals
 
@@ -59,7 +60,7 @@ observability consolidation. Slice 23 closed the first criterion
 | Slice 23 | Control-plane mutual TLS between API Server and Console BFF (the only in-cluster gRPC channel today) | Implementation Complete |
 | Slice 24 | Operational runbook templates | Implementation Complete |
 | Slice 25 | Multi-region standby, failover, and recovery semantics | Design |
-| Slice 26 | Observability handbook and dashboard consolidation | Design |
+| Slice 26 | Observability handbook and dashboard consolidation | Implementation Complete |
 
 The first Phase 7 slice will be Slice 23 (control-plane mTLS) because the
 other three entry criteria depend on having an authenticated channel between
@@ -72,7 +73,9 @@ by Kubernetes NetworkPolicy.
 - [ADR-044: Phase 6 closeout and Phase 7 entry criteria](../adr/adr-044-phase6-closeout-and-phase7-entry-criteria.md)
 - [ADR-045: Control-Plane Mutual TLS and Network Boundary](../adr/adr-045-control-plane-mtls-and-network-boundary.md)
 - [ADR-046: Operational Runbook Templates](../adr/adr-046-operational-runbook-templates.md)
+- [ADR-047: Observability Handbook and Dashboard Consolidation](../adr/adr-047-observability-handbook-and-dashboard-consolidation.md)
 - [Operational runbook templates](../runbooks/README.md)
+- [Observability handbook](../observability/README.md)
 - [Phase 6 closeout reference](../phase6/README.md)
 
 ## Boundary Notes

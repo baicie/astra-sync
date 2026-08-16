@@ -52,6 +52,7 @@ This directory contains the Architecture Decision Records (ADRs) for AstraSync.
 | [ADR-044](adr-044-phase6-closeout-and-phase7-entry-criteria.md) | Phase 6 Closeout and Phase 7 Entry Criteria | Accepted | 2026-08-15 |
 | [ADR-045](adr-045-control-plane-mtls-and-network-boundary.md) | Control-Plane Mutual TLS and Network Boundary | Accepted | 2026-08-15 |
 | [ADR-046](adr-046-operational-runbook-templates.md) | Operational Runbook Templates | Accepted | 2026-08-16 |
+| [ADR-047](adr-047-observability-handbook-and-dashboard-consolidation.md) | Observability Handbook and Dashboard Consolidation | Accepted | 2026-08-16 |
 
 ## Template
 
