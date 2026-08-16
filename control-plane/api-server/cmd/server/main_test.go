@@ -17,6 +17,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -96,9 +97,29 @@ func TestLoadConfigEnforcesProductionAndCompilerMTLSGates(t *testing.T) {
 	values["COMPILER_VALIDATION_TLS_CERTIFICATE_FILE"] = "client.crt"
 	values["COMPILER_VALIDATION_TLS_PRIVATE_KEY_FILE"] = "client.key"
 	values["COMPILER_VALIDATION_TLS_CA_FILE"] = "ca.crt"
+	caFile := writeTempFile(t, "testdata", "mtls-client-ca.crt", []byte(testPEM))
+	values["MTLS_CLIENT_CA_FILE"] = caFile
+	values["MTLS_REQUIRE_CLIENT_CERT"] = "false"
+	if _, err := loadConfig(func(key string) string { return values[key] }); err == nil ||
+		!strings.Contains(err.Error(), "MTLS_REQUIRE_CLIENT_CERT") {
+		t.Fatalf("expected MTLS_REQUIRE_CLIENT_CERT production gate, got %v", err)
+	}
+	values["MTLS_REQUIRE_CLIENT_CERT"] = "true"
+	values["MTLS_CLIENT_CA_FILE"] = ""
+	if _, err := loadConfig(func(key string) string { return values[key] }); err == nil ||
+		!strings.Contains(err.Error(), "MTLS_CLIENT_CA_FILE") {
+		t.Fatalf("expected MTLS_CLIENT_CA_FILE production gate, got %v", err)
+	}
+	values["MTLS_CLIENT_CA_FILE"] = caFile
 	configuration, err := loadConfig(func(key string) string { return values[key] })
 	if err != nil || configuration.compilerTimeout != 3*time.Second {
 		t.Fatalf("load gated production config: config=%+v err=%v", configuration, err)
+	}
+	if !configuration.mtlsRequireClientCert {
+		t.Fatalf("expected mtlsRequireClientCert=true, got false")
+	}
+	if configuration.mtlsClientCAFile != caFile {
+		t.Fatalf("expected mtlsClientCAFile=%q, got %q", caFile, configuration.mtlsClientCAFile)
 	}
 
 	delete(values, "COMPILER_VALIDATION_TLS_PRIVATE_KEY_FILE")
@@ -198,6 +219,85 @@ func writeTestCertificate(t *testing.T) (string, string) {
 	return certificateFile, keyFile
 }
 
+func writeTempFile(t *testing.T, _, name string, contents []byte) string {
+	t.Helper()
+	directory := t.TempDir()
+	path := filepath.Join(directory, name)
+	if err := os.WriteFile(path, contents, 0o600); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
+	return path
+}
+
+// testPEM is a stand-in PEM-encoded certificate used by tests that only
+// need to assert the API Server main.go startup gate on a CA file path
+// existing. It does not need to be a valid x509 certificate because the
+// loadConfig call only checks that the file is readable.
+const testPEM = `-----BEGIN CERTIFICATE-----
+MIIBkTCB+wIBADANBgkqhkiG9w0BAQUFADAUMRIwEAYDVQQDEwl0ZXN0LWNhMB4X
+DTI1MDEwMTAwMDAwMFoXDTI2MDEwMTAwMDAwMFowFDESMBAGA1UEAxMJdGVzdC1j
+YTCBnzANBgkqhkiG9w0BAQEFAAOBjQAwgYkCgYEAuPqxJ4yU8Dp9Q2vO9Y4M0Hps
+-----END CERTIFICATE-----
+`
+
+func productionConfigValues(t *testing.T) map[string]string {
+	t.Helper()
+	caFile := writeTempFile(t, "testdata", "production-client-ca.crt", []byte(testPEM))
+	return map[string]string{
+		"DATABASE_URL":         "postgresql://example/astrasync",
+		"APP_ENV":              "production",
+		"AUTH_MODE":            "oidc",
+		"OIDC_ISSUER":          "https://issuer.example",
+		"OIDC_AUDIENCE":        "astrasync",
+		"TLS_CERTIFICATE_FILE": "server.crt",
+		"TLS_PRIVATE_KEY_FILE": "server.key",
+		"CATALOG_TOKEN_KEY":    "0123456789abcdef0123456789abcdef",
+		"TRUSTED_PROXY_CIDRS":  "10.0.0.0/8",
+		"COMPILER_VALIDATION_TLS_CERTIFICATE_FILE": "client.crt",
+		"COMPILER_VALIDATION_TLS_PRIVATE_KEY_FILE": "client.key",
+		"COMPILER_VALIDATION_TLS_CA_FILE":          "ca.crt",
+		"MTLS_CLIENT_CA_FILE":                      caFile,
+	}
+}
+
+func TestLoadConfigRejectsMissingMTLSClientCA(t *testing.T) {
+	values := productionConfigValues(t)
+	values["MTLS_REQUIRE_CLIENT_CERT"] = "true"
+	delete(values, "MTLS_CLIENT_CA_FILE")
+	if _, err := loadConfig(func(key string) string { return values[key] }); err == nil ||
+		!strings.Contains(err.Error(), "MTLS_CLIENT_CA_FILE") {
+		t.Fatalf("expected MTLS_CLIENT_CA_FILE production gate, got %v", err)
+	}
+}
+
+func TestLoadConfigRejectsMTLSRequireClientCertFalse(t *testing.T) {
+	values := productionConfigValues(t)
+	caFile := writeTempFile(t, "testdata", "mtls-client-ca.crt", []byte(testPEM))
+	values["MTLS_CLIENT_CA_FILE"] = caFile
+	values["MTLS_REQUIRE_CLIENT_CERT"] = "false"
+	if _, err := loadConfig(func(key string) string { return values[key] }); err == nil ||
+		!strings.Contains(err.Error(), "MTLS_REQUIRE_CLIENT_CERT") {
+		t.Fatalf("expected MTLS_REQUIRE_CLIENT_CERT gate, got %v", err)
+	}
+}
+
+func TestLoadConfigAcceptsMissingMTLSClientCAOutsideProduction(t *testing.T) {
+	values := map[string]string{
+		"DATABASE_URL": "postgresql://example/astrasync",
+		"APP_ENV":      "development",
+	}
+	configuration, err := loadConfig(func(key string) string { return values[key] })
+	if err != nil {
+		t.Fatalf("development config should load without MTLS_CLIENT_CA_FILE: %v", err)
+	}
+	if configuration.mtlsClientCAFile != "" {
+		t.Fatalf("expected mtlsClientCAFile to be empty, got %q", configuration.mtlsClientCAFile)
+	}
+	if !configuration.mtlsRequireClientCert {
+		t.Fatalf("expected mtlsRequireClientCert default true, got false")
+	}
+}
+
 func TestLoadConfigEnforcesTrustedProxyCIDRs(t *testing.T) {
 	values := map[string]string{
 		"DATABASE_URL":         "postgresql://example/astrasync",
@@ -210,6 +310,8 @@ func TestLoadConfigEnforcesTrustedProxyCIDRs(t *testing.T) {
 		"COMPILER_VALIDATION_TLS_CERTIFICATE_FILE": "client.crt",
 		"COMPILER_VALIDATION_TLS_PRIVATE_KEY_FILE": "client.key",
 		"COMPILER_VALIDATION_TLS_CA_FILE":          "ca.crt",
+		"MTLS_REQUIRE_CLIENT_CERT":                 "true",
+		"MTLS_CLIENT_CA_FILE":                      writeTempFile(t, "testdata", "trusted-proxy-ca.crt", []byte(testPEM)),
 	}
 	if _, err := loadConfig(func(key string) string { return values[key] }); err == nil {
 		t.Fatal("expected production TRUSTED_PROXY_CIDRS gate")

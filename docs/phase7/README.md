@@ -53,14 +53,16 @@ consolidation.
 
 | Slice | Focus | Status |
 |---|---|---|
-| Slice 23 | Control-plane mutual TLS between API Server and Console / Scheduler | Design |
+| Slice 23 | Control-plane mutual TLS between API Server and Console BFF (the only in-cluster gRPC channel today) | Implementation Complete |
 | Slice 24 | Operational runbook templates | Design |
 | Slice 25 | Multi-region standby, failover, and recovery semantics | Design |
 | Slice 26 | Observability handbook and dashboard consolidation | Design |
 
 The first Phase 7 slice will be Slice 23 (control-plane mTLS) because the
 other three entry criteria depend on having an authenticated channel between
-services.
+services. ADR-045 records that Slice 23 covers only the Console BFF to
+API Server channel; the Scheduler and Controller continue to be isolated
+by Kubernetes NetworkPolicy.
 
 ## Records
 

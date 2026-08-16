@@ -63,6 +63,8 @@ type config struct {
 	tlsCertificateFile         string
 	tlsPrivateKeyFile          string
 	tlsServerName              string
+	mtlsClientCAFile           string
+	mtlsRequireClientCert      bool
 	trustedProxyCIDRs          string
 	connectionTestDeadline     time.Duration
 	connectionTestPolicies     map[string]connection.TestEgressPolicy
@@ -122,6 +124,19 @@ func loadConfig(getenv func(string) string) (config, error) {
 		}
 		if tokenKeyValue == "" {
 			return config{}, fmt.Errorf("production requires CATALOG_TOKEN_KEY")
+		}
+	}
+	mtlsClientCAFile := strings.TrimSpace(getenv("MTLS_CLIENT_CA_FILE"))
+	mtlsRequireClientCert := strings.ToLower(valueOrDefault(getenv("MTLS_REQUIRE_CLIENT_CERT"), "true")) == "true"
+	if environment == "production" && mtlsClientCAFile == "" {
+		return config{}, fmt.Errorf("production requires MTLS_CLIENT_CA_FILE")
+	}
+	if environment == "production" && !mtlsRequireClientCert {
+		return config{}, fmt.Errorf("production requires MTLS_REQUIRE_CLIENT_CERT=true")
+	}
+	if mtlsClientCAFile != "" {
+		if _, err := os.Stat(mtlsClientCAFile); err != nil {
+			return config{}, fmt.Errorf("MTLS_CLIENT_CA_FILE: %w", err)
 		}
 	}
 	if trustedProxyCIDRs != "" {
@@ -197,6 +212,8 @@ func loadConfig(getenv func(string) string) (config, error) {
 		compilerServerName:         valueOrDefault(getenv("COMPILER_VALIDATION_TLS_SERVER_NAME"), "compiler-validation"),
 		tlsPrivateKeyFile:          privateKeyFile,
 		tlsServerName:              valueOrDefault(getenv("TLS_SERVER_NAME"), "localhost"),
+		mtlsClientCAFile:           mtlsClientCAFile,
+		mtlsRequireClientCert:      mtlsRequireClientCert,
 		trustedProxyCIDRs:          trustedProxyCIDRs,
 		connectionTestDeadline:     connectionTestDeadline,
 		connectionTestPolicies:     connectionTestPolicies,
@@ -357,13 +374,16 @@ func run(ctx context.Context, configuration config) error {
 			return fmt.Errorf("production requires TLS certificate and private key for the gRPC listener")
 		}
 	} else {
-		serverCredentials, err := credentials.NewServerTLSFromFile(
-			configuration.tlsCertificateFile, configuration.tlsPrivateKeyFile,
-		)
+		serverTLSConfig, err := transport.ServerTLSConfig(transport.ServerTLSConfigInput{
+			CertificateFile:   configuration.tlsCertificateFile,
+			PrivateKeyFile:    configuration.tlsPrivateKeyFile,
+			ClientCAPath:      configuration.mtlsClientCAFile,
+			RequireClientCert: configuration.mtlsRequireClientCert && configuration.environment == "production",
+		})
 		if err != nil {
 			return fmt.Errorf("load gRPC TLS identity: %w", err)
 		}
-		grpcOptions = append(grpcOptions, grpc.Creds(serverCredentials))
+		grpcOptions = append(grpcOptions, grpc.Creds(credentials.NewTLS(serverTLSConfig)))
 	}
 	grpcListener, err := net.Listen("tcp", configuration.grpcListen)
 	if err != nil {

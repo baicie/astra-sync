@@ -78,14 +78,25 @@ check: vet-go
 	mvn spotless:check
 
 # Security boundary checks: trusted-proxy boundary tests, security response headers,
-# and the production startup-config negative tests for the API Server and Console.
-# This gate is required by the Repository security checks workflow job.
-check-security: vet-go
+# the production startup-config negative tests for the API Server and Console,
+# and the control-plane mutual TLS gate added by Slice 23 (ADR-045). This gate
+# is required by the Repository security checks workflow job.
+check-security: vet-go check-mtls
 	@echo "Running transport security checks..."
 	@set -e; \
 	(cd control-plane/auth && go test -count=1 ./transport/...); \
 	(cd control-plane/api-server && go test -count=1 -run 'TestLoadConfig|TestAPIHandler|TestLoadTrustedProxy' ./cmd/server/...); \
 	(cd console && go test -count=1 -run 'TestLoadConfig|TestConsoleHandler|TestLoadTrustedProxyPrefixesConsole' ./cmd/console/...)
+
+# Phase 7 Slice 23 control-plane mutual TLS verification. Runs the same set of
+# tests that check-security runs, restricted to the mTLS suites, so that the
+# negotiation path is exercised by an explicit gate in CI.
+check-mtls: vet-go
+	@echo "Running control-plane mTLS verification..."
+	@set -e; \
+	(cd control-plane/auth && go test -count=1 -run 'MTLS|ServerTLSConfig|ClientTLSConfig' ./transport/...); \
+	(cd control-plane/api-server && go test -count=1 -run 'MTLS|LoadConfig' ./cmd/server/...); \
+	(cd console && go test -count=1 -run 'MTLS|LoadConfig' ./cmd/console/...)
 
 catalog-check:
 	mvn -pl cli -am package -DskipTests -DskipITs

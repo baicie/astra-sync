@@ -110,6 +110,11 @@ apiServer:
       privateKeyKey: client.key
       caKey: ca.crt
       serverName: compiler-validation
+  mtls:
+    enabled: false
+    requireClientCert: true
+    secretName: ""
+    clientCAKey: ca.crt
   connectionTests:
     deadline: 30s
     # Map tenant UUIDs to private/protected CIDRs allowed for that tenant's probes.
@@ -182,6 +187,10 @@ console:
       secretName: ""
       caKey: ca.crt
       serverName: api-server
+    clientCert:
+      enabled: false
+      certKey: tls.crt
+      keyKey: tls.key
   serviceAccount:
     create: true
     annotations: {}

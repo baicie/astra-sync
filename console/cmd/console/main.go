@@ -2,8 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/tls"
-	"crypto/x509"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -54,6 +52,8 @@ type config struct {
 	loginTTL           time.Duration
 	apiTLSCAFile       string
 	apiTLSServerName   string
+	apiClientCertFile  string
+	apiClientKeyFile   string
 	tlsCertificateFile string
 	tlsPrivateKeyFile  string
 	trustedProxyCIDRs  string
@@ -169,6 +169,8 @@ func loadConfig(getenv func(string) string) (config, error) {
 		oidcClientSecret:   getenv("CONSOLE_OIDC_CLIENT_SECRET"),
 		apiTLSCAFile:       getenv("CONSOLE_API_TLS_CA_FILE"),
 		apiTLSServerName:   valueOrDefault(getenv("CONSOLE_API_TLS_SERVER_NAME"), "api-server"),
+		apiClientCertFile:  strings.TrimSpace(getenv("CONSOLE_API_CLIENT_CERT_FILE")),
+		apiClientKeyFile:   strings.TrimSpace(getenv("CONSOLE_API_CLIENT_KEY_FILE")),
 		tlsCertificateFile: strings.TrimSpace(getenv("CONSOLE_TLS_CERTIFICATE_FILE")),
 		tlsPrivateKeyFile:  strings.TrimSpace(getenv("CONSOLE_TLS_PRIVATE_KEY_FILE")),
 		trustedProxyCIDRs:  strings.TrimSpace(getenv("TRUSTED_PROXY_CIDRS")),
@@ -206,6 +208,12 @@ func loadConfig(getenv func(string) string) (config, error) {
 		}
 		if configuration.apiTLSCAFile == "" {
 			return config{}, fmt.Errorf("production requires Console-to-API TLS")
+		}
+		if (configuration.apiClientCertFile == "") != (configuration.apiClientKeyFile == "") {
+			return config{}, fmt.Errorf("CONSOLE_API_CLIENT_CERT_FILE and CONSOLE_API_CLIENT_KEY_FILE must be configured together")
+		}
+		if configuration.apiClientCertFile == "" {
+			return config{}, fmt.Errorf("production requires CONSOLE_API_CLIENT_CERT_FILE and CONSOLE_API_CLIENT_KEY_FILE")
 		}
 		if (configuration.tlsCertificateFile == "") != (configuration.tlsPrivateKeyFile == "") {
 			return config{}, fmt.Errorf("CONSOLE_TLS_CERTIFICATE_FILE and CONSOLE_TLS_PRIVATE_KEY_FILE must be configured together")
@@ -326,17 +334,16 @@ func apiDialOptions(configuration config) ([]grpc.DialOption, error) {
 	if configuration.apiTLSCAFile == "" {
 		return []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}, nil
 	}
-	pem, err := os.ReadFile(configuration.apiTLSCAFile)
+	tlsConfig, err := transport.ClientTLSConfig(transport.ClientTLSConfigInput{
+		CAPath:          configuration.apiTLSCAFile,
+		ServerName:      configuration.apiTLSServerName,
+		CertificateFile: configuration.apiClientCertFile,
+		PrivateKeyFile:  configuration.apiClientKeyFile,
+	})
 	if err != nil {
-		return nil, fmt.Errorf("read Console API CA: %w", err)
+		return nil, fmt.Errorf("build Console API TLS config: %w", err)
 	}
-	pool := x509.NewCertPool()
-	if !pool.AppendCertsFromPEM(pem) {
-		return nil, fmt.Errorf("Console API CA is invalid")
-	}
-	return []grpc.DialOption{grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{
-		MinVersion: tls.VersionTLS12, RootCAs: pool, ServerName: configuration.apiTLSServerName,
-	}))}, nil
+	return []grpc.DialOption{grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig))}, nil
 }
 
 func loadTrustedProxyPrefixes(configuration config) ([]netip.Prefix, error) {
