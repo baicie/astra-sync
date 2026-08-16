@@ -503,3 +503,14 @@ func postGateway(t *testing.T, handler http.Handler, path, payload string, targe
 		t.Fatalf("decode POST %s response (%s): %v", path, fmt.Sprintf("%q", body), err)
 	}
 }
+
+func TestLoadConfigErrorDoesNotLeakDatabaseCredentials(t *testing.T) {
+	_, err := loadConfig(func(key string) string { return "" })
+	if err == nil {
+		t.Fatalf("expected loadConfig to fail when DATABASE_URL is missing")
+	}
+	msg := err.Error()
+	if strings.Contains(strings.ToLower(msg), "postgres://") || strings.Contains(msg, "password=") {
+		t.Fatalf("loadConfig error leaks credentials: %q", msg)
+	}
+}
