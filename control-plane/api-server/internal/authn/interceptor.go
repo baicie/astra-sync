@@ -21,6 +21,19 @@ type Authenticator interface {
 	Authenticate(context.Context, string) (auth.Principal, error)
 }
 
+// AuthMetrics records bounded authentication decision observations.
+type AuthMetrics interface {
+	ObserveAuthRequest(tenantID, outcome, requestID string, duration time.Duration)
+}
+
+const (
+	authTenantUnknown  = "_unknown"
+	authTenantPlatform = "_platform"
+	authOutcomeSuccess = "success"
+	authOutcomeReject  = "rejected"
+	authOutcomeFailure = "failure"
+)
+
 type Policy struct {
 	Permission        auth.Permission
 	ResolvePermission func(any) (auth.Permission, error)
@@ -213,14 +226,15 @@ type Interceptor struct {
 	Authenticator Authenticator
 	Authorizer    auth.Authorizer
 	AuditWriter   auth.AuditWriter
+	Metrics       AuthMetrics
 	Registry      Registry
 	Clock         func() time.Time
 	EventID       func() string
 }
 
 func (i Interceptor) Validate() error {
-	if i.Authenticator == nil || i.Authorizer == nil || i.AuditWriter == nil || i.Clock == nil || i.EventID == nil ||
-		i.Registry.policies == nil {
+	if i.Authenticator == nil || i.Authorizer == nil || i.AuditWriter == nil || i.Metrics == nil || i.Clock == nil ||
+		i.EventID == nil || i.Registry.policies == nil {
 		return fmt.Errorf("authentication interceptor dependencies must not be nil")
 	}
 	return nil
@@ -239,30 +253,41 @@ func (i Interceptor) Unary() grpc.UnaryServerInterceptor {
 		if i.Registry.RequirePublicMethod(info.FullMethod) {
 			return handler(ctx, request)
 		}
+		startedAt := i.Clock()
+		requestID := requestIDFromMetadata(ctx)
+		ctx = withRequestID(ctx, requestID)
 		policy, found := i.Registry.Policy(info.FullMethod)
 		if !found {
+			i.observeAuthDecision(startedAt, authTenantUnknown, authOutcomeFailure, requestID)
 			i.auditDenied(ctx, auth.Principal{}, "", info.FullMethod, "UNMAPPED_METHOD")
 			return nil, status.Error(codes.PermissionDenied, "request is not authorized")
 		}
-		requestID := requestIDFromMetadata(ctx)
-		ctx = withRequestID(ctx, requestID)
 		token, err := bearerToken(ctx)
 		if err != nil {
+			i.observeAuthDecision(startedAt, authTenantUnknown, authOutcomeReject, requestID)
 			i.auditDenied(ctx, auth.Principal{}, "", info.FullMethod, "UNAUTHENTICATED")
 			return nil, status.Error(codes.Unauthenticated, "authentication required")
 		}
 		principal, err := i.Authenticator.Authenticate(ctx, token)
 		if err != nil {
+			if !errors.Is(err, auth.ErrUnauthenticated) {
+				i.observeAuthDecision(startedAt, authTenantUnknown, authOutcomeFailure, requestID)
+				i.auditDenied(ctx, auth.Principal{}, "", info.FullMethod, "UNAUTHENTICATED")
+				return nil, status.Error(codes.Internal, "authentication service is unavailable")
+			}
+			i.observeAuthDecision(startedAt, authTenantUnknown, authOutcomeReject, requestID)
 			i.auditDenied(ctx, auth.Principal{}, "", info.FullMethod, "UNAUTHENTICATED")
 			return nil, status.Error(codes.Unauthenticated, "authentication required")
 		}
 		permission, err := policy.permission(request)
 		if err != nil {
+			i.observeAuthDecision(startedAt, authTenantUnknown, authOutcomeReject, requestID)
 			i.auditDenied(ctx, principal, "", info.FullMethod, "INVALID_POLICY_INPUT")
 			return nil, status.Error(codes.InvalidArgument, "request purpose is invalid")
 		}
 		principalContext, err := auth.WithPrincipal(ctx, principal)
 		if err != nil {
+			i.observeAuthDecision(startedAt, authTenantUnknown, authOutcomeFailure, requestID)
 			return nil, status.Error(codes.Internal, "authenticated principal is invalid")
 		}
 		if policy.SelfScope {
@@ -270,26 +295,55 @@ func (i Interceptor) Unary() grpc.UnaryServerInterceptor {
 			// directly. The service handler is responsible for any platform
 			// role or membership filtering.
 			if !principalHasPermission(principal, permission) {
+				i.observeAuthDecision(startedAt, authTenantPlatform, authOutcomeReject, requestID)
 				i.auditDenied(ctx, principal, "", info.FullMethod, "PERMISSION_DENIED")
 				return nil, status.Error(codes.PermissionDenied, "tenant access denied")
 			}
+			i.observeAuthDecision(startedAt, authTenantPlatform, authOutcomeSuccess, requestID)
 			return handler(principalContext, request)
 		}
 		scope, err := policy.Scope(request)
 		if err != nil {
+			i.observeAuthDecision(startedAt, authTenantUnknown, authOutcomeReject, requestID)
 			i.auditDenied(ctx, principal, "", info.FullMethod, "INVALID_SCOPE")
 			return nil, status.Error(codes.InvalidArgument, "tenant scope is required")
 		}
 		membership, found := principal.MembershipForScope(scope)
 		if !found {
+			i.observeAuthDecision(startedAt, authTenantUnknown, authOutcomeReject, requestID)
 			i.auditDenied(ctx, principal, "", info.FullMethod, "TENANT_DENIED")
 			return nil, status.Error(codes.PermissionDenied, "tenant access denied")
 		}
 		if _, err := i.Authorizer.Authorize(principalContext, membership.TenantID, permission); err != nil {
+			i.observeAuthDecision(startedAt, membership.TenantID, authMetricOutcome(err), requestID)
 			i.auditDenied(ctx, principal, membership.TenantID, info.FullMethod, denialOutcome(err))
 			return nil, status.Error(codes.PermissionDenied, "tenant access denied")
 		}
+		i.observeAuthDecision(startedAt, membership.TenantID, authOutcomeSuccess, requestID)
 		return handler(principalContext, request)
+	}
+}
+
+func (i Interceptor) observeAuthDecision(startedAt time.Time, tenantID, outcome, requestID string) {
+	duration := i.Clock().Sub(startedAt)
+	if duration < 0 {
+		duration = 0
+	}
+	i.Metrics.ObserveAuthRequest(tenantID, outcome, requestID, duration)
+}
+
+func authMetricOutcome(err error) string {
+	// ContextAuthorizer joins ErrPermissionDenied with policy-store failures.
+	// Only the bare sentinel is caller rejection; a joined cause is an SLO failure.
+	switch {
+	case errors.Is(err, auth.ErrPolicyStale):
+		return authOutcomeFailure
+	case err == auth.ErrPermissionDenied,
+		errors.Is(err, auth.ErrTenantUnavailable),
+		errors.Is(err, auth.ErrUnauthenticated):
+		return authOutcomeReject
+	default:
+		return authOutcomeFailure
 	}
 }
 

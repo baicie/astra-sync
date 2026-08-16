@@ -5,7 +5,8 @@ observability handbook. The slice column is the Phase 7 Slice 26 follow-up
 identifier; the commit column identifies the source commit on its original
 slice branch; the PR column identifies the closeout pull request that lands
 the work on `main`. Descriptor registration and endpoint wiring do not imply
-that business call sites or Prometheus exemplars are already active.
+that business call sites or Prometheus exemplars are active; F7 is the first
+row that explicitly activates business observations.
 
 | Slice | Commit | Title | PR |
 |---|---|---|---|
@@ -47,6 +48,7 @@ that business call sites or Prometheus exemplars are already active.
 | 26.F5 | `67a10c0` | feat(helm): add ServiceMonitor templates for Prometheus scraping | [#48][closeout-pr] |
 | 26.F5 | `63ab279` | ci(helm): add observability toggle render guard | [#48][closeout-pr] |
 | 26.F6 | (this slice) | docs(observability): record F1–F5 foundation status and deferred instrumentation | (Phase 7 Slice 26 follow-up F6) |
+| 26.F7 | (this slice) | feat(observability): instrument API Server SLO metrics and bounded exemplars | (Phase 7 Slice 26 follow-up F7) |
 
 The PR column is populated when the closeout pull request merges to `main`.
 The PR URLs follow the convention

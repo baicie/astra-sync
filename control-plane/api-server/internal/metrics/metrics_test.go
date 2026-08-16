@@ -5,9 +5,62 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 )
+
+const exemplarRequestID = "d724ad9a-30a2-4dab-9704-2b01ea1f67e1"
+
+func TestRecorderObservesSLOMetricsWithBoundedExemplars(t *testing.T) {
+	registry := prometheus.NewRegistry()
+	recorder, err := NewRecorder(registry)
+	if err != nil {
+		t.Fatalf("new recorder: %v", err)
+	}
+
+	recorder.ObserveAuthRequest("tenant-a", "success", exemplarRequestID, 25*time.Millisecond)
+	recorder.ObserveAuditQuery("tenant-a", exemplarRequestID, 40*time.Millisecond)
+
+	body := scrapeOpenMetrics(t, registry)
+	for _, sample := range []string{
+		`apiserver_auth_request_total{outcome="success",tenant_id="tenant-a"} 1.0`,
+		`apiserver_auth_request_duration_seconds_count{outcome="success",tenant_id="tenant-a"} 1`,
+		`apiserver_audit_query_duration_seconds_count{tenant_id="tenant-a"} 1`,
+	} {
+		if !strings.Contains(body, sample) {
+			t.Fatalf("OpenMetrics body missing %q: %s", sample, body)
+		}
+	}
+	if count := strings.Count(body, `request_id="`+exemplarRequestID+`"`); count != 3 {
+		t.Fatalf("request_id exemplar count = %d, want 3: %s", count, body)
+	}
+}
+
+func TestRecorderDropsNonCanonicalRequestIDExemplars(t *testing.T) {
+	registry := prometheus.NewRegistry()
+	recorder, err := NewRecorder(registry)
+	if err != nil {
+		t.Fatalf("new recorder: %v", err)
+	}
+
+	recorder.ObserveAuthRequest("tenant-a", "rejected", "attacker-controlled", 5*time.Millisecond)
+	recorder.ObserveAuditQuery("tenant-a", "D724AD9A-30A2-4DAB-9704-2B01EA1F67E1", 8*time.Millisecond)
+
+	body := scrapeOpenMetrics(t, registry)
+	if strings.Contains(body, "request_id=") {
+		t.Fatalf("non-canonical request ID was exposed as an exemplar: %s", body)
+	}
+	for _, sample := range []string{
+		`apiserver_auth_request_total{outcome="rejected",tenant_id="tenant-a"} 1.0`,
+		`apiserver_audit_query_duration_seconds_count{tenant_id="tenant-a"} 1`,
+	} {
+		if !strings.Contains(body, sample) {
+			t.Fatalf("observation without exemplar missing %q: %s", sample, body)
+		}
+	}
+}
 
 func TestMetricsRegistered(t *testing.T) {
 	// Touch each metric to make sure registration happened at init time.
@@ -84,4 +137,30 @@ func TestHandlerExposesMetrics(t *testing.T) {
 			t.Fatalf("/metrics body missing %s: %s", name, body)
 		}
 	}
+}
+
+func TestHandlerNegotiatesOpenMetrics(t *testing.T) {
+	request := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	request.Header.Set("Accept", "application/openmetrics-text")
+	recorder := httptest.NewRecorder()
+	Handler().ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected HTTP 200, got %d", recorder.Code)
+	}
+	if contentType := recorder.Header().Get("Content-Type"); !strings.HasPrefix(contentType, "application/openmetrics-text") {
+		t.Fatalf("Content-Type = %q, want OpenMetrics", contentType)
+	}
+}
+
+func scrapeOpenMetrics(t *testing.T, gatherer prometheus.Gatherer) string {
+	t.Helper()
+	request := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	request.Header.Set("Accept", "application/openmetrics-text")
+	recorder := httptest.NewRecorder()
+	handler(gatherer).ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("scrape status = %d, want 200", recorder.Code)
+	}
+	return recorder.Body.String()
 }

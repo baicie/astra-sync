@@ -16,11 +16,16 @@ The closeout verifies two layers of the observability delivery:
   listener.
 - F5: Helm metrics ports, environment wiring, Service ports, ServiceMonitor
   resources, and fail-closed rendering when monitoring is disabled.
+- F6: Foundation status reconciliation and explicit deferred-work records.
+- F7: API Server authentication counter/histogram and authorized audit-query
+  histogram observations, trusted tenant labels, canonical UUID exemplars,
+  and OpenMetrics negotiation.
 
-Business counter/histogram call sites, `request_id` exemplars, and Java
-data-plane metric families are intentionally outside this closeout. The
-handbook and dashboard recipes label those contracts as pending rather than
-claiming that registration has produced samples.
+The three F7 metric families now produce business samples. Other
+control-plane counter/histogram call sites and Java data-plane metric families
+remain outside this follow-up. The handbook and dashboard recipes label those
+contracts as pending rather than claiming that registration has produced
+samples.
 
 ## Test plan
 
@@ -34,6 +39,10 @@ claiming that registration has produced samples.
 
 - Go unit tests and vet run through the repository Makefile for every Go
   module.
+- API Server focused tests run twice and assert authentication
+  `success`/`rejected`/`failure` exactly once, trusted tenant selection,
+  authorization-gated audit-query observations, and OpenMetrics exemplar
+  encoding/omission.
 - Java tests run through the repository Maven targets, including the
   Coordinator Logback configuration and error-path tests.
 - `make check-security` protects the existing credential and trusted-proxy
@@ -54,8 +63,10 @@ The closeout is accepted when:
    descriptor-only, or reserved.
 4. The closeout PR CI is green and the resulting squash commit is present on
    `main`.
-5. The remaining business instrumentation and exemplar work is explicitly
+5. Remaining business instrumentation and exemplar coverage is explicitly
    recorded as follow-up rather than silently treated as complete.
+6. F7 marks only its three API Server families active and leaves every other
+   descriptor or reserved family pending.
 
 ## Evidence
 
@@ -74,6 +85,20 @@ table after verification:
 | Helm lint/render guard | passed locally: 4 `LOG_LEVEL` entries and 3 ServiceMonitors |
 | Affected Docker image builds | CI required; local Docker daemon was unavailable |
 | Closeout PR CI | passed on [#48](https://github.com/baicie/astra-sync/pull/48), run `31950884699` |
+
+### F7 evidence
+
+| Check | Result |
+|---|---|
+| API Server focused `go test -count=2` | passed locally on 2026-08-16 |
+| `make SHELL=D:/install/Git/usr/bin/bash.exe check-runbooks` | passed locally on 2026-08-16 |
+| `git diff --check` | passed locally on 2026-08-16 |
+| `make SHELL=D:/install/Git/usr/bin/bash.exe check` | passed locally on 2026-08-16 |
+| `make SHELL=D:/install/Git/usr/bin/bash.exe test-go` | passed locally on 2026-08-16 |
+| `make test-java` | passed locally on 2026-08-16 (32-module reactor) |
+| `make SHELL=D:/install/Git/usr/bin/bash.exe check-security` | passed locally on 2026-08-16 |
+| `mvn -B -ntp verify` | passed locally on 2026-08-16 (32-module reactor) |
+| F7 PR CI | pending |
 
 ## References
 

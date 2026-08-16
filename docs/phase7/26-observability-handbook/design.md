@@ -77,30 +77,38 @@ Server, Scheduler, Connection Test Executor, and Console modules and
 adds descriptor packages. The auth module contains a descriptor package,
 but the one-shot admin CLI does not import it or expose a listener. The
 long-running executables bind `/metrics` only when
-`METRICS_LISTEN_ADDRESS` is non-empty. The remaining instrumentation work
-is expected to:
+`METRICS_LISTEN_ADDRESS` is non-empty. F7 implements the first business
+instrumentation step:
 
-1. Add the Prometheus client as a direct dependency.
-2. Register and observe the metrics that the
-   [`metrics-catalog.md`](../../observability/metrics-catalog.md)
-   document records.
-3. Configure bounded Prometheus exemplars at business call sites; merely
-   using the default registerer does not enable them. The
-   [`audit-correlation.md`](../../observability/audit-correlation.md)
-   document records.
-4. Keep exposing the metrics on the port that the Helm chart records
+1. Inject one recorder into the authentication interceptor and AuditService
+   rather than mutating global vectors from business logic.
+2. Record `success`, `rejected`, and `failure` authentication decisions once
+   before the business handler. The availability denominator is
+   `success|failure`; caller-controlled `rejected` traffic is excluded.
+3. Use only validated membership tenant UUIDs. Pre-tenant failures use the
+   fixed `_unknown` value, and self-scope methods use `_platform`.
+4. Observe audit-query duration only after authorization returns a trusted
+   tenant decision, and reuse the same request ID for the audit row and metric
+   exemplar.
+5. Attach a single `request_id` exemplar only for canonical lowercase UUIDs;
+   never add it to the normal metric label set.
+6. Enable OpenMetrics negotiation on the existing endpoint and keep exposing
+   metrics on the port that the Helm chart records
    (`monitoring.prometheus.port: 9090`).
 
-Descriptor registration and endpoint wiring are complete; business
-observations and exemplars remain a future implementation slice.
+Descriptor registration and endpoint wiring are complete. F7 activates
+`apiserver_auth_request_total`,
+`apiserver_auth_request_duration_seconds`, and
+`apiserver_audit_query_duration_seconds`; other business observations remain
+future slices.
 
 ## SLI categories
 
 The SLO handbook records four SLI categories that cover the Phase 6
 acceptance criteria:
 
-- **Availability** — the control plane accepts sign-in requests and
-  the API Server returns success responses.
+- **Availability** — the API Server completes authentication and
+  authorization without an internal failure.
 - **Freshness** — the data plane processes records within the
   latency budget.
 - **Deliverability** — the Worker writes records to the sink without
@@ -127,14 +135,16 @@ The slice is verified by:
 - Running the existing `make check-runbooks` against the handbook
   templates. The templates must satisfy the placeholder and
   hostname requirements.
+- Running API Server metric, authentication interceptor, AuditService, and
+  server tests twice to verify deterministic observations and OpenMetrics
+  exemplar exposition.
 
 ## Future work
 
-The next observability implementation step is to add business metric
-observations and bounded `request_id` exemplars in the Go control plane,
-then register and instrument the Java data-plane metric families. Those
-steps are out of scope for the current closeout but are explicitly tracked
-by the handbook.
+The next observability implementation step is to activate the remaining Go
+control-plane descriptors, then register and instrument the Java data-plane
+metric families. F7 completes the API Server authentication and audit-query
+subset with bounded `request_id` exemplars.
 
 The Slice 25 (multi-region) follow-up will inherit the SLO
 handbook and add the multi-region SLI categories. The SLO handbook
