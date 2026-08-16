@@ -17,6 +17,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 
 	connectionpostgres "io.astrasync/control-plane/connection/postgres"
+	"io.astrasync/control-plane/observability"
 	"io.astrasync/control-plane/scheduler/internal/connectiontest"
 	"io.astrasync/control-plane/scheduler/internal/materialization"
 )
@@ -24,7 +25,7 @@ import (
 const shutdownTimeout = 10 * time.Second
 
 func main() {
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	logger := observability.NewComponentLogger("connection-test-executor")
 	configuration, err := loadConfig(os.Getenv)
 	if err != nil {
 		logger.Error("invalid Connection test executor configuration", "error", err)
