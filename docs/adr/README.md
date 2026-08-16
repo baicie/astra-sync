@@ -53,6 +53,9 @@ This directory contains the Architecture Decision Records (ADRs) for AstraSync.
 | [ADR-045](adr-045-control-plane-mtls-and-network-boundary.md) | Control-Plane Mutual TLS and Network Boundary | Accepted | 2026-08-15 |
 | [ADR-046](adr-046-operational-runbook-templates.md) | Operational Runbook Templates | Accepted | 2026-08-16 |
 | [ADR-047](adr-047-observability-handbook-and-dashboard-consolidation.md) | Observability Handbook and Dashboard Consolidation | Accepted | 2026-08-16 |
+| [ADR-048](adr-048-multi-region-control-plane-replication.md) | Multi-Region Control-Plane Replication Model | Proposed | 2026-08-16 |
+| [ADR-049](adr-049-region-pinned-data-plane-failover.md) | Region-pinned Data-Plane Failover with Epoch Fencing | Proposed | 2026-08-16 |
+| [ADR-050](adr-050-tenant-identifier-and-audit-cross-region.md) | Tenant Identifier and Audit Cross-Region Semantics | Proposed | 2026-08-16 |
 
 ## Template
 
