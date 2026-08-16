@@ -73,7 +73,7 @@ table after verification:
 | Prometheus metric packages with `go test -count=2` | passed locally on 2026-08-16 |
 | Helm lint/render guard | passed locally: 4 `LOG_LEVEL` entries and 3 ServiceMonitors |
 | Affected Docker image builds | CI required; local Docker daemon was unavailable |
-| Closeout PR CI | running on [#48](https://github.com/baicie/astra-sync/pull/48) |
+| Closeout PR CI | passed on [#48](https://github.com/baicie/astra-sync/pull/48), run `31950884699` |
 
 ## References
 
