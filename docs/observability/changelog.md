@@ -48,7 +48,7 @@ row that explicitly activates business observations.
 | 26.F5 | `67a10c0` | feat(helm): add ServiceMonitor templates for Prometheus scraping | [#48][closeout-pr] |
 | 26.F5 | `63ab279` | ci(helm): add observability toggle render guard | [#48][closeout-pr] |
 | 26.F6 | (this slice) | docs(observability): record F1–F5 foundation status and deferred instrumentation | (Phase 7 Slice 26 follow-up F6) |
-| 26.F7 | (this slice) | feat(observability): instrument API Server SLO metrics and bounded exemplars | (Phase 7 Slice 26 follow-up F7) |
+| 26.F7 | `49debb6` | feat(observability): instrument API Server SLO metrics and bounded exemplars | [#49][f7-pr] |
 
 The PR column is populated when the closeout pull request merges to `main`.
 The PR URLs follow the convention
@@ -56,3 +56,4 @@ The PR URLs follow the convention
 kept as the template placeholder required by the repository guard.
 
 [closeout-pr]: https://github.com/baicie/astra-sync/pull/48
+[f7-pr]: https://github.com/baicie/astra-sync/pull/49

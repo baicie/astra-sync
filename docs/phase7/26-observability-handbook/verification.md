@@ -98,7 +98,7 @@ table after verification:
 | `make test-java` | passed locally on 2026-08-16 (32-module reactor) |
 | `make SHELL=D:/install/Git/usr/bin/bash.exe check-security` | passed locally on 2026-08-16 |
 | `mvn -B -ntp verify` | passed locally on 2026-08-16 (32-module reactor) |
-| F7 PR CI | pending |
+| F7 PR CI | tracked on [#49](https://github.com/baicie/astra-sync/pull/49) |
 
 ## References
 
