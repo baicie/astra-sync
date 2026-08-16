@@ -2,21 +2,31 @@ package main
 
 import (
 	"context"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	consolemetrics "io.astrasync/console/observability"
 )
 
+func newComponentLogger(component string, output io.Writer, levelText string) *slog.Logger {
+	level := slog.LevelInfo
+	if err := level.UnmarshalText([]byte(strings.TrimSpace(levelText))); err != nil {
+		level = slog.LevelInfo
+	}
+	return slog.New(slog.NewJSONHandler(output, &slog.HandlerOptions{Level: level})).With("component", component)
+}
+
 // metricsServer hosts the /metrics endpoint on a dedicated port that is
-// independent of the Console's HTTP listener. The deployment defaults
-// to :9090; the Prometheus scrape configuration in
-// deployment/helm/astrasync matches.
+// independent of the Console's HTTP listener. An empty address disables the
+// listener so the Helm monitoring toggle remains fail-closed.
 func metricsServer(ctx context.Context, logger *slog.Logger, listenAddress string) (*http.Server, error) {
+	listenAddress = strings.TrimSpace(listenAddress)
 	if listenAddress == "" {
-		listenAddress = ":9090"
+		return nil, nil
 	}
 	listener, err := net.Listen("tcp", listenAddress)
 	if err != nil {

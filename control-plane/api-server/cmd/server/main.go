@@ -38,7 +38,6 @@ import (
 	"io.astrasync/control-plane/connection"
 	connectionpostgres "io.astrasync/control-plane/connection/postgres"
 	jobpostgres "io.astrasync/control-plane/job/postgres"
-	"io.astrasync/control-plane/observability"
 )
 
 const shutdownTimeout = 10 * time.Second
@@ -76,7 +75,7 @@ type config struct {
 }
 
 func main() {
-	logger := observability.NewComponentLogger("apiserver")
+	logger := newComponentLogger("apiserver", os.Stdout, os.Getenv("LOG_LEVEL"))
 	slog.SetDefault(logger)
 
 	configuration, err := loadConfig(os.Getenv)
@@ -212,7 +211,7 @@ func loadConfig(getenv func(string) string) (config, error) {
 		databaseURL: databaseURL, grpcListen: valueOrDefault(getenv("GRPC_LISTEN_ADDRESS"), ":50051"),
 		grpcEndpoint:  valueOrDefault(getenv("GRPC_GATEWAY_ENDPOINT"), "127.0.0.1:50051"),
 		httpListen:    valueOrDefault(getenv("HTTP_LISTEN_ADDRESS"), ":8080"),
-		metricsListen: valueOrDefault(getenv("METRICS_LISTEN_ADDRESS"), ":9090"),
+		metricsListen: strings.TrimSpace(getenv("METRICS_LISTEN_ADDRESS")),
 		environment:   environment, authMode: authMode,
 		oidcIssuer: getenv("OIDC_ISSUER"), oidcAudience: getenv("OIDC_AUDIENCE"),
 		catalogPath:      valueOrDefault(getenv("CONNECTOR_INVENTORY_PATH"), defaultCatalogPath()),

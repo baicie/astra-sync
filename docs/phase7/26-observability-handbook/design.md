@@ -51,15 +51,15 @@ the same template-vs-populated boundary.
 
 The handbook's `log-conventions.md` §"Follow-up migration" section
 records the rule that the Java data plane loggers use SLF4J with a
-logger name that matches the fully qualified class name. The current
-state is that the Java executables (Coordinator, Worker) use
-`System.out.printf` and `System.err.printf`. The migration is a
-follow-up slice.
+logger name that matches the fully qualified class name. The F1/F2
+follow-up now routes Coordinator and Worker error paths through SLF4J;
+stable CLI summaries and liveness output intentionally retain their
+`System.out.printf`/`System.err.printf` boundary.
 
 The follow-up slice is expected to:
 
-1. Replace every `System.out.printf` and `System.err.printf` call
-   with a SLF4J `Logger` call.
+1. Route production error paths through SLF4J `Logger` calls while
+   preserving the stable CLI and liveness output contract.
 2. Add the Logback configuration that emits the line-delimited
    JSON layout by default.
 3. Register the Prometheus client in the Java module and emit the
@@ -72,26 +72,27 @@ code-migration follow-up stays clear.
 
 ## Prometheus client registration
 
-The current state is that the Prometheus client library is declared
-as an indirect dependency in the `controller` module. The API
-Server, the Console, and the auth module do not declare the
-dependency. The follow-up slice that registers the Prometheus
-client in the API Server, the Console, and the auth module is
-expected to:
+The F4 follow-up declares the Prometheus client directly in the API
+Server, Scheduler, Connection Test Executor, and Console modules and
+adds descriptor packages. The auth module contains a descriptor package,
+but the one-shot admin CLI does not import it or expose a listener. The
+long-running executables bind `/metrics` only when
+`METRICS_LISTEN_ADDRESS` is non-empty. The remaining instrumentation work
+is expected to:
 
 1. Add the Prometheus client as a direct dependency.
-2. Register the metrics that the
+2. Register and observe the metrics that the
    [`metrics-catalog.md`](../../observability/metrics-catalog.md)
    document records.
-3. Configure the Prometheus exemplar that the
+3. Configure bounded Prometheus exemplars at business call sites; merely
+   using the default registerer does not enable them. The
    [`audit-correlation.md`](../../observability/audit-correlation.md)
    document records.
-4. Expose the metrics on the port that the Helm chart records
+4. Keep exposing the metrics on the port that the Helm chart records
    (`monitoring.prometheus.port: 9090`).
 
-The follow-up slice is documented in the Phase 7 ADR-047
-Consequences section so the boundary between the documentation-only
-Slice 26 and the code-migration follow-ups stays clear.
+Descriptor registration and endpoint wiring are complete; business
+observations and exemplars remain a future implementation slice.
 
 ## SLI categories
 
@@ -129,15 +130,11 @@ The slice is verified by:
 
 ## Future work
 
-The follow-up slice that migrates the Java data plane to SLF4J and
-registers the Prometheus client in the Java module is the next
-step. The follow-up slice is out of scope for Slice 26; the
-handbook documents the convention.
-
-The follow-up slice that registers the Prometheus client in the
-control plane Go modules (API Server, Console, auth) is the next
-step. The follow-up slice is out of scope for Slice 26; the
-handbook documents the convention.
+The next observability implementation step is to add business metric
+observations and bounded `request_id` exemplars in the Go control plane,
+then register and instrument the Java data-plane metric families. Those
+steps are out of scope for the current closeout but are explicitly tracked
+by the handbook.
 
 The Slice 25 (multi-region) follow-up will inherit the SLO
 handbook and add the multi-region SLI categories. The SLO handbook

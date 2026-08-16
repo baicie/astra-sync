@@ -21,7 +21,6 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 
 	jobpostgres "io.astrasync/control-plane/job/postgres"
-	"io.astrasync/control-plane/observability"
 	"io.astrasync/control-plane/scheduler/internal/dispatch"
 	dispatchpostgres "io.astrasync/control-plane/scheduler/internal/dispatch/postgres"
 	dispatchkube "io.astrasync/control-plane/scheduler/internal/kubernetes"
@@ -33,7 +32,7 @@ import (
 const shutdownTimeout = 10 * time.Second
 
 func main() {
-	logger := observability.NewComponentLogger("scheduler")
+	logger := newComponentLogger("scheduler", os.Stdout, os.Getenv("LOG_LEVEL"))
 	slog.SetDefault(logger)
 	configuration, err := loadConfig(os.Getenv)
 	if err != nil {
@@ -42,7 +41,7 @@ func main() {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	if _, err := metricsServer(ctx, logger, ":9090"); err != nil {
+	if _, err := metricsServer(ctx, logger, os.Getenv("METRICS_LISTEN_ADDRESS")); err != nil {
 		logger.Error("metrics listener failed to start", "error", err)
 		os.Exit(1)
 	}

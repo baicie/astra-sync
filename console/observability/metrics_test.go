@@ -10,8 +10,10 @@ import (
 )
 
 func TestMetricsRegistered(t *testing.T) {
-	ConsoleRequestTotal.WithLabelValues("tenant-a", "success", "dashboard").Inc()
-	if testutil.ToFloat64(ConsoleRequestTotal.WithLabelValues("tenant-a", "success", "dashboard")) != 1 {
+	requestTotal := ConsoleRequestTotal.WithLabelValues("tenant-a", "success", "dashboard")
+	before := testutil.ToFloat64(requestTotal)
+	requestTotal.Inc()
+	if testutil.ToFloat64(requestTotal) != before+1 {
 		t.Fatalf("console_request_total did not register")
 	}
 	ConsoleRenderDuration.WithLabelValues("dashboard").Observe(0.01)
@@ -21,6 +23,9 @@ func TestMetricsRegistered(t *testing.T) {
 }
 
 func TestHandlerExposesMetrics(t *testing.T) {
+	ConsoleRequestTotal.WithLabelValues("scrape-tenant", "success", "dashboard").Inc()
+	ConsoleRenderDuration.WithLabelValues("dashboard").Observe(0.01)
+
 	request := httptest.NewRequest(http.MethodGet, "/metrics", nil)
 	recorder := httptest.NewRecorder()
 	Handler().ServeHTTP(recorder, request)

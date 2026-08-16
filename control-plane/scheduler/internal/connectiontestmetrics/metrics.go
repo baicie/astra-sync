@@ -1,6 +1,6 @@
-// Package connectiontestmetrics registers the connection-test-executor
-// Prometheus metrics. The names and labels follow the convention
-// documented at docs/observability/metrics-catalog.md.
+// Package connectiontestmetrics registers Prometheus descriptors for the
+// Connection Test Executor. Business call sites create the samples. The names
+// and labels follow docs/observability/metrics-catalog.md.
 package connectiontestmetrics
 
 import (
@@ -13,7 +13,7 @@ import (
 
 // ConnectionTestTotal counts connection test outcomes.
 var ConnectionTestTotal = promauto.NewCounterVec(prometheus.CounterOpts{
-	Name: "connection_test_executor_connection_test_total",
+	Name: "connection_test_total",
 	Help: "Total connection tests executed by the Connection Test Executor.",
 }, []string{"tenant_id", "outcome"})
 

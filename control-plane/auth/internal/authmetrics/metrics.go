@@ -1,8 +1,6 @@
-// Package authmetrics registers the auth library Prometheus metrics. The
-// metrics are exported from the package so that future API-Server-side
-// admin RPCs and the API Server authentication layer can register the
-// same way. The admin CLI does not bind a /metrics port (it is a
-// one-shot command); the metrics package remains importable.
+// Package authmetrics defines Prometheus descriptors for the auth library.
+// Future server-side auth call sites can import the package and create samples.
+// The one-shot admin CLI neither imports this package nor binds a /metrics port.
 package authmetrics
 
 import (

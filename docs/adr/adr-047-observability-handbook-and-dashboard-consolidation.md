@@ -2,11 +2,13 @@
 
 ## Status
 
-Accepted (follow-up slices F1–F5 complete). Implements Phase 7 Slice 26
-and closes the "Observability consolidation" entry criterion recorded
-by ADR-044 §"Phase 7 entry criteria" §4. The Consequences section is
-satisfied by the follow-up slices recorded in
-[`../observability/changelog.md`](../observability/changelog.md).
+Accepted (F1–F5 foundation complete; business instrumentation deferred).
+Implements Phase 7 Slice 26 and closes the documentation and exposition
+portion of the "Observability consolidation" entry criterion recorded by
+ADR-044 §"Phase 7 entry criteria" §4. The landed logging, descriptor,
+endpoint, and Helm work is recorded in
+[`../observability/changelog.md`](../observability/changelog.md). Business
+metric observations and Prometheus exemplars are explicitly not complete.
 
 ## Context
 
@@ -107,10 +109,10 @@ Slice 26.
 The slice is verified by:
 
 - Reading the handbook against the existing Prometheus metric
-  surface, the existing SLF4J/zap logger conventions, and the
-  existing audit-event schema. The handbook must reference every
-  metric name, logger name, and audit column that the production
-  code already emits.
+  surface, the existing SLF4J/zap/slog logger conventions, and the
+  existing audit-event schema. The handbook must classify metric names as
+  emitted, descriptor-only, or reserved and must not equate registration
+  with business observations.
 - Reading the SLO handbook against the Phase 6 acceptance
   document. The acceptance document records the SLIs that the
   Phase 6 slices are responsible for; the SLO handbook must inherit
@@ -127,8 +129,14 @@ The slice is verified by:
   or to the code.
 - The Phase 7 README updates the Slice 26 row from Design to
   Implementation Complete. Slice 25 (multi-region) is not affected.
-- The Java data plane migration to SLF4J is a follow-up slice. The
-  handbook documents the migration but does not implement it.
+- F1/F2 install SLF4J + Logback JSON output and migrate Coordinator/Worker
+  error paths. Stable CLI and liveness summaries remain on
+  `stdout`/`stderr` by compatibility contract.
+- F3 uses module-local `slog` JSON logger constructors in the migrated Go
+  executables; no cross-module helper or local `replace` is introduced.
+- F4/F5 register Go metric descriptors, expose optional `/metrics`
+  listeners, and wire Helm discovery. Business observations, request
+  exemplars, and Java data-plane metric families remain future work.
 - The audit-correlation document becomes a pre-requisite for any
   log-side or metric-side change. Future slices that add a log
   field or a metric label must update the corresponding document

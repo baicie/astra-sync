@@ -1,6 +1,6 @@
-// Package metrics registers the business Prometheus metrics that the
-// AstraSync Scheduler exposes on its /metrics listener. The names and
-// labels follow the convention documented at
+// Package metrics registers Prometheus descriptors for Scheduler business
+// metrics and provides its /metrics handler. Business call sites create the
+// samples. The names and labels follow the convention documented at
 // docs/observability/metrics-catalog.md.
 package metrics
 
@@ -16,13 +16,13 @@ import (
 var JobAssignmentTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 	Name: "scheduler_job_assignment_total",
 	Help: "Total job splits assigned by the scheduler.",
-}, []string{"tenant_id", "outcome"})
+}, []string{"tenant_id", "worker_id", "outcome"})
 
 // LeaseTakeoverTotal counts leadership lease takeovers.
 var LeaseTakeoverTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 	Name: "scheduler_lease_takeover_total",
 	Help: "Total leadership lease takeovers performed by the scheduler.",
-}, []string{"outcome"})
+}, []string{"tenant_id", "outcome"})
 
 // JobReconcileDuration records the latency of one job reconcile iteration.
 var JobReconcileDuration = promauto.NewHistogramVec(prometheus.HistogramOpts{

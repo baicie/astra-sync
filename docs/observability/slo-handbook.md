@@ -4,6 +4,12 @@ The SLO handbook records the per-tenant SLI and SLO definitions that
 the operator consumes through the populated dashboard. The handbook
 is a template; the populated SLO targets are deployment-owned.
 
+The PromQL definitions below are target contracts, not currently live SLOs.
+F4/F5 provide Go metric descriptors and scrape endpoints, but business
+call-site observations and exemplars remain pending. Java data-plane metric
+families are not registered. The SQL audit-completeness query is usable
+independently of that metrics work.
+
 ## SLI categories
 
 The handbook records four SLI categories. Each category is a
@@ -168,22 +174,10 @@ follow-up migration slice lands.
 
 ## Follow-up
 
-The follow-up slice that migrates the Java data plane to SLF4J and
-registers the Prometheus client must emit the freshness and
-deliverability metrics documented in the
-[`metrics-catalog.md`](metrics-catalog.md) §"Data plane metrics"
-table. The follow-up slice must also register the Prometheus
-exemplar that the [`audit-correlation.md`](audit-correlation.md)
-document records.
-
-The follow-up slice that registers the Prometheus client in the
-API Server, the Console, and the auth module must emit the
-availability and audit completeness metrics documented in the
-[`metrics-catalog.md`](metrics-catalog.md) §"Authentication and
-authorization metrics" table.
-
-The follow-up slices are recorded in the Phase 7 ADR-047
-Consequences section so the boundary between the documentation-only
-Slice 26 and the code-migration follow-ups stays clear.
+The remaining follow-up must add business observations and bounded
+`request_id` exemplars to the Go control plane, then register and instrument
+the Java data-plane families used by freshness and deliverability. The
+completed F1–F5 foundation is recorded separately from this remaining work
+in ADR-047 and the observability changelog.
 
 <!-- placeholders: slo-availability-target, slo-freshness-budget, slo-deliverability-target, audit-retention-days -->

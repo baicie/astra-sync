@@ -1,6 +1,6 @@
-// Package metrics registers the business Prometheus metrics that the
-// AstraSync Console exposes on its /metrics listener. The names and
-// labels follow the convention documented at
+// Package metrics registers Prometheus descriptors for Console business
+// metrics and provides its /metrics handler. Business call sites create the
+// samples. The names and labels follow the convention documented at
 // docs/observability/metrics-catalog.md.
 package metrics
 

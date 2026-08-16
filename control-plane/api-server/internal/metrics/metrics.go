@@ -1,6 +1,6 @@
-// Package metrics registers the business Prometheus metrics that the
-// AstraSync API Server exposes on its /metrics listener. The names and
-// labels follow the convention documented at
+// Package metrics registers Prometheus descriptors for API Server business
+// metrics and provides its /metrics handler. Business call sites create the
+// samples. The names and labels follow the convention documented at
 // docs/observability/metrics-catalog.md. Each metric is registered
 // exactly once through promauto.NewCounterVec against the global
 // prometheus.DefaultRegisterer.
@@ -37,7 +37,7 @@ var SignInTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 var SessionRevokeTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 	Name: "apiserver_session_revoke_total",
 	Help: "Total session revocation calls served by the API Server.",
-}, []string{"tenant_id"})
+}, []string{"tenant_id", "actor_id"})
 
 // AuditQueryDuration records the latency of audit event queries.
 var AuditQueryDuration = promauto.NewHistogramVec(prometheus.HistogramOpts{

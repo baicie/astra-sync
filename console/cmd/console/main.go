@@ -28,7 +28,6 @@ import (
 	"io.astrasync/control-plane/auth"
 	authpostgres "io.astrasync/control-plane/auth/postgres"
 	"io.astrasync/control-plane/auth/transport"
-	"io.astrasync/control-plane/observability"
 )
 
 const shutdownTimeout = 10 * time.Second
@@ -136,7 +135,7 @@ func (b grpcBackend) ListAuditEvents(ctx context.Context, request *jobv1.ListAud
 }
 
 func main() {
-	logger := observability.NewComponentLogger("console")
+	logger := newComponentLogger("console", os.Stdout, os.Getenv("LOG_LEVEL"))
 	slog.SetDefault(logger)
 
 	configuration, err := loadConfig(os.Getenv)
@@ -146,7 +145,7 @@ func main() {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	if _, err := metricsServer(ctx, logger, ":9090"); err != nil {
+	if _, err := metricsServer(ctx, logger, os.Getenv("METRICS_LISTEN_ADDRESS")); err != nil {
 		logger.Error("metrics listener failed to start", "error", err.Error())
 		os.Exit(1)
 	}

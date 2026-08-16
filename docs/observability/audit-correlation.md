@@ -8,17 +8,12 @@ This document makes the join reproducible.
 
 ## Join key
 
-The join key is the `request_id` field. The audit row, the log
-record, and the Prometheus exemplar all carry the `request_id`. The
-field is a UUID assigned by the API Server for HTTP requests and
-by the data plane for batch-processing events.
-
-The `request_id` is propagated through the gRPC interceptor (API
-Server and Console) and the Coordinator's checkpoint lifecycle.
-The `request_id` is recorded in the audit table's `request_id`
-column and as the SLF4J structured field recorded in the
-[`log-conventions.md`](log-conventions.md) §"Structured fields"
-table.
+The target join key is `request_id`. Audit rows already persist it. The log
+and Prometheus sides define the same field contract, but the current
+closeout does not yet propagate `request_id` through every migrated logger
+or attach it as a Prometheus exemplar. Correlation is therefore direct only
+for call sites that already supply the field; other investigations use the
+tenant and timestamp fallback below.
 
 ## Audit table columns
 
@@ -42,42 +37,28 @@ runbook (ADR-046) records the partition rollover.
 
 ## Prometheus exemplar
 
-The Prometheus metrics documented in the
-[`metrics-catalog.md`](metrics-catalog.md) record the `request_id`
-as a Prometheus exemplar. The exemplar is enabled by the
-`prometheus.EnableExemplars` option in the Prometheus client
-configuration. The exemplar is in place as of Phase 7 Slice 26
-follow-up (F4): the metrics packages registered in
-`control-plane/api-server/internal/metrics`,
-`control-plane/scheduler/internal/metrics`,
-`control-plane/scheduler/internal/connectiontestmetrics`,
-`control-plane/auth/internal/authmetrics`, and
-`console/observability` use the default `prometheus.DefaultRegisterer`
-which enables exemplars by default.
-
-The exemplar is keyed by the metric name and the label set. The
-populated dashboard joins the exemplar to the matching log record
-by the `request_id` field. The dashboard recipes in the
-[`dashboard-recipes.md`](dashboard-recipes.md) document reference
-the exemplar by the metric name.
+Prometheus exemplars are not enabled merely by using
+`prometheus.DefaultRegisterer`. A business call site must explicitly call
+`AddWithExemplar` or `ObserveWithExemplar` with a bounded label set. No
+current AstraSync call site does so. The descriptor packages and `/metrics`
+listeners delivered by F4 are prerequisites; exemplar wiring remains a
+follow-up and the dashboard must not advertise clickable `request_id`
+correlation until it lands.
 
 ## Manual lookup procedure
 
 An operator with no Prometheus exemplar support can join the three
 signals manually. The procedure is:
 
-1. Identify the `request_id` from the audit row. The audit row's
-   `request_id` is the canonical join key.
-2. Search the log store for the `request_id` field. The log
-   records recorded by the API Server, the Console, and the data
-   plane share the `request_id`.
-3. Search the Prometheus metrics for the `request_id` label. The
-   metrics emitted by the API Server, the Console, and the data
-   plane share the `request_id` label.
+1. Identify `request_id`, `tenant_id`, and `occurred_at` from the audit row.
+2. Search the log store for `request_id`. If that field is absent at the
+   relevant call site, narrow by `tenant_id`, component, and timestamp.
+3. Inspect the metric window for the same tenant/component and timestamp.
+   Do not query `request_id` as a metric label; it is intentionally absent
+   from the bounded-cardinality metric labels.
 
-The procedure is the manual fallback when the Prometheus exemplar
-is not available. The procedure is also the integration test the
-follow-up slice that registers the Prometheus client must satisfy.
+After exemplar wiring lands, step 3 can provide a direct link back to the
+matching request without adding `request_id` as a normal metric label.
 
 ## Per-tenant join
 
@@ -119,9 +100,9 @@ and the metrics.
 
 ## Follow-up
 
-The follow-up slices are complete as of Phase 7 Slice 26 follow-up
-(F1–F5). The implementation commits and PR references are recorded
-in [`changelog.md`](changelog.md).
+F1–F5 deliver logging, descriptor, exposition, and Helm foundations.
+Request-context propagation and Prometheus exemplars remain incomplete.
+The landed work is recorded in [`changelog.md`](changelog.md).
 
 ## Inline placeholders for the populated handbook
 

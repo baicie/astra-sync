@@ -18,7 +18,6 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.time.Duration;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -28,9 +27,9 @@ import org.junit.jupiter.api.io.TempDir;
  * path of {@link CoordinatorApplication}. The test wires a
  * {@link ListAppender} to the same logger that
  * {@code CoordinatorApplication} uses, invokes {@code run(configuration)}
- * with a non-existent JobSpec path so the catch block exercises its logging
- * branch, and asserts the appender captured an ERROR event whose logger
- * name matches the class under test.
+ * with a non-existent JobSpec path, passes the rejection to the production
+ * error logger used by {@code main}, and asserts the appender captured an
+ * ERROR event whose logger name matches the class under test.
  */
 class CoordinatorApplicationLogbackTest {
 
@@ -40,30 +39,32 @@ class CoordinatorApplicationLogbackTest {
     @Test
     void runFailureEmitsSlf4jErrorEvent() {
         ListAppender<ILoggingEvent> appender = attachAppender();
-
-        Path jobSpec = tempDirectory.resolve("missing.yaml");
-        CoordinatorConfiguration configuration = new CoordinatorConfiguration(
-                jobSpec,
-                tempDirectory.resolve("progress"),
-                List.of(new WorkerEndpoint("worker-0", "127.0.0.1", 1)),
-                Duration.ofSeconds(1),
-                1,
-                1);
-
         try {
-            CoordinatorApplication.run(configuration);
-        } catch (RuntimeException expected) {
-            // The main() catch block performs the same log call.
-            org.slf4j.LoggerFactory.getLogger(CoordinatorApplication.class)
-                    .error("coordinator failed to start or execute", expected);
-        }
+            Path jobSpec = tempDirectory.resolve("missing.yaml");
+            CoordinatorConfiguration configuration = new CoordinatorConfiguration(
+                    jobSpec,
+                    tempDirectory.resolve("progress"),
+                    List.of(new WorkerEndpoint("worker-0", "127.0.0.1", 1)),
+                    Duration.ofSeconds(1),
+                    1,
+                    1);
 
-        assertThat(appender.list).isNotEmpty();
-        ILoggingEvent event = appender.list.get(appender.list.size() - 1);
-        assertThat(event.getLevel()).isEqualTo(ch.qos.logback.classic.Level.ERROR);
-        assertThat(event.getLoggerName()).isEqualTo(CoordinatorApplication.class.getName());
-        assertThat(event.getMessage()).isEqualTo("coordinator failed to start or execute");
-        assertThat(event.getThrowableProxy()).isNotNull();
+            try {
+                CoordinatorApplication.run(configuration);
+            } catch (RuntimeException expected) {
+                CoordinatorApplication.logFailure(expected);
+            }
+
+            assertThat(appender.list).isNotEmpty();
+            ILoggingEvent event = appender.list.get(appender.list.size() - 1);
+            assertThat(event.getLevel()).isEqualTo(ch.qos.logback.classic.Level.ERROR);
+            assertThat(event.getLoggerName()).isEqualTo(CoordinatorApplication.class.getName());
+            assertThat(event.getMessage()).isEqualTo("coordinator failed to start or execute");
+            assertThat(event.getThrowableProxy()).isNotNull();
+        } finally {
+            Logger coordinator = (Logger) org.slf4j.LoggerFactory.getLogger(CoordinatorApplication.class);
+            coordinator.detachAppender(appender);
+        }
     }
 
     @Test
@@ -100,8 +101,7 @@ class CoordinatorApplicationLogbackTest {
 
     private static WorkerService worker(String workerId) {
         return new WorkerService(
-                new WorkerConfiguration(workerId, 0, JdbcWorkerTaskFactoryProvider.class.getName(), 1, 0, 4),
-                split -> {
+                new WorkerConfiguration(workerId, 0, JdbcWorkerTaskFactoryProvider.class.getName(), 1, 0, 4), split -> {
                     throw new IllegalStateException("planned failure");
                 });
     }

@@ -10,13 +10,17 @@ import (
 )
 
 func TestMetricsRegistered(t *testing.T) {
-	JobAssignmentTotal.WithLabelValues("tenant-a", "success").Inc()
-	if testutil.ToFloat64(JobAssignmentTotal.WithLabelValues("tenant-a", "success")) != 1 {
+	jobAssignment := JobAssignmentTotal.WithLabelValues("tenant-a", "worker-a", "success")
+	jobAssignmentBefore := testutil.ToFloat64(jobAssignment)
+	jobAssignment.Inc()
+	if testutil.ToFloat64(jobAssignment) != jobAssignmentBefore+1 {
 		t.Fatalf("scheduler_job_assignment_total did not register")
 	}
 
-	LeaseTakeoverTotal.WithLabelValues("elected").Inc()
-	if testutil.ToFloat64(LeaseTakeoverTotal.WithLabelValues("elected")) != 1 {
+	leaseTakeover := LeaseTakeoverTotal.WithLabelValues("tenant-a", "elected")
+	leaseTakeoverBefore := testutil.ToFloat64(leaseTakeover)
+	leaseTakeover.Inc()
+	if testutil.ToFloat64(leaseTakeover) != leaseTakeoverBefore+1 {
 		t.Fatalf("scheduler_lease_takeover_total did not register")
 	}
 
@@ -27,6 +31,10 @@ func TestMetricsRegistered(t *testing.T) {
 }
 
 func TestHandlerExposesMetrics(t *testing.T) {
+	JobAssignmentTotal.WithLabelValues("scrape-tenant", "worker-a", "success").Inc()
+	LeaseTakeoverTotal.WithLabelValues("scrape-tenant", "elected").Inc()
+	JobReconcileDuration.WithLabelValues("scrape-tenant").Observe(0.01)
+
 	request := httptest.NewRequest(http.MethodGet, "/metrics", nil)
 	recorder := httptest.NewRecorder()
 	Handler().ServeHTTP(recorder, request)

@@ -10,17 +10,24 @@ import (
 )
 
 func TestMetricsRegistered(t *testing.T) {
-	AuthSignInTotal.WithLabelValues("tenant-a", "success").Inc()
-	if testutil.ToFloat64(AuthSignInTotal.WithLabelValues("tenant-a", "success")) != 1 {
+	signIn := AuthSignInTotal.WithLabelValues("tenant-a", "success")
+	signInBefore := testutil.ToFloat64(signIn)
+	signIn.Inc()
+	if testutil.ToFloat64(signIn) != signInBefore+1 {
 		t.Fatalf("auth_sign_in_total did not register")
 	}
-	AuthSessionRevokeTotal.WithLabelValues("tenant-a").Inc()
-	if testutil.ToFloat64(AuthSessionRevokeTotal.WithLabelValues("tenant-a")) != 1 {
+	sessionRevoke := AuthSessionRevokeTotal.WithLabelValues("tenant-a")
+	sessionRevokeBefore := testutil.ToFloat64(sessionRevoke)
+	sessionRevoke.Inc()
+	if testutil.ToFloat64(sessionRevoke) != sessionRevokeBefore+1 {
 		t.Fatalf("auth_session_revoke_total did not register")
 	}
 }
 
 func TestHandlerExposesMetrics(t *testing.T) {
+	AuthSignInTotal.WithLabelValues("scrape-tenant", "success").Inc()
+	AuthSessionRevokeTotal.WithLabelValues("scrape-tenant").Inc()
+
 	request := httptest.NewRequest(http.MethodGet, "/metrics", nil)
 	recorder := httptest.NewRecorder()
 	Handler().ServeHTTP(recorder, request)

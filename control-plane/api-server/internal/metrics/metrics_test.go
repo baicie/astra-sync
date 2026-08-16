@@ -16,20 +16,28 @@ func TestMetricsRegistered(t *testing.T) {
 		collect func() float64
 	}{
 		{"apiserver_auth_request_total", func() float64 {
-			AuthRequestTotal.WithLabelValues("tenant-a", "success").Inc()
-			return testutil.ToFloat64(AuthRequestTotal.WithLabelValues("tenant-a", "success"))
+			metric := AuthRequestTotal.WithLabelValues("tenant-a", "success")
+			before := testutil.ToFloat64(metric)
+			metric.Inc()
+			return testutil.ToFloat64(metric) - before
 		}},
 		{"apiserver_sign_in_total", func() float64 {
-			SignInTotal.WithLabelValues("tenant-a", "started").Inc()
-			return testutil.ToFloat64(SignInTotal.WithLabelValues("tenant-a", "started"))
+			metric := SignInTotal.WithLabelValues("tenant-a", "started")
+			before := testutil.ToFloat64(metric)
+			metric.Inc()
+			return testutil.ToFloat64(metric) - before
 		}},
 		{"apiserver_session_revoke_total", func() float64 {
-			SessionRevokeTotal.WithLabelValues("tenant-a").Inc()
-			return testutil.ToFloat64(SessionRevokeTotal.WithLabelValues("tenant-a"))
+			metric := SessionRevokeTotal.WithLabelValues("tenant-a", "actor-a")
+			before := testutil.ToFloat64(metric)
+			metric.Inc()
+			return testutil.ToFloat64(metric) - before
 		}},
 		{"apiserver_trusted_proxy_hsts_total", func() float64 {
-			TrustedProxyHSTS.WithLabelValues("tenant-a").Inc()
-			return testutil.ToFloat64(TrustedProxyHSTS.WithLabelValues("tenant-a"))
+			metric := TrustedProxyHSTS.WithLabelValues("tenant-a")
+			before := testutil.ToFloat64(metric)
+			metric.Inc()
+			return testutil.ToFloat64(metric) - before
 		}},
 	}
 	for _, metric := range metrics {
@@ -50,6 +58,11 @@ func TestMetricsRegistered(t *testing.T) {
 
 func TestHandlerExposesMetrics(t *testing.T) {
 	AuthRequestTotal.WithLabelValues("scrape-tenant", "success").Inc()
+	AuthRequestDuration.WithLabelValues("scrape-tenant", "success").Observe(0.01)
+	SignInTotal.WithLabelValues("scrape-tenant", "success").Inc()
+	SessionRevokeTotal.WithLabelValues("scrape-tenant", "actor-a").Inc()
+	AuditQueryDuration.WithLabelValues("scrape-tenant").Observe(0.01)
+	TrustedProxyHSTS.WithLabelValues("scrape-tenant").Inc()
 
 	request := httptest.NewRequest(http.MethodGet, "/metrics", nil)
 	recorder := httptest.NewRecorder()
@@ -61,6 +74,7 @@ func TestHandlerExposesMetrics(t *testing.T) {
 	body := recorder.Body.String()
 	for _, name := range []string{
 		"apiserver_auth_request_total",
+		"apiserver_auth_request_duration_seconds",
 		"apiserver_sign_in_total",
 		"apiserver_session_revoke_total",
 		"apiserver_audit_query_duration_seconds",

@@ -341,6 +341,11 @@ jobs:
             echo "::error::metrics containerPort leaked when monitoring.prometheus.enabled=false"
             exit 1
           fi
+          log_level_count="$(echo "${off_render}" | grep -c 'name: LOG_LEVEL' || true)"
+          if [[ "${log_level_count}" -ne 4 ]]; then
+            echo "::error::expected LOG_LEVEL for 4 observability-enabled components, got ${log_level_count}"
+            exit 1
+          fi
           # Toggle on: metrics containerPort, env var, and service port are emitted
           on_render="$(helm template astrasync deployment/helm/astrasync \
             --set apiServer.enabled=true \

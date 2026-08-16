@@ -54,10 +54,14 @@ public final class CoordinatorApplication {
                         result.metrics().writtenCount());
             }
         } catch (RuntimeException exception) {
-            LOG.error("coordinator failed to start or execute", exception);
+            logFailure(exception);
             System.err.println("FAILED to start or execute Coordinator: " + message(exception));
             System.exit(1);
         }
+    }
+
+    static void logFailure(RuntimeException exception) {
+        LOG.error("coordinator failed to start or execute", exception);
     }
 
     @SuppressWarnings("try")

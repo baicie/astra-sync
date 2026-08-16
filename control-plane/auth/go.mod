@@ -6,7 +6,6 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.7.2
 	github.com/prometheus/client_golang v1.20.5
-	io.astrasync/control-plane/observability v0.0.0-00010101000000-000000000000
 )
 
 require (
@@ -27,5 +26,3 @@ require (
 	golang.org/x/text v0.21.0 // indirect
 	google.golang.org/protobuf v1.34.2 // indirect
 )
-
-replace io.astrasync/control-plane/observability => ../observability
