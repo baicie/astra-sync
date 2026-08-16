@@ -2,9 +2,11 @@
 
 ## Status
 
-Accepted. Implements Phase 7 Slice 26 and closes the "Observability
-consolidation" entry criterion recorded by ADR-044 §"Phase 7 entry
-criteria" §4.
+Accepted (follow-up slices F1–F5 complete). Implements Phase 7 Slice 26
+and closes the "Observability consolidation" entry criterion recorded
+by ADR-044 §"Phase 7 entry criteria" §4. The Consequences section is
+satisfied by the follow-up slices recorded in
+[`../observability/changelog.md`](../observability/changelog.md).
 
 ## Context
 
