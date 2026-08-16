@@ -18,3 +18,5 @@ require (
 )
 
 replace io.astrasync/control-plane/auth => ./auth
+
+replace io.astrasync/control-plane/observability => ./observability
