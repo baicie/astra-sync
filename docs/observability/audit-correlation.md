@@ -46,9 +46,14 @@ The Prometheus metrics documented in the
 [`metrics-catalog.md`](metrics-catalog.md) record the `request_id`
 as a Prometheus exemplar. The exemplar is enabled by the
 `prometheus.EnableExemplars` option in the Prometheus client
-configuration. The follow-up slice that registers the Prometheus
-client in the API Server, the Console, and the auth module records
-the option.
+configuration. The exemplar is in place as of Phase 7 Slice 26
+follow-up (F4): the metrics packages registered in
+`control-plane/api-server/internal/metrics`,
+`control-plane/scheduler/internal/metrics`,
+`control-plane/scheduler/internal/connectiontestmetrics`,
+`control-plane/auth/internal/authmetrics`, and
+`console/observability` use the default `prometheus.DefaultRegisterer`
+which enables exemplars by default.
 
 The exemplar is keyed by the metric name and the label set. The
 populated dashboard joins the exemplar to the matching log record
@@ -114,20 +119,9 @@ and the metrics.
 
 ## Follow-up
 
-The follow-up slice that migrates the Java data plane to SLF4J
-must record the `request_id` field in every structured log record
-that the Coordinator and the Worker emit. The follow-up slice that
-migrates the API Server, the Console, and the auth module to zap
-must record the same field.
-
-The follow-up slice that registers the Prometheus client in the
-API Server, the Console, and the auth module must register the
-exemplar handler. The follow-up slice that registers the Prometheus
-client in the Java module must register the same handler.
-
-The follow-up slices are recorded in the Phase 7 ADR-047
-Consequences section so the boundary between the documentation-only
-Slice 26 and the code-migration follow-ups stays clear.
+The follow-up slices are complete as of Phase 7 Slice 26 follow-up
+(F1–F5). The implementation commits and PR references are recorded
+in [`changelog.md`](changelog.md).
 
 ## Inline placeholders for the populated handbook
 
