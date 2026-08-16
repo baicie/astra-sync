@@ -22,6 +22,7 @@ jobs:
     outputs:
       go: ${{ steps.filter.outputs.go }}
       helm: ${{ steps.filter.outputs.helm }}
+      docs: ${{ steps.filter.outputs.docs }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
@@ -48,6 +49,11 @@ jobs:
             echo "helm=false" >> "${GITHUB_OUTPUT}"
           else
             echo "helm=true" >> "${GITHUB_OUTPUT}"
+          fi
+          if git diff --quiet "${base_sha}" HEAD -- docs runbooks scripts; then
+            echo "docs=false" >> "${GITHUB_OUTPUT}"
+          else
+            echo "docs=true" >> "${GITHUB_OUTPUT}"
           fi
 
   java:
@@ -336,6 +342,30 @@ jobs:
         # Runs check-security, which depends on check-mtls for Phase 7
         # Slice 23 control-plane mutual TLS verification.
         run: make check-security
+
+  runbooks:
+    name: Operational runbook template guard
+    needs: changes
+    if: needs.changes.outputs.docs == 'true' || needs.changes.outputs.go == 'true' || needs.changes.outputs.java == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Run runbook template gate
+        # Runs check-runbooks, which verifies every Markdown file under
+        # docs/runbooks/ is a template (contains a <placeholder> and no
+        # production hostname patterns). Phase 7 Slice 24.
+        run: make check-runbooks
+
+      - name: Run script unit tests
+        run: make test-scripts
 
   container-images:
     name: Build ${{ matrix.name }} image

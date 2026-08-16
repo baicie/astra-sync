@@ -1,6 +1,6 @@
 # Makefile for AstraSync
 
-.PHONY: all build build-java build-go build-connectors test test-java test-go vet-go check-security clean install format check verify catalog-check docker-build docker-push proto-generate proto-go-generate proto-lint crd-generate install-hooks
+.PHONY: all build build-java build-go build-connectors test test-java test-go vet-go check-security check-runbooks check clean install format check verify catalog-check docker-build docker-push proto-generate proto-go-generate proto-lint crd-generate install-hooks
 
 GO_MODULES := control-plane control-plane/api-server control-plane/controller control-plane/scheduler control-plane/catalog control-plane/auth console
 JAVA_PROTO_MODULES := connector-api,protocol/data-protocol,protocol/connector-protocol,protocol/worker-protocol,control-plane/compiler-validation
@@ -73,9 +73,24 @@ format:
 	@set -e; for module in $(GO_MODULES); do (cd "$$module" && go fmt ./...); done
 
 # Code style check
-check: vet-go
+check: vet-go check-runbooks
 	@echo "Checking code style..."
 	mvn spotless:check
+
+# Phase 7 Slice 24 operational runbook template guard. Verifies that every
+# Markdown file under docs/runbooks/ is a template (contains at least one
+# <placeholder> and no known production hostname patterns). Fails closed if a
+# populated runbook slips into the repository.
+check-runbooks:
+	@echo "Checking runbook templates..."
+	@python scripts/check-runbook-templates.py
+
+# Run the Python script unit tests. The tests live alongside the scripts
+# they exercise; the make target is intentionally narrow so the Java and Go
+# gates keep their current cadence.
+test-scripts:
+	@echo "Running script unit tests..."
+	@python -m unittest discover -s scripts -p 'test_*.py'
 
 # Security boundary checks: trusted-proxy boundary tests, security response headers,
 # the production startup-config negative tests for the API Server and Console,
