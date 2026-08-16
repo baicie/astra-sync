@@ -317,6 +317,56 @@ jobs:
             --set jobSpec.existingSecret=job-spec \
             --set coordinator.progress.existingClaim=progress > /dev/null
 
+      - name: Render observability toggles
+        if: needs.changes.outputs.helm == 'true'
+        # Phase 7 Slice 26 follow-up: verifies the metrics wiring is
+        # fail-closed (no metrics containerPort / METRICS_LISTEN_ADDRESS
+        # when monitoring.prometheus.enabled is false) and that turning the
+        # toggle on emits the metrics containerPort, env var, and Service
+        # port. The ServiceMonitor is exercised by enabling both toggles.
+        run: |
+          set -euo pipefail
+          # Fail-closed: with the toggle off, no metrics containerPort and no METRICS_LISTEN_ADDRESS
+          off_render="$(helm template astrasync deployment/helm/astrasync \
+            --set apiServer.enabled=true \
+            --set scheduler.enabled=true \
+            --set console.enabled=true \
+            --set connectionTestExecutor.enabled=true \
+            --set monitoring.prometheus.enabled=false)"
+          if echo "${off_render}" | grep -q 'METRICS_LISTEN_ADDRESS'; then
+            echo "::error::METRICS_LISTEN_ADDRESS leaked when monitoring.prometheus.enabled=false"
+            exit 1
+          fi
+          if echo "${off_render}" | grep -q 'name: metrics'; then
+            echo "::error::metrics containerPort leaked when monitoring.prometheus.enabled=false"
+            exit 1
+          fi
+          # Toggle on: metrics containerPort, env var, and service port are emitted
+          on_render="$(helm template astrasync deployment/helm/astrasync \
+            --set apiServer.enabled=true \
+            --set scheduler.enabled=true \
+            --set console.enabled=true \
+            --set connectionTestExecutor.enabled=true \
+            --set monitoring.prometheus.enabled=true)"
+          for needle in 'containerPort: 9090' 'METRICS_LISTEN_ADDRESS' 'name: metrics'; do
+            if ! echo "${on_render}" | grep -q "${needle}"; then
+              echo "::error::expected '${needle}' in rendered manifest when monitoring.prometheus.enabled=true"
+              exit 1
+            fi
+          done
+          # ServiceMonitor toggle: emits ServiceMonitor resources when both toggles are on
+          sm_render="$(helm template astrasync deployment/helm/astrasync \
+            --set apiServer.enabled=true \
+            --set scheduler.enabled=true \
+            --set console.enabled=true \
+            --set monitoring.prometheus.enabled=true \
+            --set monitoring.prometheus.serviceMonitor.enabled=true)"
+          sm_count="$(echo "${sm_render}" | grep -c '^kind: ServiceMonitor' || true)"
+          if [[ "${sm_count}" -lt 3 ]]; then
+            echo "::error::expected at least 3 ServiceMonitor resources, got ${sm_count}"
+            exit 1
+          fi
+
   security:
     name: Repository security checks
     needs: changes
