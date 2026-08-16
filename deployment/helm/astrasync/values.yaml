@@ -468,6 +468,11 @@ monitoring:
   prometheus:
     enabled: true
     port: 9090
+    serviceMonitor:
+      enabled: false
+      interval: 30s
+      scrapeTimeout: 10s
+      additionalLabels: {}
   grafana:
     enabled: false
     adminUser: admin
