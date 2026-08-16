@@ -152,3 +152,28 @@ Create etcd endpoints
 {{- .Values.apiServer.config.etcdEndpoints -}}
 {{- end -}}
 {{- end -}}
+
+{{/*
+Standard metrics containerPort stanza. Emits nothing when the
+monitoring.prometheus toggle is off so the helper is fail-closed: a
+deployment that does not explicitly opt in cannot accidentally expose
+a /metrics endpoint that has not been configured.
+*/}}
+{{- define "astrasync.metricsContainerPort" -}}
+{{- if .Values.monitoring.prometheus.enabled -}}
+- name: metrics
+  containerPort: {{ .Values.monitoring.prometheus.port }}
+  protocol: TCP
+{{- end -}}
+{{- end -}}
+
+{{/*
+Returns the metrics listen address that the Go binaries should bind.
+Returns empty when the toggle is off so the binary falls back to its
+own default (an empty value, which the binary treats as "do not bind").
+*/}}
+{{- define "astrasync.metricsListenAddress" -}}
+{{- if .Values.monitoring.prometheus.enabled -}}
+:{{ .Values.monitoring.prometheus.port }}
+{{- end -}}
+{{- end -}}
