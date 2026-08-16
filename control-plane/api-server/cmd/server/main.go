@@ -7,7 +7,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/netip"
@@ -38,6 +38,7 @@ import (
 	"io.astrasync/control-plane/connection"
 	connectionpostgres "io.astrasync/control-plane/connection/postgres"
 	jobpostgres "io.astrasync/control-plane/job/postgres"
+	"io.astrasync/control-plane/observability"
 )
 
 const shutdownTimeout = 10 * time.Second
@@ -74,14 +75,19 @@ type config struct {
 }
 
 func main() {
+	logger := observability.NewComponentLogger("apiserver")
+	slog.SetDefault(logger)
+
 	configuration, err := loadConfig(os.Getenv)
 	if err != nil {
-		log.Fatal(err)
+		logger.Error("failed to load configuration", "error", err.Error())
+		os.Exit(1)
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	if err := run(ctx, configuration); err != nil {
-		log.Fatal(err)
+		logger.Error("api-server terminated with error", "error", err.Error())
+		os.Exit(1)
 	}
 }
 
@@ -560,7 +566,7 @@ func reconcileCompilerCatalog(
 	inventory, err := compiler.Inventory(ctx, configuration.executionProfile)
 	if err != nil {
 		if _, retainedErr := repository.Current(ctx, configuration.executionProfile); retainedErr == nil {
-			log.Printf("compiler inventory publisher unavailable; serving last verified snapshot")
+			slog.Default().Warn("compiler inventory publisher unavailable; serving last verified snapshot")
 			return nil
 		}
 		return fmt.Errorf("read deployment connector inventory from compiler: %w", err)
@@ -632,7 +638,7 @@ func reconcileDeploymentCatalog(
 	payload, err := os.ReadFile(configuration.catalogPath)
 	if err != nil {
 		if _, retainedErr := repository.Current(ctx, configuration.executionProfile); retainedErr == nil {
-			log.Printf("connector inventory publisher unavailable; serving last verified snapshot")
+			slog.Default().Warn("connector inventory publisher unavailable; serving last verified snapshot")
 			return nil
 		}
 		return fmt.Errorf("read deployment connector inventory: %w", err)
