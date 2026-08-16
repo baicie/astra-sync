@@ -1,0 +1,73 @@
+{{- if .Values.monitoring.prometheus.enabled }}
+{{- if .Values.monitoring.prometheus.serviceMonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "astrasync.componentFullname" (dict "context" . "component" "api-server") }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "astrasync.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api-server
+  {{- with .Values.monitoring.prometheus.serviceMonitor.additionalLabels }}
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "astrasync.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: api-server
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: {{ .Values.monitoring.prometheus.serviceMonitor.interval }}
+      scrapeTimeout: {{ .Values.monitoring.prometheus.serviceMonitor.scrapeTimeout }}
+{{- end }}
+{{- end }}
+---
+{{- if and .Values.monitoring.prometheus.enabled .Values.monitoring.prometheus.serviceMonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "astrasync.componentFullname" (dict "context" . "component" "scheduler") }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "astrasync.labels" . | nindent 4 }}
+    app.kubernetes.io/component: scheduler
+  {{- with .Values.monitoring.prometheus.serviceMonitor.additionalLabels }}
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "astrasync.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: scheduler
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: {{ .Values.monitoring.prometheus.serviceMonitor.interval }}
+      scrapeTimeout: {{ .Values.monitoring.prometheus.serviceMonitor.scrapeTimeout }}
+{{- end }}
+---
+{{- if and .Values.monitoring.prometheus.enabled .Values.monitoring.prometheus.serviceMonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "astrasync.componentFullname" (dict "context" . "component" "console") }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "astrasync.labels" . | nindent 4 }}
+    app.kubernetes.io/component: console
+  {{- with .Values.monitoring.prometheus.serviceMonitor.additionalLabels }}
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "astrasync.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: console
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: {{ .Values.monitoring.prometheus.serviceMonitor.interval }}
+      scrapeTimeout: {{ .Values.monitoring.prometheus.serviceMonitor.scrapeTimeout }}
+{{- end }}
