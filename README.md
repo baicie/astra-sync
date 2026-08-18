@@ -218,6 +218,7 @@ constraints.
 - [Phase 4 Control Plane](./docs/phase4/README.md)
 - [Phase 5 Performance](./docs/phase5/README.md)
 - [Phase 6 Platform](./docs/phase6/README.md)
+- [Phase 7 Multi-Region](./docs/phase7/README.md)
 - [CDC Usage and Delivery Boundary](./docs/phase3/01-native-cdc/README.md)
 - [Connector Development Guide](./docs/connector-dev.md)
 - [Deployment Guide](./docs/deployment.md)
@@ -232,7 +233,8 @@ constraints.
 | Phase 3 | CDC (MySQL, PostgreSQL) | Complete |
 | Phase 4 | Control Plane HA | Complete |
 | Phase 5 | Performance Optimization | Complete |
-| Phase 6 | Platform (Web Console, RBAC) | In Progress |
+| Phase 6 | Platform (Web Console, RBAC) | Complete |
+| **Phase 7** | **Multi-Region and Operational Maturity** | **Design Complete** |
 
 ## Contributing
 

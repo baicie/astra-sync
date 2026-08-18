@@ -2,8 +2,9 @@
 
 ## Status
 
-Design draft. Three ADRs are pending review (ADR-048, ADR-049,
-ADR-050). No implementation code yet.
+**Design complete and accepted.** Three ADRs are accepted (ADR-048, ADR-049,
+ADR-050). Implementation code is deferred to Phase 8+ on the user's prior
+guidance.
 
 This slice closes the Phase 7 entry criterion that ADR-044
 §"Phase 7 entry criteria" §3 recorded:

@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed (Phase 7 Slice 25 design cluster)
+Accepted (Phase 7 Slice 25 design cluster, reviewed and accepted 2026-08-18)
 
 ## Context
 

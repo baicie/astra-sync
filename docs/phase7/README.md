@@ -70,7 +70,7 @@ and Slice 26 closed the fourth (ADR-047).
 |---|---|---|
 | Slice 23 | Control-plane mutual TLS between API Server and Console BFF (the only in-cluster gRPC channel today) | Implementation Complete |
 | Slice 24 | Operational runbook templates | Implementation Complete |
-| Slice 25 | Multi-region standby, failover, and recovery semantics | ADR Review |
+| Slice 25 | Multi-region standby, failover, and recovery semantics | Design Accepted (Implementation deferred to Phase 8+) |
 | Slice 26 | Observability handbook and dashboard consolidation | Implementation Complete |
 | Slice 26.F1–F5 | Logging + Prometheus descriptor/exposition foundation for ADR-047 (changelog) | Foundation Complete |
 | Slice 26.F6 | Foundation closeout and deferred-work reconciliation | Complete |
@@ -95,6 +95,7 @@ by Kubernetes NetworkPolicy.
 - [Operational runbook templates](../runbooks/README.md)
 - [Observability handbook](../observability/README.md)
 - [Phase 6 closeout reference](../phase6/README.md)
+- [Phase 7 closeout verification](closeout.md)
 
 ## Boundary Notes
 
