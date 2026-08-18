@@ -1,8 +1,8 @@
-# <type>(<scope>): <subject>
-#
-# Explain why this change is needed. Wrap body lines at 100 characters.
-#
-# Types: build, chore, ci, docs, feat, fix, perf, refactor, revert, style, test
-# Use an imperative, lowercase subject without a trailing period.
-#
-# Breaking changes must use ! after the type/scope or a BREAKING CHANGE footer.
+docs(phase8): open Phase 8 multi-region implementation
+
+- Add Phase 8 README with roadmap (Slices 25.1-25.6)
+- Add Slice 25.1 design: PostgreSQL WAL replication and region topology
+- Add Slice 25.1 implementation plan
+- Update root README roadmap to Phase 8
+
+Refs ADR-048, ADR-049, ADR-050
