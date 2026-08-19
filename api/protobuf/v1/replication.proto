@@ -164,3 +164,79 @@ enum ReplicationInstruction {
   REPLICATION_INSTRUCTION_PAUSE = 2;
   REPLICATION_INSTRUCTION_RESYNC = 3;
 }
+
+// RegionPromotionService handles operator-initiated region promotion.
+service RegionPromotionService {
+  // PromoteRegion promotes a standby region to become the active region for a job.
+  rpc PromoteRegion(PromoteRegionRequest) returns (PromoteRegionResponse);
+  // GetPromotionStatus returns the current promotion status for a job.
+  rpc GetPromotionStatus(GetPromotionStatusRequest) returns (PromotionStatus);
+}
+
+// PromoteRegionRequest is sent by the operator to promote a standby region.
+message PromoteRegionRequest {
+  // Job ID to promote.
+  string job_id = 1;
+  // Region to promote to.
+  string target_region = 2;
+  // Idempotency key to prevent duplicate promotions.
+  string idempotency_key = 3;
+  // Expected version of the job record (optimistic locking).
+  int64 expected_version = 4;
+}
+
+// PromoteRegionResponse is the response to a promotion request.
+message PromoteRegionResponse {
+  // Job ID.
+  string job_id = 1;
+  // Previous active region.
+  string previous_region = 2;
+  // New active region.
+  string new_region = 3;
+  // New epoch after promotion.
+  int64 new_epoch = 4;
+  // Current promotion status.
+  PromotionStatus status = 5;
+}
+
+// GetPromotionStatusRequest requests the current promotion status.
+message GetPromotionStatusRequest {
+  // Job ID.
+  string job_id = 1;
+  // Idempotency key (optional, returns status of most recent promotion if empty).
+  string idempotency_key = 2;
+}
+
+// PromotionStatus represents the current status of a region promotion.
+message PromotionStatus {
+  // Promotion states.
+  enum State {
+    STATE_UNSPECIFIED = 0;
+    STATE_PROMOTION_PENDING = 1;
+    STATE_EPOCH_BUMPED = 2;
+    STATE_EPOCH_WRITTEN = 3;
+    STATE_CAPABILITY_REVALIDATING = 4;
+    STATE_CAPABILITY_CONFIRMED = 5;
+    STATE_FAILOVER_COMPLETE = 6;
+    STATE_PROMOTION_FAILED = 7;
+  }
+
+  // Current state.
+  State state = 1;
+  // Job ID.
+  string job_id = 2;
+  // Region promoted to.
+  string target_region = 3;
+  // Idempotency key.
+  string idempotency_key = 4;
+  // Epoch before promotion.
+  int64 previous_epoch = 5;
+  // Epoch after promotion.
+  int64 new_epoch = 6;
+  // Error message if promotion failed.
+  string error_message = 7;
+  // Timestamp when promotion started.
+  google.protobuf.Timestamp started_at = 8;
+  // Timestamp when promotion completed or failed.
+  google.protobuf.Timestamp completed_at = 9;
+}
