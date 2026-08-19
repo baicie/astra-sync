@@ -5,8 +5,7 @@ semantics designed in Phase 7 Slice 25 (ADR-048, ADR-049, ADR-050).
 
 ## Status
 
-**In Progress.** This phase is gated on the Phase 7 Slice 25 design
-acceptance (ADR-048/049/050 accepted 2026-08-18).
+**Complete.** Phase 8 implementation completed 2026-08-19.
 
 ## Goals
 
@@ -45,12 +44,12 @@ All Phase 7 entry criteria are satisfied:
 
 | Slice | Focus | Status |
 |-------|-------|--------|
-| Slice 25.1 | PostgreSQL replication topology and region topology discovery | Pending |
-| Slice 25.2 | Cross-region gRPC channel with mTLS | Pending |
-| Slice 25.3 | Operator-initiated region promotion with epoch bump | Pending |
-| Slice 25.4 | Sink capability revalidation on failover | Pending |
-| Slice 25.5 | Checkpoint-coupled recovery | Pending |
-| Slice 25.6 | Multi-region runbook template | Pending |
+| Slice 25.1 | PostgreSQL replication topology and region topology discovery | Complete |
+| Slice 25.2 | Cross-region gRPC channel with mTLS | Complete |
+| Slice 25.3 | Operator-initiated region promotion with epoch bump | Complete |
+| Slice 25.4 | Sink capability revalidation on failover | Complete |
+| Slice 25.5 | Checkpoint-coupled recovery | Complete |
+| Slice 25.6 | Multi-region runbook template | Complete |
 
 ## Open Decisions (from Slice 25 Design)
 
@@ -74,8 +73,20 @@ The implementation must answer the following before code lands:
 
 ## Records
 
-- [Phase 8 Slice 25.1 README](25-multi-region/25-1-replication-topology.md)
-- [Phase 8 Slice 25.1 Implementation Plan](25-multi-region/25-1-implementation-plan.md)
+### Phase 8 Slice 25 (Multi-Region Implementation)
+
+| Slice | Focus | Status | Records |
+|-------|-------|--------|---------|
+| 25.1 | WAL replication topology | Complete | [Design](25-multi-region/25-1-replication-topology.md) · [Plan](25-multi-region/25-1-implementation-plan.md) |
+| 25.2 | Cross-region gRPC channel | Complete | [Design](25-multi-region/25-2-cross-region-channel.md) · [Plan](25-multi-region/25-2-implementation-plan.md) |
+| 25.3 | Region promotion command | Complete | [Design](25-multi-region/25-3-region-promotion.md) · [Plan](25-multi-region/25-3-implementation-plan.md) |
+| 25.4 | Sink capability revalidation | Complete | [Design](25-multi-region/25-4-sink-capability-revalidation.md) · [Plan](25-multi-region/25-4-implementation-plan.md) |
+| 25.5 | Checkpoint-coupled recovery | Complete | [Design](25-multi-region/25-5-checkpoint-recovery.md) · [Plan](25-multi-region/25-5-implementation-plan.md) |
+| 25.6 | Multi-region runbook template | Complete | [Design](25-multi-region/25-6-multi-region-runbook.md) · [Plan](25-multi-region/25-6-implementation-plan.md) |
+
+### Phase 7 Design Cluster
+
+- [Phase 8 README](README.md)
 - [Phase 7 Slice 25 design cluster](../phase7/25-multi-region/README.md)
 - [Phase 7 Slice 25 design](../phase7/25-multi-region/design.md)
 - [Phase 7 Slice 25 implementation plan](../phase7/25-multi-region/implementation-plan.md)
