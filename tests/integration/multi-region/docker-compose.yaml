@@ -1,0 +1,70 @@
+version: '3.8'
+
+services:
+  # Primary region: us-east-1
+  api-server-primary:
+    image: ghcr.io/baicie/astra-sync/api-server:latest
+    container_name: astrasync-us-east-1
+    environment:
+      - ASTRA_REGION=us-east-1
+      - ASTRA_ROLE=primary
+      - ASTRA_PEER_REGION=us-west-1
+      - ASTRA_PEER_ENDPOINT=api-server-secondary:50051
+      - ASTRA_PEER_CA_CERT_PATH=/certs/cross-region-ca.crt
+      - ASTRA_PEER_CLIENT_CERT_PATH=/certs/us-east-1-client.crt
+      - ASTRA_PEER_CLIENT_KEY_PATH=/certs/us-east-1-client.key
+    ports:
+      - "50051:50051"
+    volumes:
+      - ./certs:/certs:ro
+    networks:
+      - astrasync-primary
+      - astrasync-cross-region
+
+  postgres-primary:
+    image: postgres:15
+    container_name: postgres-us-east-1
+    environment:
+      - POSTGRES_DB=astrasync
+      - POSTGRES_USER=user
+      - POSTGRES_PASSWORD=pass
+    networks:
+      - astrasync-primary
+
+  # Secondary region: us-west-1
+  api-server-secondary:
+    image: ghcr.io/baicie/astra-sync/api-server:latest
+    container_name: astrasync-us-west-1
+    environment:
+      - ASTRA_REGION=us-west-1
+      - ASTRA_ROLE=secondary
+      - ASTRA_PEER_REGION=us-east-1
+      - ASTRA_PEER_ENDPOINT=api-server-primary:50051
+      - ASTRA_PEER_CA_CERT_PATH=/certs/cross-region-ca.crt
+      - ASTRA_PEER_CLIENT_CERT_PATH=/certs/us-west-1-client.crt
+      - ASTRA_PEER_CLIENT_KEY_PATH=/certs/us-west-1-client.key
+    ports:
+      - "50061:50051"
+    volumes:
+      - ./certs:/certs:ro
+    networks:
+      - astrasync-secondary
+      - astrasync-cross-region
+
+  postgres-secondary:
+    image: postgres:15
+    container_name: postgres-us-west-1
+    environment:
+      - POSTGRES_DB=astrasync
+      - POSTGRES_USER=user
+      - POSTGRES_PASSWORD=pass
+    networks:
+      - astrasync-secondary
+
+networks:
+  astrasync-primary:
+    driver: bridge
+  astrasync-secondary:
+    driver: bridge
+  astrasync-cross-region:
+    driver: bridge
