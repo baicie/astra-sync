@@ -520,3 +520,27 @@ jobSpec:
   existingSecret: ""
   key: job.yaml
   mountPath: /etc/astrasync/job
+
+# Multi-region configuration for cross-region replication (ADR-048).
+# Requires multiRegion.enabled=true and a valid regionTopologyConfigMap.
+multiRegion:
+  enabled: false
+  # Current region name (must match a region in the topology ConfigMap).
+  region: ""
+  # Kubernetes ConfigMap containing region topology configuration.
+  # Format: see docs/phase8/25-multi-region/25-1-replication-topology.md
+  regionTopologyConfigMap: "astrasync-region-topology"
+  # Key in the ConfigMap containing the topology YAML.
+  regionTopologyConfigMapKey: "regions.yaml"
+  # Replication configuration.
+  replication:
+    # WAL prefix for region replication entries.
+    walPrefix: "region-replication/wal"
+    # Interval between forced WAL flushes.
+    flushInterval: "1s"
+    # Number of entries to batch before flushing.
+    batchSize: 100
+  # Topology watcher configuration.
+  topologyWatcher:
+    # Polling interval for topology ConfigMap changes.
+    pollInterval: "30s"

@@ -1,0 +1,166 @@
+syntax = "proto3";
+
+package astra.control.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "io.astrasync/control-plane/api-server/gen/go/v1;replicationv1";
+option java_multiple_files = true;
+option java_package = "io.astrasync.control.v1";
+option java_outer_classname = "ReplicationProto";
+
+// RegionTopologyService provides cross-region topology discovery.
+service RegionTopologyService {
+  // GetRegionTopology returns the full region topology configuration.
+  rpc GetRegionTopology(GetRegionTopologyRequest) returns (GetRegionTopologyResponse);
+  // StreamTopologyUpdates streams topology updates to secondary regions.
+  rpc StreamTopologyUpdates(StreamTopologyUpdatesRequest) returns (stream TopologyUpdate);
+}
+
+// ReplicationService handles cross-region checkpoint replication.
+service ReplicationService {
+  // StreamCheckpoints streams checkpoint replication events from primary to secondary.
+  rpc StreamCheckpoints(StreamCheckpointsRequest) returns (stream CheckpointEvent);
+  // ReportReplicationStatus reports replication lag and health to the primary region.
+  rpc ReportReplicationStatus(ReportReplicationStatusRequest) returns (ReportReplicationStatusResponse);
+}
+
+// RegionRole defines the role of a region in the multi-region topology.
+enum RegionRole {
+  REGION_ROLE_UNSPECIFIED = 0;
+  REGION_ROLE_PRIMARY = 1;
+  REGION_ROLE_STANDBY = 2;
+}
+
+// WALEntry represents a Write-Ahead Log entry for cross-region replication.
+message WALEntry {
+  // Unique sequence number for this entry. Monotonically increasing per region.
+  int64 sequence = 1;
+  // The region that originated this entry.
+  string region = 2;
+  // The epoch at which this checkpoint completed.
+  int64 epoch = 3;
+  // URI of the checkpoint manifest in object storage.
+  string checkpoint_uri = 4;
+  // Job ID this checkpoint belongs to.
+  string job_id = 5;
+  // Timestamp when this entry was created.
+  google.protobuf.Timestamp timestamp = 6;
+  // CRC-32C checksum for integrity verification.
+  fixed32 crc32c = 7;
+}
+
+// GetRegionTopologyRequest is sent by a region to discover its peers.
+message GetRegionTopologyRequest {
+  // Region name of the requesting region.
+  string requesting_region = 1;
+}
+
+// GetRegionTopologyResponse contains the full topology configuration.
+message GetRegionTopologyResponse {
+  // All regions in the topology.
+  repeated Region regions = 1;
+  // Default replication lag threshold in seconds.
+  int64 replication_lag_threshold_seconds = 2;
+}
+
+// Region represents a single region in the topology.
+message Region {
+  // Unique region name (e.g., "us-east-1").
+  string name = 1;
+  // Role of this region.
+  RegionRole role = 2;
+  // API Server endpoint for gRPC communication.
+  string api_server_endpoint = 3;
+  // PostgreSQL connection string (reference only, actual secret managed separately).
+  string postgres_reference = 4;
+  // Object storage endpoint for checkpoint/replication storage.
+  string object_storage_endpoint = 5;
+  // Object storage bucket for checkpoints.
+  string object_storage_bucket = 6;
+  // WAL prefix for region replication.
+  string wal_prefix = 7;
+}
+
+// StreamTopologyUpdatesRequest is sent by secondary regions to receive topology updates.
+message StreamTopologyUpdatesRequest {
+  // Region name of the subscribing region.
+  string region = 1;
+  // Last known topology version for incremental updates.
+  int64 known_version = 2;
+}
+
+// TopologyUpdate is pushed from the primary region when topology changes.
+message TopologyUpdate {
+  // New or updated region.
+  Region region = 1;
+  // New version number.
+  int64 version = 2;
+  // Type of update.
+  TopologyUpdateType update_type = 3;
+}
+
+// TopologyUpdateType defines the type of topology change.
+enum TopologyUpdateType {
+  TOPOLOGY_UPDATE_TYPE_UNSPECIFIED = 0;
+  TOPOLOGY_UPDATE_TYPE_REGION_ADDED = 1;
+  TOPOLOGY_UPDATE_TYPE_REGION_UPDATED = 2;
+  TOPOLOGY_UPDATE_TYPE_REGION_REMOVED = 3;
+}
+
+// StreamCheckpointsRequest is sent by secondary regions to receive checkpoint events.
+message StreamCheckpointsRequest {
+  // Region name of the subscribing secondary region.
+  string region = 1;
+  // Filter by job ID (optional, empty means all jobs).
+  string job_id = 2;
+  // Resume from a specific sequence number.
+  int64 resume_from_sequence = 3;
+}
+
+// CheckpointEvent represents a checkpoint replication event.
+message CheckpointEvent {
+  // Type of checkpoint event.
+  CheckpointEventType event_type = 1;
+  // The WAL entry for this checkpoint.
+  WALEntry wal_entry = 2;
+  // Indicates if this is the last event before a gap (e.g., due to region failover).
+  bool is_gap_marker = 3;
+}
+
+// CheckpointEventType defines the type of checkpoint event.
+enum CheckpointEventType {
+  CHECKPOINT_EVENT_TYPE_UNSPECIFIED = 0;
+  CHECKPOINT_EVENT_TYPE_CHECKPOINT_COMPLETED = 1;
+  CHECKPOINT_EVENT_TYPE_CHECKPOINT_GAP = 2;
+}
+
+// ReportReplicationStatusRequest is sent by secondary regions to report their status.
+message ReportReplicationStatusRequest {
+  // Region name of the reporting secondary region.
+  string region = 1;
+  // Current replication lag in milliseconds.
+  int64 replication_lag_millis = 2;
+  // Last successfully replicated sequence number.
+  int64 last_replicated_sequence = 3;
+  // Whether the replication channel is healthy.
+  bool is_healthy = 4;
+  // Human-readable status message.
+  string status_message = 5;
+}
+
+// ReportReplicationStatusResponse is the response to status reports.
+message ReportReplicationStatusResponse {
+  // Acknowledged sequence number.
+  int64 acknowledged_sequence = 1;
+  // Instructions for the secondary region.
+  ReplicationInstruction instruction = 2;
+}
+
+// ReplicationInstruction tells the secondary region what action to take.
+enum ReplicationInstruction {
+  REPLICATION_INSTRUCTION_UNSPECIFIED = 0;
+  REPLICATION_INSTRUCTION_CONTINUE = 1;
+  REPLICATION_INSTRUCTION_PAUSE = 2;
+  REPLICATION_INSTRUCTION_RESYNC = 3;
+}

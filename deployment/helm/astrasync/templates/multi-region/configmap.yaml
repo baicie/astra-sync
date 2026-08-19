@@ -1,0 +1,40 @@
+{{/*
+AstraSync Region Topology ConfigMap
+
+This ConfigMap defines the multi-region topology for cross-region replication.
+Each region must be registered with its role (primary or standby) and endpoints.
+
+Usage:
+  Copy this template to your deployment-side wiki or ConfigMap store,
+  replace all <placeholder> values, and apply it to your cluster.
+
+  Do NOT commit populated values to the repository. The repository only
+  holds the template, not the deployment-specific configuration.
+*/}}
+{{- if .Values.multiRegion.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Values.multiRegion.regionTopologyConfigMap | default "astrasync-region-topology" }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: {{ include "astrasync.name" . }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    {{- include "astrasync.labels" . | nindent 4 }}
+  annotations:
+    # Document the template source for operators
+    astrasync.io/replication-template: "https://github.com/astrasync/astra-sync/blob/main/deployment/helm/astrasync/templates/multi-region/configmap.yaml"
+data:
+  {{ .Values.multiRegion.regionTopologyConfigMapKey | default "regions.yaml" }}: |
+    regions:
+      {{- $root := . }}
+      {{- range $region := .Values.multiRegion.topology.regions }}
+      - name: <region-name-{{ $region.name | quote }}>
+        role: {{ $region.role | quote }}
+        apiServerEndpoint: <api-server-endpoint-{{ $region.name | quote }}>
+        postgresEndpoint: <postgres-endpoint-{{ $region.name | quote }}>
+        objectStorageBucket: <object-storage-bucket-{{ $region.name | quote }}>
+        objectStoragePrefix: <object-storage-prefix-{{ $region.name | quote }}>
+      {{- end }}
+    replicationLagThresholdSec: {{ .Values.multiRegion.topology.replicationLagThresholdSec | default 5 }}
+{{- end }}
