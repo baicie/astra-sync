@@ -2,11 +2,15 @@
 
 ## Status
 
-Proposed. This slice implements the first two open decisions from the Phase 7
-Slice 25 design cluster:
+Implementation Complete (Phase 8, 2026-08-19). This slice implements the first
+two open decisions from the Phase 7 Slice 25 design cluster:
 
 1. Checkpoint replication transport
 2. Region topology discovery
+
+See [`docs/phase8/closeout.md`](../closeout.md) for the implementation record
+and Phase 9 [`docs/phase9/closeout.md`](../../phase9/closeout.md) for the
+end-to-end test coverage.
 
 ## Context
 

@@ -1,6 +1,6 @@
 # Makefile for AstraSync
 
-.PHONY: all build build-java build-go build-connectors test test-java test-go vet-go check-security check-runbooks check clean install format check verify catalog-check docker-build docker-push proto-generate proto-go-generate proto-lint crd-generate install-hooks
+.PHONY: all build build-java build-go build-connectors test test-java test-go vet-go check-security check-runbooks check clean install format check verify catalog-check docker-build docker-push proto-generate proto-go-generate proto-lint crd-generate install-hooks test-integration-go
 
 GO_MODULES := control-plane control-plane/api-server control-plane/controller control-plane/scheduler control-plane/catalog control-plane/auth console
 JAVA_PROTO_MODULES := connector-api,protocol/data-protocol,protocol/connector-protocol,protocol/worker-protocol,control-plane/compiler-validation
@@ -25,15 +25,12 @@ build-java:
 # Build Go control plane
 build-go:
 	@echo "Building Go control plane..."
-	@set -e; for module in $(GO_MODULES); do \
-		echo "Building $$module..."; \
-		(cd "$$module" && go build ./...); \
-	done
+	@python scripts/run-go-modules.py build
 
 # Build connectors
 build-connectors:
 	@echo "Building connectors..."
-	mvn clean package -pl connectors/connector-jdbc,connectors/connector-mysql-cdc,connectors/connector-postgres-cdc,connectors/connector-kafka -am -DskipTests
+	mvn clean package -pl connectors/connector-jdbc,connectors/connector-debezium,connectors/connector-mysql-cdc,connectors/connector-postgres-cdc,connectors/connector-kafka,connectors/connector-file,connectors/connector-iceberg,connectors/connector-clickhouse -am -DskipTests
 
 # Test
 test: test-java test-go
@@ -44,22 +41,20 @@ test-java:
 
 test-go:
 	@echo "Running Go tests..."
-	@set -e; for module in $(GO_MODULES); do \
-		echo "Testing $$module..."; \
-		(cd "$$module" && go test ./...); \
-	done
+	@python scripts/run-go-modules.py test
 
 vet-go:
 	@echo "Running Go static analysis..."
-	@set -e; for module in $(GO_MODULES); do \
-		echo "Vetting $$module..."; \
-		(cd "$$module" && go vet ./...); \
-	done
+	@python scripts/run-go-modules.py vet
 
 # Integration tests
 test-integration:
 	@echo "Running integration tests..."
 	mvn verify -Pintegration-tests
+
+test-integration-go:
+	@echo "Running Go integration tests..."
+	cd tests/integration && go test ./...
 
 # E2E tests
 test-e2e:
@@ -70,21 +65,21 @@ test-e2e:
 format:
 	@echo "Formatting code..."
 	mvn spotless:apply
-	@set -e; for module in $(GO_MODULES); do (cd "$$module" && go fmt ./...); done
+	@python scripts/run-go-modules.py fmt
 
 # Code style check
 check: vet-go check-runbooks
 	@echo "Checking code style..."
 	mvn spotless:check
 
-# Phase 7 Slice 24 operational runbook template guard. Verifies that every
-# Markdown file under docs/runbooks/ is a template (contains at least one
-# <placeholder> and no known production hostname patterns). Fails closed if a
-# populated runbook slips into the repository.
+# Phase 7 Slice 24 and Phase 8 multi-region template guard. Verifies that every
+# Markdown runbook and Helm multi-region template is safe to commit: it must
+# retain a placeholder and contain no known production hostname pattern.
 check-runbooks:
 	@echo "Checking runbook templates..."
 	@python scripts/check-runbook-templates.py
 	@python scripts/check-runbook-templates.py --root docs/observability
+	@python scripts/check-runbook-templates.py --root deployment/helm/astrasync/templates/multi-region
 
 # Run the Python script unit tests. The tests live alongside the scripts
 # they exercise; the make target is intentionally narrow so the Java and Go

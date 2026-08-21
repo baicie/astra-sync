@@ -2,7 +2,8 @@
 
 ## Status
 
-Proposed. Implements the sink capability revalidation described in
+Implementation Complete (Phase 8, 2026-08-19). Implements the sink capability
+revalidation described in
 ADR-049 §"Step 2: Capability Revalidation".
 
 ## Context

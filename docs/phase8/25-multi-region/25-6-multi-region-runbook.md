@@ -2,7 +2,8 @@
 
 ## Status
 
-Proposed. Implements the multi-region failover runbook template required by
+Implementation Complete (Phase 8, 2026-08-19). Implements the multi-region
+failover runbook template required by
 the Phase 7 Slice 25 implementation plan.
 
 ## Context

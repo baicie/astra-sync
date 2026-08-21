@@ -29,12 +29,12 @@ data:
     regions:
       {{- $root := . }}
       {{- range $region := .Values.multiRegion.topology.regions }}
-      - name: <region-name-{{ $region.name | quote }}>
+      - name: {{ $region.name | quote }}
         role: {{ $region.role | quote }}
-        apiServerEndpoint: <api-server-endpoint-{{ $region.name | quote }}>
-        postgresEndpoint: <postgres-endpoint-{{ $region.name | quote }}>
-        objectStorageBucket: <object-storage-bucket-{{ $region.name | quote }}>
-        objectStoragePrefix: <object-storage-prefix-{{ $region.name | quote }}>
+        apiServerEndpoint: <api-server-endpoint>
+        postgresEndpoint: <postgres-endpoint>
+        objectStorageBucket: <object-storage-bucket>
+        objectStoragePrefix: <object-storage-prefix>
       {{- end }}
     replicationLagThresholdSec: {{ .Values.multiRegion.topology.replicationLagThresholdSec | default 5 }}
 {{- end }}

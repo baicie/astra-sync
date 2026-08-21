@@ -1,15 +1,14 @@
 #!/usr/bin/env python3
-"""Guard that every Markdown file under ``docs/runbooks/`` is a template.
+"""Guard repository runbook and multi-region templates.
 
 The guard enforces two invariants recorded by ADR-046:
 
-1. Every runbook template in the repository must contain at least one
-   ``<placeholder>`` token. A populated runbook that ships to the
-   repository will not contain placeholders because the operator
-   replaced them with environment-specific values.
-2. Every runbook template must not contain a known production
-   hostname pattern. The list is intentionally short; the guard is
-   best-effort and a review-side check, not an exhaustive filter.
+1. Every repository template must contain at least one ``<placeholder>``
+   token. A populated template will not contain placeholders because the
+   operator replaced them with environment-specific values.
+2. Every template must not contain a known production hostname pattern. The
+   list is intentionally short; the guard is best-effort and a review-side
+   check, not an exhaustive filter.
 
 Usage::
 
@@ -46,10 +45,11 @@ PROD_HOSTNAME_PATTERNS = (
 
 
 def iter_markdown_files(root: Path) -> list[Path]:
-    """Return every ``*.md`` file under ``root`` sorted by path."""
+    """Return supported template files under ``root`` sorted by path."""
     if not root.exists():
         return []
-    return sorted(p for p in root.rglob("*.md") if p.is_file())
+    suffixes = {".md", ".yaml", ".yml"}
+    return sorted(p for p in root.rglob("*") if p.is_file() and p.suffix in suffixes)
 
 
 def file_contains_placeholder(path: Path) -> bool:

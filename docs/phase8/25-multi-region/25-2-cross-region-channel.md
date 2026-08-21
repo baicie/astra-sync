@@ -2,7 +2,8 @@
 
 ## Status
 
-Proposed. Implements the cross-region gRPC channel described in
+Implementation Complete (Phase 8, 2026-08-19). Implements the cross-region
+gRPC channel described in
 ADR-048 §"Cross-Region gRPC Channel" and ADR-049 §"Step 1: Epoch Bump
 and Cross-Region Fencing".
 

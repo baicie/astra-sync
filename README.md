@@ -107,12 +107,13 @@ astrasync/
 │   └── catalog-api/          # Table catalog interface
 ├── connectors/                # Connector implementations
 │   ├── connector-jdbc/        # Generic JDBC
-│   ├── connector-mysql-cdc/   # MySQL CDC (Debezium)
-│   ├── connector-postgres-cdc/ # PostgreSQL CDC (Debezium)
-│   ├── connector-kafka/       # Kafka source/sink
-│   ├── connector-file/        # File source/sink
-│   ├── connector-iceberg/    # Apache Iceberg sink
-│   └── connector-clickhouse/  # ClickHouse sink
+│   ├── connector-debezium/# Debezium-backed shared CDC primitives
+│   ├── connector-mysql-cdc/# MySQL CDC (Debezium)
+│   ├── connector-postgres-cdc/# PostgreSQL CDC (Debezium)
+│   ├── connector-kafka/# Kafka source/sink
+│   ├── connector-file/# File source/sink
+│   ├── connector-iceberg/# Apache Iceberg sink
+│   └── connector-clickhouse/# ClickHouse sink
 ├── formats/                   # Data format handlers
 │   ├── arrow-format/          # Arrow RecordBatch
 │   ├── row-format/            # Row binary
@@ -123,8 +124,9 @@ astrasync/
 │   ├── mask-transform/        # Column masking
 │   └── schema-transform/      # Schema evolution
 ├── protocol/                 # Wire protocols
-│   ├── data-protocol/         # Data exchange protocol
-│   └── connector-protocol/     # Connector control protocol
+│   ├── data-protocol/# Data exchange protocol
+│   ├── connector-protocol/# Connector control protocol
+│   └── worker-protocol/# Worker ↔ Coordinator protocol
 ├── deployment/               # Deployment configurations
 │   ├── docker/                # Dockerfiles
 │   ├── helm/                  # Helm charts
@@ -234,8 +236,9 @@ constraints.
 | Phase 4 | Control Plane HA | Complete |
 | Phase 5 | Performance Optimization | Complete |
 | Phase 6 | Platform (Web Console, RBAC) | Complete |
-| Phase 7 | Multi-Region and Operational Maturity | Design Complete |
-| **Phase 8** | **Multi-Region Implementation** | **In Progress** |
+| Phase 7 | Multi-Region and Operational Maturity | Complete|
+| Phase 8 | Multi-Region Implementation | Complete|
+| Phase 9 | Multi-Region Integration Testing | Complete|
 
 ## Contributing
 
