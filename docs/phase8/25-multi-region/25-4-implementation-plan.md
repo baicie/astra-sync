@@ -1,5 +1,12 @@
 # Phase 8 Slice 25.4: Implementation Plan
 
+## Status
+
+Implementation Complete (Phase 8, 2026-08-19). Matches the design decisions
+in [`25-4-sink-capability-revalidation.md`](25-4-sink-capability-revalidation.md).
+See [`docs/phase8/closeout.md`](../closeout.md) and the Phase 9 evidence in
+[`docs/phase9/closeout.md`](../../phase9/closeout.md).
+
 ## Scope
 
 This document is the implementation plan for Slice 25.4. It records

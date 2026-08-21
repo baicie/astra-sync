@@ -17,9 +17,10 @@ Authentication decision and authorized audit-query observations now provide
 live API Server availability/latency samples with bounded `request_id`
 exemplars. Other control-plane business observations and Java data-plane
 metric families remain deferred and are not counted as live SLO coverage.
-Slice 25 (multi-region) has shipped its design cluster
-(ADR-048, ADR-049, ADR-050) and is in **ADR Review** status; the
-implementation is deferred to Phase 8+ on the user's prior guidance.
+Slice 25 (multi-region) shipped its design cluster
+(ADR-048, ADR-049, ADR-050) in Phase 7, was implemented in Phase 8
+(`docs/phase8/closeout.md`), and is integration-tested in Phase 9
+(`docs/phase9/closeout.md`).
 Phase 7 admission is recorded by ADR-044; the entry criteria are
 cross-cluster control-plane mTLS, operational runbook templates,
 multi-region standby semantics, and observability consolidation.
@@ -70,7 +71,7 @@ and Slice 26 closed the fourth (ADR-047).
 |---|---|---|
 | Slice 23 | Control-plane mutual TLS between API Server and Console BFF (the only in-cluster gRPC channel today) | Implementation Complete |
 | Slice 24 | Operational runbook templates | Implementation Complete |
-| Slice 25 | Multi-region standby, failover, and recovery semantics | Design Accepted (Implementation deferred to Phase 8+) |
+| Slice 25 | Multi-region standby, failover, and recovery semantics | Implemented (Phase 8); integration-tested (Phase 9) |
 | Slice 26 | Observability handbook and dashboard consolidation | Implementation Complete |
 | Slice 26.F1–F5 | Logging + Prometheus descriptor/exposition foundation for ADR-047 (changelog) | Foundation Complete |
 | Slice 26.F6 | Foundation closeout and deferred-work reconciliation | Complete |

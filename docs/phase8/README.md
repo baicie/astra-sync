@@ -51,18 +51,16 @@ All Phase 7 entry criteria are satisfied:
 | Slice 25.5 | Checkpoint-coupled recovery | Complete |
 | Slice 25.6 | Multi-region runbook template | Complete |
 
-## Open Decisions (from Slice 25 Design)
+## Implementation Decisions
 
-The implementation must answer the following before code lands:
-
-1. **Checkpoint replication transport.** PostgreSQL logical replication,
-   object-storage-backed write-ahead log, or Kubernetes-native CSI snapshot.
-2. **Region topology discovery.** Kubernetes `MultiClusterService`,
-   Consul-style service mesh, or deployment-configured endpoint list.
-3. **Auto-promotion policy.** Whether auto-promotion is in scope and, if so,
-   what RBAC role authorizes it.
-4. **Region-pinned connector descriptor metadata.** Whether to add a
-   `regionAffinity` field to the connector descriptor catalogue.
+1. **Checkpoint replication transport.** Object-storage-backed write-ahead
+   log under the existing checkpoint bucket.
+2. **Region topology discovery.** Deployment-configured endpoint list rendered
+   from the multi-region Helm topology configuration.
+3. **Promotion policy.** Promotion is operator-initiated; auto-promotion
+   remains explicitly out of scope under ADR-010.
+4. **Region-pinned connector descriptor metadata.** `regionAffinity` is not
+   added to the connector descriptor catalogue in this phase.
 
 ## Dependencies
 

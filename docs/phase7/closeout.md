@@ -41,7 +41,7 @@ the verification evidence that each criterion is satisfied.
 |-------|-------|--------|--------|
 | Slice 23 | Control-plane mTLS | Implementation Complete | #38 |
 | Slice 24 | Operational runbook templates | Implementation Complete | #39 |
-| Slice 25 | Multi-region standby/failover design | Design Accepted | #47 |
+| Slice 25 | Multi-region standby/failover/recovery design and implementation | Implementation Complete (Phase 8); integration-tested (Phase 9) | #47 (design), see `docs/phase8/closeout.md` and `docs/phase9/closeout.md` |
 | Slice 26 | Observability handbook | Implementation Complete | #40 |
 | Slice 26.F1 | Java SLF4J/logback foundation | Foundation Complete | #48 |
 | Slice 26.F2 | Coordinator/Worker SLF4J migration | Foundation Complete | #48 |
@@ -53,11 +53,15 @@ the verification evidence that each criterion is satisfied.
 
 ## Deferred Work
 
-The following work is explicitly deferred to Phase 8+:
+The following work is explicitly tracked downstream (Phase 8 implementation
+and Phase 9 integration testing):
 
-1. **Slice 25 implementation**: Multi-region PostgreSQL replication topology,
-   cross-region gRPC channel, region topology discovery, auto-promotion policy,
-   cross-region audit query. See [implementation-plan.md](25-multi-region/implementation-plan.md).
+1. **Slice 25 implementation cluster**: PostgreSQL replication topology,
+   cross-region gRPC channel, region topology discovery, operator-initiated
+   promotion, sink capability revalidation, checkpoint-coupled recovery, and
+   the multi-region runbook template. Implemented in Phase 8
+   (`docs/phase8/closeout.md`); end-to-end and chaos coverage recorded in
+   Phase 9 (`docs/phase9/closeout.md`).
 
 ## Boundary Verification
 

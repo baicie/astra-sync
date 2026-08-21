@@ -2,7 +2,8 @@
 
 ## Status
 
-Proposed. Implements the checkpoint-coupled recovery described in
+Implementation Complete (Phase 8, 2026-08-19). Implements the
+checkpoint-coupled recovery described in
 ADR-049 §"Step 3: Checkpoint-Coupled Recovery".
 
 ## Context
