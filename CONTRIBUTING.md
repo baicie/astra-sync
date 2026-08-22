@@ -21,7 +21,7 @@ Thank you for your interest in contributing to AstraSync!
 
 - Java 21+
 - Maven 3.9+
-- Go 1.22+
+- Go 1.26+
 - Docker & Docker Compose
 
 ### Building

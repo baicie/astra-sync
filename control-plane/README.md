@@ -12,7 +12,7 @@ This directory contains the Go modules for the AstraSync control plane.
 
 ## Prerequisites
 
-- Go 1.22+
+- Go 1.26+
 - protoc 26.0+
 - Buf CLI 1.36+
 

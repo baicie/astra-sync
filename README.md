@@ -146,7 +146,7 @@ astrasync/
 
 - Java 21+
 - Maven 3.9+
-- Go 1.22+
+- Go 1.26+
 - Docker & Docker Compose (for local development)
 
 ### Build

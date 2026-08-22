@@ -4,7 +4,7 @@
 
 GO_MODULES := control-plane control-plane/api-server control-plane/controller control-plane/scheduler control-plane/catalog control-plane/auth console
 JAVA_PROTO_MODULES := connector-api,protocol/data-protocol,protocol/connector-protocol,protocol/worker-protocol,control-plane/compiler-validation
-CONTROLLER_GEN_VERSION := v0.15.0
+CONTROLLER_GEN_VERSION := v0.21.0
 ADMIN_BIN := control-plane/auth/cmd/admin
 
 # Default target
@@ -164,7 +164,7 @@ proto-lint:
 # Generate CRD manifests
 crd-generate:
 	@echo "Generating CRD manifests..."
-	cd control-plane/controller && GOTOOLCHAIN=go1.22.12 go run sigs.k8s.io/controller-tools/cmd/controller-gen@$(CONTROLLER_GEN_VERSION) crd paths=./api/v1 output:crd:artifacts:config=../../deployment/operator/config/crd/bases
+	cd control-plane/controller && go run sigs.k8s.io/controller-tools/cmd/controller-gen@$(CONTROLLER_GEN_VERSION) crd paths=./api/v1 output:crd:artifacts:config=../../deployment/operator/config/crd/bases
 
 ## Build the offline Slice 18 authentication administrator tool (astra-auth-admin).
 build-auth-admin:

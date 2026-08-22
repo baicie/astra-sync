@@ -126,7 +126,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v7
         with:
-          go-version: '1.22.x'
+          go-version: '1.26.x'
           cache: true
           cache-dependency-path: |
             control-plane/go.mod
@@ -182,7 +182,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v7
         with:
-          go-version: '1.22.x'
+          go-version: '1.26.x'
           cache-dependency-path: |
             control-plane/go.sum
             control-plane/controller/go.sum
@@ -254,12 +254,13 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v7
         with:
-          go-version: '1.22.x'
+          go-version: '1.26.x'
           cache: false
 
       - name: Set up Buf
         uses: bufbuild/buf-setup-action@v1
         with:
+          github_token: ${{ github.token }}
           version: '1.34.0'
 
       - name: Validate XML and protobuf modules
@@ -287,7 +288,7 @@ jobs:
       - name: Check generated SyncJob CRD
         working-directory: control-plane/controller
         run: |
-          go run sigs.k8s.io/controller-tools/cmd/controller-gen@v0.15.0 crd paths=./api/v1 output:crd:artifacts:config=../../deployment/operator/config/crd/bases
+          go run sigs.k8s.io/controller-tools/cmd/controller-gen@v0.21.0 crd paths=./api/v1 output:crd:artifacts:config=../../deployment/operator/config/crd/bases
           git diff --exit-code -- ../../deployment/operator/config/crd/bases/sync.astrasync.io_syncjobs.yaml
 
       - name: Set up Helm
@@ -385,7 +386,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v7
         with:
-          go-version: '1.22.x'
+          go-version: '1.26.x'
           cache: true
           cache-dependency-path: |
             control-plane/go.mod
