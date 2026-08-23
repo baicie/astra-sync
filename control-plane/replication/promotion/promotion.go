@@ -13,13 +13,14 @@ import (
 
 // Common errors for promotion operations.
 var (
-	ErrNotStandbyRegion    = errors.New("promotion: target region is not a standby region")
-	ErrAlreadyPromoting    = errors.New("promotion: promotion already in progress for this job")
-	ErrJobNotFound         = errors.New("promotion: job not found")
-	ErrEpochConflict       = errors.New("promotion: epoch conflict")
-	ErrCapabilityTimeout   = errors.New("promotion: sink capability revalidation timeout")
-	ErrCapabilityFailed    = errors.New("promotion: sink capability revalidation failed")
-	ErrPromotionAborted    = errors.New("promotion: promotion aborted")
+	ErrNotStandbyRegion  = errors.New("promotion: target region is not a standby region")
+	ErrAlreadyPromoting  = errors.New("promotion: promotion already in progress for this job")
+	ErrJobNotFound       = errors.New("promotion: job not found")
+	ErrEpochConflict     = errors.New("promotion: epoch conflict")
+	ErrCapabilityTimeout = errors.New("promotion: sink capability revalidation timeout")
+	ErrCapabilityFailed  = errors.New("promotion: sink capability revalidation failed")
+	ErrPromotionAborted  = errors.New("promotion: promotion aborted")
+	ErrInvalidRequest    = errors.New("promotion: invalid request")
 )
 
 // PromotionState represents the state of a promotion.
@@ -59,32 +60,32 @@ func (s PromotionState) String() string {
 
 // Promotion represents a region promotion operation.
 type Promotion struct {
-	ID               string
-	JobID            string
-	PreviousRegion   string
-	TargetRegion     string
-	IdempotencyKey   string
-	PreviousEpoch    int64
-	NewEpoch         int64
-	State            PromotionState
-	ErrorMessage     string
-	StartedAt        time.Time
-	CompletedAt      *time.Time
-	mu               sync.RWMutex
+	ID             string
+	JobID          string
+	PreviousRegion string
+	TargetRegion   string
+	IdempotencyKey string
+	PreviousEpoch  int64
+	NewEpoch       int64
+	State          PromotionState
+	ErrorMessage   string
+	StartedAt      time.Time
+	CompletedAt    *time.Time
+	mu             sync.RWMutex
 }
 
 // NewPromotion creates a new promotion record.
 func NewPromotion(jobID, previousRegion, targetRegion, idempotencyKey string, previousEpoch int64) *Promotion {
 	return &Promotion{
-		ID:               idempotencyKey,
-		JobID:            jobID,
-		PreviousRegion:   previousRegion,
-		TargetRegion:     targetRegion,
-		IdempotencyKey:  idempotencyKey,
-		PreviousEpoch:    previousEpoch,
-		NewEpoch:        previousEpoch + 1,
-		State:            StatePending,
-		StartedAt:        time.Now().UTC(),
+		ID:             idempotencyKey,
+		JobID:          jobID,
+		PreviousRegion: previousRegion,
+		TargetRegion:   targetRegion,
+		IdempotencyKey: idempotencyKey,
+		PreviousEpoch:  previousEpoch,
+		NewEpoch:       previousEpoch + 1,
+		State:          StatePending,
+		StartedAt:      time.Now().UTC(),
 	}
 }
 
@@ -177,24 +178,37 @@ type CapabilityRevalidator interface {
 	Revalidate(ctx context.Context, jobID string, timeout time.Duration) error
 }
 
+// RegionTopology validates promotion targets and identifies the active region.
+type RegionTopology interface {
+	IsStandby(region string) bool
+}
+
+// EpochFencer fences the previous region before a new execution epoch is used.
+type EpochFencer interface {
+	Fence(ctx context.Context, jobID string, expectedEpoch int64) error
+}
+
 // Manager manages region promotions.
 type Manager struct {
-	cfg      Config
-	logger   *zap.Logger
-	store    PromotionStore
-	assigner EpochAssigner
-	jobReader JobReader
-	jobWriter JobWriter
+	cfg         Config
+	logger      *zap.Logger
+	store       PromotionStore
+	assigner    EpochAssigner
+	jobReader   JobReader
+	jobWriter   JobWriter
 	revalidator CapabilityRevalidator
+	fencer      EpochFencer
 
-	mu          sync.RWMutex
-	promotions  map[string]*Promotion // key: jobID
+	mu         sync.RWMutex
+	promotions map[string]*Promotion // key: jobID
 }
 
 // Config holds the configuration for the promotion manager.
 type Config struct {
 	// Capability revalidation timeout.
 	CapabilityTimeout time.Duration
+	CurrentRegion     string
+	Topology          RegionTopology
 }
 
 // Option is a functional option for manager configuration.
@@ -207,6 +221,16 @@ func WithCapabilityTimeout(d time.Duration) Option {
 	}
 }
 
+// WithCurrentRegion identifies the region currently serving the job.
+func WithCurrentRegion(region string) Option {
+	return func(c *Config) { c.CurrentRegion = region }
+}
+
+// WithTopology enables standby target validation.
+func WithTopology(topology RegionTopology) Option {
+	return func(c *Config) { c.Topology = topology }
+}
+
 // NewManager creates a new promotion manager.
 func NewManager(logger *zap.Logger, store PromotionStore, assigner EpochAssigner, jobReader JobReader, jobWriter JobWriter, opts ...Option) (*Manager, error) {
 	cfg := Config{
@@ -217,6 +241,9 @@ func NewManager(logger *zap.Logger, store PromotionStore, assigner EpochAssigner
 		opt(&cfg)
 	}
 
+	if logger == nil || store == nil || assigner == nil || jobReader == nil || jobWriter == nil {
+		return nil, fmt.Errorf("%w: manager dependencies are required", ErrInvalidRequest)
+	}
 	return &Manager{
 		cfg:        cfg,
 		logger:     logger.With(zap.String("component", "promotion")),
@@ -230,6 +257,18 @@ func NewManager(logger *zap.Logger, store PromotionStore, assigner EpochAssigner
 
 // Promote initiates a region promotion.
 func (m *Manager) Promote(ctx context.Context, jobID, targetRegion, idempotencyKey string, expectedVersion int64) (*Promotion, error) {
+	if jobID == "" || targetRegion == "" || len(idempotencyKey) < 16 || len(idempotencyKey) > 128 || expectedVersion < 0 {
+		return nil, ErrInvalidRequest
+	}
+	if m.cfg.Topology != nil && !m.cfg.Topology.IsStandby(targetRegion) {
+		return nil, ErrNotStandbyRegion
+	}
+	m.mu.Lock()
+	if current := m.promotions[jobID]; current != nil && !current.IsComplete() {
+		m.mu.Unlock()
+		return nil, ErrAlreadyPromoting
+	}
+	m.mu.Unlock()
 	// Check if idempotency key already exists
 	if existing, err := m.store.Get(ctx, jobID, idempotencyKey); err == nil && existing != nil {
 		m.logger.Info("returning existing promotion",
@@ -250,7 +289,8 @@ func (m *Manager) Promote(ctx context.Context, jobID, targetRegion, idempotencyK
 	}
 
 	// Create promotion
-	promotion := NewPromotion(jobID, "current-region", targetRegion, idempotencyKey, currentEpoch)
+	previousRegion := m.cfg.CurrentRegion
+	promotion := NewPromotion(jobID, previousRegion, targetRegion, idempotencyKey, currentEpoch)
 
 	// Track in memory
 	m.mu.Lock()
@@ -274,6 +314,13 @@ func (m *Manager) Promote(ctx context.Context, jobID, targetRegion, idempotencyK
 		return nil, fmt.Errorf("assign epoch: %w", err)
 	}
 	promotion.SetEpoch(newEpoch)
+	if m.fencer != nil {
+		if err := m.fencer.Fence(ctx, jobID, currentEpoch); err != nil {
+			promotion.TransitionTo(StatePromotionFailed, err.Error())
+			_ = m.store.Update(ctx, promotion)
+			return nil, fmt.Errorf("fence previous epoch: %w", err)
+		}
+	}
 
 	// Transition to epoch written
 	if err := promotion.TransitionTo(StateEpochWritten, ""); err != nil {
@@ -293,12 +340,16 @@ func (m *Manager) Promote(ctx context.Context, jobID, targetRegion, idempotencyK
 	}
 
 	// Revalidate sink capability
-	if m.revalidator != nil {
-		if err := m.revalidator.Revalidate(ctx, jobID, m.cfg.CapabilityTimeout); err != nil {
-			promotion.TransitionTo(StatePromotionFailed, err.Error())
-			m.store.Update(ctx, promotion)
-			return nil, fmt.Errorf("revalidate capability: %w", err)
-		}
+	if m.revalidator == nil {
+		err := ErrCapabilityFailed
+		promotion.TransitionTo(StatePromotionFailed, err.Error())
+		_ = m.store.Update(ctx, promotion)
+		return nil, err
+	}
+	if err := m.revalidator.Revalidate(ctx, jobID, m.cfg.CapabilityTimeout); err != nil {
+		promotion.TransitionTo(StatePromotionFailed, err.Error())
+		_ = m.store.Update(ctx, promotion)
+		return nil, fmt.Errorf("revalidate capability: %w", err)
 	}
 
 	// Transition to capability confirmed
@@ -334,9 +385,9 @@ func (m *Manager) GetStatus(ctx context.Context, jobID, idempotencyKey string) (
 
 // PromotionStats holds statistics for promotions.
 type PromotionStats struct {
-	TotalPromotions    int64
+	TotalPromotions      int64
 	SuccessfulPromotions int64
-	FailedPromotions   int64
+	FailedPromotions     int64
 }
 
 // Stats returns promotion statistics.

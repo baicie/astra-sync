@@ -195,6 +195,22 @@ func NewRegistry() Registry {
 		controlv1.AccessService_RevokePlatformRole_FullMethodName: {
 			Permission: auth.PermissionPlatformRoles, SelfScope: true,
 		},
+
+		// Cross-region control RPCs have no tenant-bearing request. They are
+		// protected by the platform diagnostics permission until a dedicated
+		// region-management permission is introduced.
+		controlv1.RegionTopologyService_GetRegionTopology_FullMethodName: {
+			Permission: auth.PermissionDiagnosticsRead, SelfScope: true,
+		},
+		controlv1.ReplicationService_ReportReplicationStatus_FullMethodName: {
+			Permission: auth.PermissionDiagnosticsRead, SelfScope: true,
+		},
+		controlv1.RegionPromotionService_PromoteRegion_FullMethodName: {
+			Permission: auth.PermissionDiagnosticsRead, SelfScope: true,
+		},
+		controlv1.RegionPromotionService_GetPromotionStatus_FullMethodName: {
+			Permission: auth.PermissionDiagnosticsRead, SelfScope: true,
+		},
 	}}
 }
 

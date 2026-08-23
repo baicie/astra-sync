@@ -12,6 +12,7 @@ import java.util.Objects;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
+import java.util.function.LongConsumer;
 import java.util.function.Supplier;
 
 /** Bounded file-backed storage for batches that are waiting in an exchange. */
@@ -22,11 +23,12 @@ final class SpillableBatchStorage implements AutoCloseable {
     private final Semaphore slots;
     private final Path directory;
     private final long maxBytes;
+    private final LongConsumer spillBytesRecorder;
     private final Object bytesMonitor = new Object();
     private long reservedBytes;
     private boolean closed;
 
-    SpillableBatchStorage(int capacity, SpillPolicy policy) {
+    SpillableBatchStorage(int capacity, SpillPolicy policy, LongConsumer spillBytesRecorder) {
         if (capacity <= 0) {
             throw new IllegalArgumentException("capacity must be positive");
         }
@@ -38,6 +40,7 @@ final class SpillableBatchStorage implements AutoCloseable {
         this.files = new ArrayBlockingQueue<>(queueCapacity);
         this.slots = new Semaphore(queueCapacity);
         this.maxBytes = checked.maxBytes();
+        this.spillBytesRecorder = Objects.requireNonNull(spillBytesRecorder, "spillBytesRecorder must not be null");
         try {
             Files.createDirectories(checked.root());
             if (!Files.isDirectory(checked.root())) {
@@ -78,6 +81,7 @@ final class SpillableBatchStorage implements AutoCloseable {
                 }
                 enqueued = true;
             }
+            spillBytesRecorder.accept(payload.length);
         } catch (ExchangeFailureException exception) {
             throw exception;
         } catch (IOException | RuntimeException exception) {

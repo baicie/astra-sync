@@ -30,6 +30,7 @@ import (
 	"io.astrasync/control-plane/api-server/internal/catalogproto"
 	"io.astrasync/control-plane/api-server/internal/compilerclient"
 	"io.astrasync/control-plane/api-server/internal/metrics"
+	"io.astrasync/control-plane/api-server/internal/replication"
 	"io.astrasync/control-plane/api-server/internal/service"
 	"io.astrasync/control-plane/auth"
 	authpostgres "io.astrasync/control-plane/auth/postgres"
@@ -73,6 +74,10 @@ type config struct {
 	connectionMutationsEnabled bool
 	connectionTestsEnabled     bool
 	connectionRuntimeEnabled   bool
+	region                     string
+	regionRole                 string
+	peerRegion                 string
+	peerEndpoint               string
 }
 
 func main() {
@@ -208,6 +213,14 @@ func loadConfig(getenv func(string) string) (config, error) {
 	if environment == "production" && compilerTLSFields != 3 {
 		return config{}, fmt.Errorf("production requires mutual TLS for compiler validation")
 	}
+	region := strings.TrimSpace(valueOrDefault(getenv("ASTRA_REGION"), "local"))
+	if region == "" {
+		return config{}, fmt.Errorf("ASTRA_REGION must not be blank")
+	}
+	regionRole := strings.ToLower(strings.TrimSpace(valueOrDefault(getenv("ASTRA_ROLE"), "primary")))
+	if regionRole != "primary" && regionRole != "standby" && regionRole != "secondary" {
+		return config{}, fmt.Errorf("ASTRA_ROLE must be primary, standby, or secondary")
+	}
 	return config{
 		databaseURL: databaseURL, grpcListen: valueOrDefault(getenv("GRPC_LISTEN_ADDRESS"), ":50051"),
 		grpcEndpoint:  valueOrDefault(getenv("GRPC_GATEWAY_ENDPOINT"), "127.0.0.1:50051"),
@@ -232,6 +245,10 @@ func loadConfig(getenv func(string) string) (config, error) {
 		connectionMutationsEnabled: connectionMutationsEnabled,
 		connectionTestsEnabled:     connectionTestsEnabled,
 		connectionRuntimeEnabled:   connectionRuntimeEnabled,
+		region:                     region,
+		regionRole:                 regionRole,
+		peerRegion:                 strings.TrimSpace(getenv("ASTRA_PEER_REGION")),
+		peerEndpoint:               strings.TrimSpace(getenv("ASTRA_PEER_ENDPOINT")),
 	}, nil
 }
 
@@ -300,6 +317,9 @@ func run(ctx context.Context, configuration config) error {
 		controlv1.AuditService_ServiceDesc,
 		controlv1.IdentityService_ServiceDesc,
 		controlv1.AccessService_ServiceDesc,
+		controlv1.RegionTopologyService_ServiceDesc,
+		controlv1.ReplicationService_ServiceDesc,
+		controlv1.RegionPromotionService_ServiceDesc,
 	); err != nil {
 		return fmt.Errorf("validate API authorization registry: %w", err)
 	}
@@ -379,6 +399,25 @@ func run(ctx context.Context, configuration config) error {
 	if err != nil {
 		return fmt.Errorf("create access service: %w", err)
 	}
+	regionRole := controlv1.RegionRole_REGION_ROLE_PRIMARY
+	if configuration.regionRole == "standby" || configuration.regionRole == "secondary" {
+		regionRole = controlv1.RegionRole_REGION_ROLE_STANDBY
+	}
+	regions := []replication.TopologyRegion{{
+		Name: configuration.region, Role: regionRole,
+		APIServerEndpoint: configuration.grpcEndpoint,
+	}}
+	if configuration.peerRegion != "" && configuration.peerEndpoint != "" {
+		peerRole := controlv1.RegionRole_REGION_ROLE_STANDBY
+		if regionRole == controlv1.RegionRole_REGION_ROLE_STANDBY {
+			peerRole = controlv1.RegionRole_REGION_ROLE_PRIMARY
+		}
+		regions = append(regions, replication.TopologyRegion{
+			Name: configuration.peerRegion, Role: peerRole,
+			APIServerEndpoint: configuration.peerEndpoint,
+		})
+	}
+	replicationService := replication.NewService(regions, nil)
 	trustedProxyPrefixes, err := loadTrustedProxyPrefixes(configuration)
 	if err != nil {
 		return fmt.Errorf("configure trusted-proxy boundary: %w", err)
@@ -411,6 +450,9 @@ func run(ctx context.Context, configuration config) error {
 	controlv1.RegisterAuditServiceServer(grpcServer, auditService)
 	controlv1.RegisterIdentityServiceServer(grpcServer, identityService)
 	controlv1.RegisterAccessServiceServer(grpcServer, accessService)
+	controlv1.RegisterRegionTopologyServiceServer(grpcServer, replicationService)
+	controlv1.RegisterReplicationServiceServer(grpcServer, replicationService)
+	controlv1.RegisterRegionPromotionServiceServer(grpcServer, replicationService)
 	if configuration.environment != "production" {
 		reflection.Register(grpcServer)
 	}
@@ -427,6 +469,9 @@ func run(ctx context.Context, configuration config) error {
 		"ConnectorCatalogService": controlv1.RegisterConnectorCatalogServiceHandlerFromEndpoint,
 		"ConnectionService":       controlv1.RegisterConnectionServiceHandlerFromEndpoint,
 		"AuditService":            controlv1.RegisterAuditServiceHandlerFromEndpoint,
+		"RegionTopologyService":   controlv1.RegisterRegionTopologyServiceHandlerFromEndpoint,
+		"ReplicationService":      controlv1.RegisterReplicationServiceHandlerFromEndpoint,
+		"RegionPromotionService":  controlv1.RegisterRegionPromotionServiceHandlerFromEndpoint,
 	} {
 		if err := register(ctx, gateway, configuration.grpcEndpoint, dialOptions); err != nil {
 			grpcListener.Close()

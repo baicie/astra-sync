@@ -208,7 +208,7 @@ func TestManager_Promote(t *testing.T) {
 	}
 	m.revalidator = revalidator
 
-	promotion, err := m.Promote(context.Background(), "job-1", "eu-west-1", "key-123", 42)
+	promotion, err := m.Promote(context.Background(), "job-1", "eu-west-1", "key-1234567890123456", 42)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -236,13 +236,13 @@ func TestManager_Promote_Idempotent(t *testing.T) {
 	m.revalidator = revalidator
 
 	// First promotion
-	p1, err := m.Promote(context.Background(), "job-1", "eu-west-1", "key-123", 42)
+	p1, err := m.Promote(context.Background(), "job-1", "eu-west-1", "key-1234567890123456", 42)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	// Duplicate promotion with same idempotency key
-	p2, err := m.Promote(context.Background(), "job-1", "eu-west-1", "key-123", 42)
+	p2, err := m.Promote(context.Background(), "job-1", "eu-west-1", "key-1234567890123456", 42)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -267,7 +267,7 @@ func TestManager_Promote_VersionConflict(t *testing.T) {
 	m.revalidator = revalidator
 
 	// Wrong version
-	_, err = m.Promote(context.Background(), "job-1", "eu-west-1", "key-123", 99)
+	_, err = m.Promote(context.Background(), "job-1", "eu-west-1", "key-1234567890123456", 99)
 	if !errors.Is(err, ErrEpochConflict) {
 		t.Errorf("expected ErrEpochConflict, got %v", err)
 	}
@@ -288,7 +288,7 @@ func TestManager_Promote_CapabilityTimeout(t *testing.T) {
 	}
 	m.revalidator = revalidator
 
-	_, err = m.Promote(context.Background(), "job-1", "eu-west-1", "key-123", 42)
+	_, err = m.Promote(context.Background(), "job-1", "eu-west-1", "key-1234567890123456", 42)
 	if err == nil {
 		t.Error("expected error")
 	}
@@ -315,13 +315,13 @@ func TestManager_GetStatus(t *testing.T) {
 	m.revalidator = revalidator
 
 	// Create promotion
-	_, err = m.Promote(context.Background(), "job-1", "eu-west-1", "key-123", 42)
+	_, err = m.Promote(context.Background(), "job-1", "eu-west-1", "key-1234567890123456", 42)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	// Get status with idempotency key
-	status, err := m.GetStatus(context.Background(), "job-1", "key-123")
+	status, err := m.GetStatus(context.Background(), "job-1", "key-1234567890123456")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -354,8 +354,8 @@ func TestManager_Stats(t *testing.T) {
 	m.revalidator = revalidator
 
 	// Create promotions
-	m.Promote(context.Background(), "job-1", "eu-west-1", "key-1", 42)
-	m.Promote(context.Background(), "job-2", "eu-west-1", "key-2", 42)
+	m.Promote(context.Background(), "job-1", "eu-west-1", "key-0000000000000001", 42)
+	m.Promote(context.Background(), "job-2", "eu-west-1", "key-0000000000000002", 42)
 
 	stats, err := m.Stats(context.Background())
 	if err != nil {

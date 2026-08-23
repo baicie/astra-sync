@@ -21,11 +21,13 @@ import (
 
 // Common errors for channel operations.
 var (
-	ErrClosed             = errors.New("channel: client is closed")
-	ErrNoPeerEndpoint     = errors.New("channel: no peer endpoint configured")
-	ErrTLSConfigMissing    = errors.New("channel: TLS configuration incomplete")
-	ErrCertLoadFailed      = errors.New("channel: failed to load certificates")
+	ErrClosed               = errors.New("channel: client is closed")
+	ErrNoPeerEndpoint       = errors.New("channel: no peer endpoint configured")
+	ErrTLSConfigMissing     = errors.New("channel: TLS configuration incomplete")
+	ErrCertLoadFailed       = errors.New("channel: failed to load certificates")
 	ErrCAVerificationFailed = errors.New("channel: CA verification failed")
+	ErrTransportUnavailable = errors.New("channel: replication transport is not configured")
+	ErrInvalidEvent         = errors.New("channel: event is invalid")
 )
 
 // EventType defines the type of cross-region event.
@@ -54,11 +56,11 @@ func (e EventType) String() string {
 
 // Event represents a cross-region event.
 type Event struct {
-	Type        EventType
+	Type         EventType
 	SourceRegion string
 	TargetRegion string
-	Timestamp   time.Time
-	Payload     []byte
+	Timestamp    time.Time
+	Payload      []byte
 }
 
 // Config holds the configuration for a cross-region channel.
@@ -71,6 +73,7 @@ type Config struct {
 	ClientKeyPath  string
 	ServerName     string
 	EnableTLS      bool
+	eventSender    EventSender
 }
 
 // Option is a functional option for channel configuration.
@@ -107,16 +110,25 @@ func (f EventHandlerFunc) HandleEvent(ctx context.Context, event *Event) error {
 	return f(ctx, event)
 }
 
+// EventSender is the transport bridge used to deliver events. The API Server
+// supplies a gRPC implementation; keeping it injected avoids a module cycle.
+type EventSender interface {
+	SendEvent(context.Context, *Event) error
+}
+
 // Client manages the cross-region gRPC connection.
 type Client struct {
 	cfg     Config
 	logger  *zap.Logger
 	handler EventHandler
 
-	mu          sync.RWMutex
-	conn        *grpc.ClientConn
-	closed      atomic.Bool
-	reconnectCh chan struct{}
+	mu             sync.RWMutex
+	conn           *grpc.ClientConn
+	closed         atomic.Bool
+	eventsSent     atomic.Int64
+	eventsReceived atomic.Int64
+	lastError      atomic.Value
+	reconnectCh    chan struct{}
 }
 
 // NewClient creates a new cross-region channel client.
@@ -168,14 +180,24 @@ func (c *Client) Close() error {
 	return nil
 }
 
-// SendEvent sends an event to the peer region.
-// Note: This is a placeholder for the actual gRPC stream implementation.
+// SendEvent sends an event through the configured transport.
 func (c *Client) SendEvent(ctx context.Context, event *Event) error {
 	if c.closed.Load() {
 		return ErrClosed
 	}
+	if event == nil || event.Type == EventTypeUnknown || event.SourceRegion == "" {
+		return ErrInvalidEvent
+	}
+	if c.cfg.eventSender == nil {
+		return ErrTransportUnavailable
+	}
+	if err := c.cfg.eventSender.SendEvent(ctx, event); err != nil {
+		c.lastError.Store(err.Error())
+		return fmt.Errorf("send %s event: %w", event.Type, err)
+	}
+	c.eventsSent.Add(1)
 
-	c.logger.Debug("event queued for transmission",
+	c.logger.Debug("event sent to peer",
 		zap.String("type", event.Type.String()),
 		zap.String("source", event.SourceRegion),
 		zap.String("target", event.TargetRegion))
@@ -262,7 +284,7 @@ type Server struct {
 	logger  *zap.Logger
 	handler EventHandler
 
-	mu     sync.RWMutex
+	mu      sync.RWMutex
 	streams map[string]chan *Event
 }
 
@@ -352,9 +374,11 @@ type ChannelStats struct {
 func (c *Client) Stats() ChannelStats {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	return ChannelStats{
-		Connected: c.conn != nil,
+	stats := ChannelStats{Connected: c.conn != nil, EventsSent: c.eventsSent.Load(), EventsReceived: c.eventsReceived.Load()}
+	if value := c.lastError.Load(); value != nil {
+		stats.LastError, _ = value.(string)
 	}
+	return stats
 }
 
 // NewHealthEvent creates a health event.
@@ -395,4 +419,9 @@ func NewTopologyEvent(sourceRegion, targetRegion string, version int64) *Event {
 		Timestamp:    time.Now().UTC(),
 		Payload:      []byte(fmt.Sprintf("topology-version:%d", version)),
 	}
+}
+
+// WithEventSender attaches the concrete replication transport.
+func WithEventSender(sender EventSender) Option {
+	return func(c *Config) { c.eventSender = sender }
 }

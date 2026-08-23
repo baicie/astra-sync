@@ -51,11 +51,11 @@ func (m *mockObjectStorage) DeleteObject(ctx context.Context, key string) error 
 func TestEntry_MarshalBinary(t *testing.T) {
 	entry := &Entry{
 		Sequence:      123,
-		Region:       "us-east-1",
-		Epoch:        42,
+		Region:        "us-east-1",
+		Epoch:         42,
 		CheckpointURI: "s3://bucket/checkpoints/job-123/epoch-42",
-		JobID:        "job-123",
-		Timestamp:    time.Date(2026, 8, 18, 12, 0, 0, 0, time.UTC),
+		JobID:         "job-123",
+		Timestamp:     time.Date(2026, 8, 18, 12, 0, 0, 0, time.UTC),
 	}
 
 	data, err := entry.MarshalBinary()
@@ -91,7 +91,7 @@ func TestEntry_MarshalBinary(t *testing.T) {
 
 func TestEntry_MarshalBinary_EmptyCheckpoint(t *testing.T) {
 	entry := &Entry{
-		Sequence: 1,
+		Sequence:      1,
 		CheckpointURI: "",
 	}
 	_, err := entry.MarshalBinary()
@@ -151,11 +151,11 @@ func TestWriter_Append(t *testing.T) {
 
 	logger, _ := zap.NewDevelopment()
 	writer := &Writer{
-		cfg:    Config{Region: "us-east-1", WALPrefix: "replication/wal"},
-		store:  store,
-		logger: logger.With(zap.String("region", "us-east-1")),
+		cfg:      Config{Region: "us-east-1", WALPrefix: "replication/wal"},
+		store:    store,
+		logger:   logger.With(zap.String("region", "us-east-1")),
 		sequence: 0,
-		pending: make([]*Entry, 0),
+		pending:  make([]*Entry, 0),
 	}
 
 	ctx := context.Background()
@@ -184,23 +184,72 @@ func TestWriter_Append(t *testing.T) {
 func TestWriter_Append_RegionMismatch(t *testing.T) {
 	store := &mockObjectStorage{}
 	entry := &Entry{
-		Region: "eu-west-1", // Different from writer's region
+		Region:        "eu-west-1", // Different from writer's region
 		CheckpointURI: "s3://bucket/checkpoint",
 	}
 
 	logger, _ := zap.NewDevelopment()
 	writer := &Writer{
-		cfg:    Config{Region: "us-east-1", WALPrefix: "replication/wal"},
-		store:  store,
-		logger: logger.With(zap.String("region", "us-east-1")),
+		cfg:      Config{Region: "us-east-1", WALPrefix: "replication/wal"},
+		store:    store,
+		logger:   logger.With(zap.String("region", "us-east-1")),
 		sequence: 0,
-		pending: make([]*Entry, 0),
+		pending:  make([]*Entry, 0),
 	}
 
 	ctx := context.Background()
 	err := writer.Append(ctx, entry)
 	if err == nil {
 		t.Error("expected region mismatch error")
+	}
+}
+
+func TestWriter_NewWriterResumesSequenceAndFlushesBatch(t *testing.T) {
+	store := &mockObjectStorage{}
+	store.objects = make(map[string][]byte)
+	logger, _ := zap.NewDevelopment()
+	seed := &Entry{Sequence: 7, Region: "us-east-1", CheckpointURI: "s3://bucket/seed", JobID: "job-1"}
+	data, err := seed.MarshalBinary()
+	if err != nil {
+		t.Fatalf("marshal seed: %v", err)
+	}
+	store.objects["replication/wal/us-east-1/0000000000000007.wal"] = data
+	writer, err := NewWriter(context.Background(), store, logger, "us-east-1", "bucket", "replication/wal", WithBatchSize(2), WithFlushInterval(time.Hour))
+	if err != nil {
+		t.Fatalf("NewWriter failed: %v", err)
+	}
+	defer writer.Close(context.Background())
+	entry := &Entry{CheckpointURI: "s3://bucket/checkpoint", JobID: "job-1"}
+	if err := writer.Append(context.Background(), entry); err != nil {
+		t.Fatalf("Append failed: %v", err)
+	}
+	if entry.Sequence != 8 {
+		t.Fatalf("expected resumed sequence 8, got %d", entry.Sequence)
+	}
+	if _, ok := store.objects["replication/wal/us-east-1/0000000000000008.wal"]; ok {
+		t.Fatal("batch entry should not be stored before batch is full")
+	}
+	if err := writer.Append(context.Background(), &Entry{CheckpointURI: "s3://bucket/checkpoint-2", JobID: "job-1"}); err != nil {
+		t.Fatalf("second Append failed: %v", err)
+	}
+	if _, ok := store.objects["replication/wal/us-east-1/0000000000000008.wal"]; !ok {
+		t.Fatal("batch flush did not persist first entry")
+	}
+}
+
+func TestWriter_Append_InvalidDoesNotConsumeSequence(t *testing.T) {
+	store := &mockObjectStorage{}
+	logger, _ := zap.NewDevelopment()
+	writer, err := NewWriter(context.Background(), store, logger, "us-east-1", "bucket", "replication/wal")
+	if err != nil {
+		t.Fatalf("NewWriter failed: %v", err)
+	}
+	defer writer.Close(context.Background())
+	if err := writer.Append(context.Background(), &Entry{}); !errors.Is(err, ErrInvalidCheckpoint) {
+		t.Fatalf("expected invalid checkpoint, got %v", err)
+	}
+	if writer.Sequence() != 0 {
+		t.Fatalf("invalid append consumed sequence: %d", writer.Sequence())
 	}
 }
 

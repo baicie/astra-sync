@@ -7,6 +7,7 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -18,6 +19,8 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/credentials/insecure"
+	controlv1 "io.astrasync/control-plane/api-server/gen/go/v1"
 )
 
 // Common errors for the test framework.
@@ -36,6 +39,7 @@ type Region struct {
 	PostgresURI   string
 	ObjectStorage string
 	Network       string
+	HTTPURI       string
 }
 
 // Config holds the configuration for the test framework.
@@ -51,7 +55,8 @@ type Config struct {
 	// TeardownTimeout is the time to wait for region teardown.
 	TeardownTimeout time.Duration
 	// LogDirectory is the directory for test logs.
-	LogDirectory string
+	LogDirectory  string
+	AllowInsecure bool
 }
 
 // Option is a functional option for framework configuration.
@@ -83,6 +88,11 @@ func WithLogDirectory(dir string) Option {
 	return func(c *Config) {
 		c.LogDirectory = dir
 	}
+}
+
+// WithInsecureTransportForTest explicitly allows insecure local transport.
+func WithInsecureTransportForTest() Option {
+	return func(c *Config) { c.AllowInsecure = true }
 }
 
 // defaultConfig returns the default configuration.
@@ -148,7 +158,7 @@ func (f *Framework) Bootstrap(ctx context.Context) error {
 	}
 
 	// Start docker-compose
-	if err := f.runCompose("up", "-d", "--wait"); err != nil {
+	if err := f.runCompose(ctx, "up", "-d", "--wait"); err != nil {
 		return fmt.Errorf("%w: %v", ErrRegionBootstrapFailed, err)
 	}
 
@@ -156,21 +166,24 @@ func (f *Framework) Bootstrap(ctx context.Context) error {
 	f.regions[f.cfg.PrimaryRegion] = &Region{
 		Name:         f.cfg.PrimaryRegion,
 		Role:         "primary",
-		APIServerURI: fmt.Sprintf("localhost:50051"),
+		APIServerURI: "localhost:50051",
 		PostgresURI:  "postgres://user:pass@localhost:5432/primary",
 		Network:      "astrasync-primary",
+		HTTPURI:      "http://localhost:8080",
 	}
 
 	f.regions[f.cfg.SecondaryRegion] = &Region{
 		Name:         f.cfg.SecondaryRegion,
 		Role:         "secondary",
-		APIServerURI: fmt.Sprintf("localhost:50061"),
+		APIServerURI: "localhost:50061",
 		PostgresURI:  "postgres://user:pass@localhost:5433/secondary",
 		Network:      "astrasync-secondary",
+		HTTPURI:      "http://localhost:8081",
 	}
 
 	// Wait for both regions to be healthy
 	if err := f.waitForHealthy(ctx); err != nil {
+		_ = f.runCompose(context.Background(), "down", "-v", "--remove-orphans")
 		return fmt.Errorf("wait for healthy: %w", err)
 	}
 
@@ -195,7 +208,7 @@ func (f *Framework) Teardown(ctx context.Context) error {
 	}
 
 	// Stop docker-compose
-	if err := f.runCompose("down", "-v", "--remove-orphans"); err != nil {
+	if err := f.runCompose(ctx, "down", "-v", "--remove-orphans"); err != nil {
 		return fmt.Errorf("%w: %v", ErrRegionTeardownFailed, err)
 	}
 
@@ -239,8 +252,10 @@ func (f *Framework) GetConnection(ctx context.Context, regionName string) (*grpc
 		return nil, fmt.Errorf("region not found: %s", regionName)
 	}
 
-	// Create insecure connection for testing
-	conn, err := grpc.DialContext(ctx, region.APIServerURI, grpc.WithInsecure())
+	if !f.cfg.AllowInsecure {
+		return nil, errors.New("TLS transport is required; explicitly enable insecure test transport")
+	}
+	conn, err := grpc.DialContext(ctx, region.APIServerURI, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		return nil, fmt.Errorf("dial %s: %w", region.APIServerURI, err)
 	}
@@ -319,21 +334,41 @@ func (f *Framework) waitForHealthy(ctx context.Context) error {
 
 // checkRegionsHealth checks if both regions are healthy.
 func (f *Framework) checkRegionsHealth(ctx context.Context) (bool, error) {
-	// In real implementation, this would call the API server health endpoint
-	// For now, we assume regions are healthy after bootstrap
+	f.mu.RLock()
+	regions := make([]*Region, 0, len(f.regions))
+	for _, region := range f.regions {
+		regions = append(regions, region)
+	}
+	f.mu.RUnlock()
+	client := &http.Client{Timeout: 2 * time.Second}
+	for _, region := range regions {
+		request, err := http.NewRequestWithContext(ctx, http.MethodGet, region.HTTPURI+"/ready", nil)
+		if err != nil {
+			return false, err
+		}
+		response, err := client.Do(request)
+		if err != nil {
+			return false, err
+		}
+		_ = response.Body.Close()
+		if response.StatusCode != http.StatusOK {
+			return false, fmt.Errorf("region %s health returned %d", region.Name, response.StatusCode)
+		}
+	}
 	return true, nil
 }
 
 // runCompose runs a docker-compose command.
-func (f *Framework) runCompose(args ...string) error {
+func (f *Framework) runCompose(ctx context.Context, args ...string) error {
 	f.logger.Info("running docker-compose", zap.Strings("args", args))
 
-	composeDir := filepath.Dir(f.cfg.ComposeFile)
-	if composeDir == "" {
-		composeDir = "."
+	composeFile, err := filepath.Abs(f.cfg.ComposeFile)
+	if err != nil {
+		return fmt.Errorf("resolve compose file path: %w", err)
 	}
+	composeDir := filepath.Dir(composeFile)
 
-	cmd := exec.Command("docker-compose", append([]string{"-f", f.cfg.ComposeFile}, args...)...)
+	cmd := exec.CommandContext(ctx, "docker-compose", append([]string{"-f", composeFile}, args...)...)
 	cmd.Dir = composeDir
 
 	output, err := cmd.CombinedOutput()
@@ -391,13 +426,17 @@ func (f *Framework) GetRegionLogs(regionName string) (string, error) {
 
 // PromoteRegion promotes the secondary region.
 func (f *Framework) PromoteRegion(ctx context.Context, jobID, idempotencyKey string) error {
-	// In real implementation, this would call the promotion gRPC endpoint
-	// For the framework, we just simulate the operation
-	f.logger.Info("promoting region",
-		zap.String("jobID", jobID),
-		zap.String("region", f.cfg.SecondaryRegion),
-		zap.String("idempotencyKey", idempotencyKey))
-	return nil
+	if jobID == "" || len(idempotencyKey) < 16 {
+		return errors.New("job ID and idempotency key are required")
+	}
+	conn, err := f.GetConnection(ctx, f.cfg.SecondaryRegion)
+	if err != nil {
+		return err
+	}
+	_, err = controlv1.NewRegionPromotionServiceClient(conn).PromoteRegion(ctx, &controlv1.PromoteRegionRequest{
+		JobId: jobID, TargetRegion: f.cfg.SecondaryRegion, IdempotencyKey: idempotencyKey,
+	})
+	return err
 }
 
 // WaitForCondition waits for a condition to be true.

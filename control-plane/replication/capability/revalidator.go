@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -46,6 +47,8 @@ type RevalidationResult struct {
 	ErrorMessage string
 	// Duration of the revalidation.
 	Duration time.Duration
+	// Negotiated capability must satisfy this requirement when present.
+	RequiredCapability *Capability
 }
 
 // RevalidationResultString returns a human-readable string for the result.
@@ -58,10 +61,11 @@ func (r *RevalidationResult) String() string {
 
 // ConnectionInfo holds information about a sink connection.
 type ConnectionInfo struct {
-	JobID        string
-	SinkEndpoint string
-	Database     string
-	Table        string
+	JobID              string
+	SinkEndpoint       string
+	Database           string
+	Table              string
+	RequiredCapability *Capability
 }
 
 // ConnectionCatalog provides access to connection information.
@@ -74,6 +78,11 @@ type ConnectionCatalog interface {
 type CapabilityNegotiator interface {
 	// Negotiate attempts to negotiate a capability with the sink.
 	Negotiate(ctx context.Context, endpoint string) (Capability, error)
+}
+
+// ReachabilityProber optionally performs a bounded transport probe before negotiation.
+type ReachabilityProber interface {
+	Probe(ctx context.Context, endpoint string) error
 }
 
 // AuditLogger logs audit events for capability revalidation.
@@ -90,11 +99,15 @@ type AuditLogger interface {
 
 // Revalidator revalidates sink capabilities for cross-region failover.
 type Revalidator struct {
-	cfg       Config
-	logger    *zap.Logger
-	catalog   ConnectionCatalog
-	negotiator CapabilityNegotiator
-	auditor   AuditLogger
+	cfg           Config
+	logger        *zap.Logger
+	catalog       ConnectionCatalog
+	negotiator    CapabilityNegotiator
+	auditor       AuditLogger
+	total         atomic.Int64
+	success       atomic.Int64
+	failure       atomic.Int64
+	totalDuration atomic.Int64
 }
 
 // Config holds the configuration for the revalidator.
@@ -149,10 +162,10 @@ func NewRevalidator(
 	opts ...Option,
 ) *Revalidator {
 	cfg := Config{
-		Timeout:       60 * time.Second,
-		ProbeTimeout:  5 * time.Second,
-		MaxRetries:    3,
-		RetryBackoff:  2 * time.Second,
+		Timeout:      60 * time.Second,
+		ProbeTimeout: 5 * time.Second,
+		MaxRetries:   3,
+		RetryBackoff: 2 * time.Second,
 	}
 
 	for _, opt := range opts {
@@ -160,9 +173,9 @@ func NewRevalidator(
 	}
 
 	return &Revalidator{
-		cfg:         cfg,
-		logger:      logger.With(zap.String("component", "capability-revalidator")),
-		catalog:     catalog,
+		cfg:        cfg,
+		logger:     logger.With(zap.String("component", "capability-revalidator")),
+		catalog:    catalog,
 		negotiator: negotiator,
 		auditor:    auditor,
 	}
@@ -171,7 +184,22 @@ func NewRevalidator(
 // Revalidate revalidates the sink capability for a job.
 // This implements the promotion.CapabilityRevalidator interface.
 func (r *Revalidator) Revalidate(ctx context.Context, jobID string, timeout time.Duration) error {
+	return r.revalidate(ctx, jobID, timeout)
+}
+
+// RevalidateFor verifies that the negotiated capability satisfies the requested guarantee.
+func (r *Revalidator) RevalidateFor(ctx context.Context, jobID string, timeout time.Duration, required Capability) error {
+	return r.revalidateWithRequirement(ctx, jobID, timeout, &required)
+}
+
+func (r *Revalidator) revalidate(ctx context.Context, jobID string, timeout time.Duration) error {
+	return r.revalidateWithRequirement(ctx, jobID, timeout, nil)
+}
+
+func (r *Revalidator) revalidateWithRequirement(ctx context.Context, jobID string, timeout time.Duration, explicit *Capability) error {
 	start := time.Now()
+	r.total.Add(1)
+	defer func() { r.totalDuration.Add(time.Since(start).Nanoseconds()) }()
 
 	// Use configured timeout if not specified
 	if timeout == 0 {
@@ -192,10 +220,33 @@ func (r *Revalidator) Revalidate(ctx context.Context, jobID string, timeout time
 		zap.Duration("timeout", timeout))
 
 	// Step 1: Get connection information
+	if r.catalog == nil || r.negotiator == nil {
+		r.failure.Add(1)
+		return ErrCapabilityNegotiationFailed
+	}
 	connInfo, err := r.catalog.GetConnection(ctx, jobID)
 	if err != nil {
 		r.abort(ctx, jobID, fmt.Sprintf("get connection: %v", err))
 		return fmt.Errorf("get connection: %w", err)
+	}
+	if connInfo == nil || connInfo.SinkEndpoint == "" {
+		r.failure.Add(1)
+		r.abort(ctx, jobID, ErrSinkUnreachable.Error())
+		return ErrSinkUnreachable
+	}
+	if prober, ok := r.negotiator.(ReachabilityProber); ok {
+		probeCtx, probeCancel := context.WithTimeout(ctx, r.cfg.ProbeTimeout)
+		probeErr := prober.Probe(probeCtx, connInfo.SinkEndpoint)
+		probeCancel()
+		if probeErr != nil {
+			r.failure.Add(1)
+			r.abort(ctx, jobID, fmt.Sprintf("probe failed: %v", probeErr))
+			return fmt.Errorf("%w: %v", ErrSinkUnreachable, probeErr)
+		}
+	}
+	required := explicit
+	if required == nil {
+		required = connInfo.RequiredCapability
 	}
 
 	r.logger.Debug("got connection info",
@@ -221,6 +272,11 @@ func (r *Revalidator) Revalidate(ctx context.Context, jobID string, timeout time
 
 		capability, err := r.negotiator.Negotiate(ctx, connInfo.SinkEndpoint)
 		if err == nil {
+			if required != nil && capability > *required {
+				lastErr = fmt.Errorf("%w: negotiated=%s required=%s", ErrCapabilityNegotiationFailed, capability, *required)
+				r.logger.Warn("negotiated capability is insufficient", zap.String("jobID", jobID), zap.String("negotiated", capability.String()), zap.String("required", required.String()))
+				continue
+			}
 			duration := time.Since(start)
 
 			r.logger.Info("capability revalidation succeeded",
@@ -231,6 +287,7 @@ func (r *Revalidator) Revalidate(ctx context.Context, jobID string, timeout time
 			if r.auditor != nil {
 				r.auditor.LogCapabilityConfirmed(ctx, jobID, capability, duration)
 			}
+			r.success.Add(1)
 
 			return nil
 		}
@@ -243,6 +300,7 @@ func (r *Revalidator) Revalidate(ctx context.Context, jobID string, timeout time
 	}
 
 	// All retries exhausted
+	r.failure.Add(1)
 	r.abort(ctx, jobID, fmt.Sprintf("all retries exhausted: %v", lastErr))
 	return fmt.Errorf("capability revalidation failed after %d retries: %w", r.cfg.MaxRetries, lastErr)
 }
@@ -267,12 +325,21 @@ func (r *Revalidator) GetRevalidationResult(ctx context.Context, jobID string, t
 	result := &RevalidationResult{}
 
 	// Get connection info
+	if r.catalog == nil || r.negotiator == nil {
+		return result, ErrCapabilityNegotiationFailed
+	}
 	connInfo, err := r.catalog.GetConnection(ctx, jobID)
 	if err != nil {
 		result.Reachable = false
 		result.ErrorMessage = fmt.Sprintf("get connection: %v", err)
 		result.Duration = time.Since(start)
 		return result, err
+	}
+	if connInfo == nil || connInfo.SinkEndpoint == "" {
+		result.Reachable = false
+		result.ErrorMessage = ErrSinkUnreachable.Error()
+		result.Duration = time.Since(start)
+		return result, ErrSinkUnreachable
 	}
 
 	// Negotiate capability
@@ -286,22 +353,32 @@ func (r *Revalidator) GetRevalidationResult(ctx context.Context, jobID string, t
 
 	result.Reachable = true
 	result.Capability = capability
+	result.RequiredCapability = connInfo.RequiredCapability
+	if connInfo.RequiredCapability != nil && capability > *connInfo.RequiredCapability {
+		result.ErrorMessage = fmt.Sprintf("negotiated capability %s does not satisfy required %s", capability, connInfo.RequiredCapability)
+		result.Duration = time.Since(start)
+		return result, fmt.Errorf("%w: %s", ErrCapabilityNegotiationFailed, result.ErrorMessage)
+	}
 	result.Duration = time.Since(start)
 	return result, nil
 }
 
 // RevalidatorMetrics holds metrics for the revalidator.
 type RevalidatorMetrics struct {
-	TotalRevalidations  int64
+	TotalRevalidations      int64
 	SuccessfulRevalidations int64
-	FailedRevalidations int64
-	TotalDuration       time.Duration
+	FailedRevalidations     int64
+	TotalDuration           time.Duration
 }
 
 // Metrics returns the current revalidator metrics.
 func (r *Revalidator) Metrics() RevalidatorMetrics {
-	// This is a placeholder; actual implementation would use atomic counters
-	return RevalidatorMetrics{}
+	return RevalidatorMetrics{
+		TotalRevalidations:      r.total.Load(),
+		SuccessfulRevalidations: r.success.Load(),
+		FailedRevalidations:     r.failure.Load(),
+		TotalDuration:           time.Duration(r.totalDuration.Load()),
+	}
 }
 
 // ErrSinkUnreachable is returned when the sink is not reachable.

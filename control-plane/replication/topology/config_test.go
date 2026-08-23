@@ -3,6 +3,7 @@ package topology
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"go.uber.org/zap"
@@ -160,6 +161,69 @@ regions:
 	}
 }
 
+func TestParseTopology_RequiresExactlyOnePrimary(t *testing.T) {
+	logger, _ := zap.NewDevelopment()
+	for name, yaml := range map[string]string{
+		"no_primary": `
+regions:
+  - name: eu-west-1
+    role: standby
+    apiServerEndpoint: https://eu
+    postgresEndpoint: postgres://eu
+    objectStorageBucket: bucket
+    objectStoragePrefix: wal
+`, "multiple_primary": `
+regions:
+  - name: us-east-1
+    role: primary
+    apiServerEndpoint: https://east
+    postgresEndpoint: postgres://east
+    objectStorageBucket: bucket-east
+    objectStoragePrefix: wal
+  - name: us-west-1
+    role: primary
+    apiServerEndpoint: https://west
+    postgresEndpoint: postgres://west
+    objectStorageBucket: bucket-west
+    objectStoragePrefix: wal
+`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := parseTopology(logger, []byte(yaml), 1)
+			if err == nil {
+				t.Fatal("expected topology validation error")
+			}
+		})
+	}
+}
+
+func TestParseTopology_RejectsUnknownRoleAndMissingEndpoint(t *testing.T) {
+	logger, _ := zap.NewDevelopment()
+	unknownRole := []byte(`
+regions:
+  - name: us-east-1
+    role: active
+    apiServerEndpoint: https://east
+    postgresEndpoint: postgres://east
+    objectStorageBucket: bucket
+    objectStoragePrefix: wal
+`)
+	if _, err := parseTopology(logger, unknownRole, 1); err == nil {
+		t.Fatal("expected unknown role error")
+	}
+	missingEndpoint := []byte(`
+regions:
+  - name: us-east-1
+    role: primary
+    postgresEndpoint: postgres://east
+    objectStorageBucket: bucket
+    objectStoragePrefix: wal
+`)
+	if _, err := parseTopology(logger, missingEndpoint, 1); err == nil {
+		t.Fatal("expected missing endpoint error")
+	}
+}
+
 func TestNewFileLoader(t *testing.T) {
 	// Create a temporary file
 	tmpFile, err := os.CreateTemp("", "topology-*.yaml")
@@ -186,9 +250,13 @@ func TestNewFileLoader(t *testing.T) {
 }
 
 func TestNewLoader_Defaults(t *testing.T) {
-	// Test that NewLoader handles nil clientset gracefully (out of cluster)
+	// Outside Kubernetes, NewLoader must load a concrete local topology file.
+	path := filepath.Join(t.TempDir(), "regions.yaml")
+	if err := os.WriteFile(path, []byte(testTopologyYAML), 0600); err != nil {
+		t.Fatalf("write topology file: %v", err)
+	}
 	logger, _ := zap.NewDevelopment()
-	loader, err := NewLoader(context.Background(), logger, "test-configmap", "", "")
+	loader, err := NewLoader(context.Background(), logger, path, "", "")
 	if err != nil {
 		t.Fatalf("NewLoader failed: %v", err)
 	}

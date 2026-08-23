@@ -56,6 +56,7 @@ This directory contains the Architecture Decision Records (ADRs) for AstraSync.
 | [ADR-048](adr-048-multi-region-control-plane-replication.md) | Multi-Region Control-Plane Replication Model | Accepted | 2026-08-16 |
 | [ADR-049](adr-049-region-pinned-data-plane-failover.md) | Region-pinned Data-Plane Failover with Epoch Fencing | Accepted | 2026-08-16 |
 | [ADR-050](adr-050-tenant-identifier-and-audit-cross-region.md) | Tenant Identifier and Audit Cross-Region Semantics | Accepted | 2026-08-16 |
+|| [ADR-051](adr-051-java-data-plane-metrics-activation.md) | Java Data-Plane Metrics Activation (Slice 26 Follow-up F8) | Accepted | 2026-08-22 |
 
 ## Template
 

@@ -19,6 +19,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -94,6 +95,37 @@ class BatchExchangeTest {
         }
 
         assertThat(listEntries(spillRoot)).isEmpty();
+    }
+
+    @Test
+    void spillReportsEncodedBytesOnceAfterSuccessfulEnqueue() {
+        AtomicLong spilledBytes = new AtomicLong();
+        SpillPolicy policy = new SpillPolicy(true, spillRoot, 4096, 1);
+        RowBatch batch = RowBatch.last(List.of(Row.of("id", 1)));
+
+        try (BatchExchange exchange = new BatchExchange(1, policy, spilledBytes::addAndGet)) {
+            exchange.publish(batch);
+            long publishedBytes = spilledBytes.get();
+
+            assertThat(publishedBytes).isEqualTo(SpillFrameCodec.encode(batch, policy.maxBytes()).length);
+            assertThat(exchange.receive()).isEqualTo(batch);
+            exchange.close();
+            assertThat(spilledBytes.get()).isEqualTo(publishedBytes);
+        }
+    }
+
+    @Test
+    void spillDoesNotReportFailedEncodingOrCleanup() {
+        AtomicLong spilledBytes = new AtomicLong();
+        BatchExchange exchange =
+                new BatchExchange(1, new SpillPolicy(true, spillRoot, 4096, 1), spilledBytes::addAndGet);
+        try {
+            assertThatThrownBy(() -> exchange.publish(RowBatch.data(List.of(Row.of("value", new Object())))))
+                    .isInstanceOf(ExchangeFailureException.class);
+            assertThat(spilledBytes.get()).isZero();
+        } finally {
+            exchange.close();
+        }
     }
 
     @Test

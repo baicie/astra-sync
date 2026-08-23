@@ -16,13 +16,9 @@ import (
 
 // TestFramework_Bootstrap verifies the framework can bootstrap a two-region topology.
 func TestFramework_Bootstrap(t *testing.T) {
-	composeFile := filepath.Join("..", "..", "docker-compose.yaml")
+	composeFile := filepath.Join("..", "docker-compose.yaml")
 	if _, err := os.Stat(composeFile); os.IsNotExist(err) {
-		// Try alternate path
-		composeFile = filepath.Join("multi-region", "docker-compose.yaml")
-		if _, err := os.Stat(composeFile); os.IsNotExist(err) {
-			t.Skip("docker-compose.yaml not found, skipping")
-		}
+		t.Fatalf("docker-compose.yaml not found at %s", composeFile)
 	}
 
 	f := New(t, WithComposeFile(composeFile))
@@ -260,9 +256,9 @@ func TestFramework_PromoteRegion(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
 
-	err := f.PromoteRegion(ctx, "job-1", "idempotency-key-123")
-	if err != nil {
-		t.Errorf("unexpected error: %v", err)
+	err := f.PromoteRegion(ctx, "job-1", "idempotency-key-1234567890123456")
+	if err == nil {
+		t.Error("expected promotion to require a bootstrapped real API")
 	}
 }
 
@@ -299,9 +295,9 @@ func TestFramework_PromoteRegion_EmptyJobID(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 
-	err := f.PromoteRegion(ctx, "", "key-123")
-	if err != nil {
-		t.Errorf("unexpected error: %v", err)
+	err := f.PromoteRegion(ctx, "", "key-1234567890123456")
+	if err == nil {
+		t.Error("expected empty job ID to be rejected")
 	}
 }
 

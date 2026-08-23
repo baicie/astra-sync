@@ -5,7 +5,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"hash/crc32"
 	"io"
+	"strings"
 	"sync"
 	"time"
 
@@ -14,31 +16,31 @@ import (
 
 // Common errors for recovery operations.
 var (
-	ErrCheckpointNotFound     = errors.New("recovery: checkpoint not found")
+	ErrCheckpointNotFound      = errors.New("recovery: checkpoint not found")
 	ErrCheckpointNotReplicated = errors.New("recovery: checkpoint not replicated to secondary")
-	ErrCheckpointCorrupted    = errors.New("recovery: checkpoint data corrupted")
-	ErrCheckpointEpochMismatch = errors.New("recovery: checkpoint epoch mismatch")
-	ErrCheckpointSeqMismatch  = errors.New("recovery: checkpoint sequence mismatch")
-	ErrRecoveryAborted        = errors.New("recovery: recovery aborted")
+	ErrCheckpointCorrupted     = errors.New("recovery: checkpoint data corrupted")
+	ErrCheckpointEpochMismatch = errors.New("recovery: checkpoint epoch is newer than target epoch")
+	ErrCheckpointSeqMismatch   = errors.New("recovery: checkpoint sequence mismatch")
+	ErrRecoveryAborted         = errors.New("recovery: recovery aborted")
 )
 
 // CheckpointManifest represents a checkpoint manifest.
 type CheckpointManifest struct {
-	JobID          string
-	Epoch          int64
-	Sequence       int64
-	CheckpointURI  string
-	Files          []CheckpointFile
-	CreatedAt      time.Time
-	CRC32C         uint32
+	JobID         string
+	Epoch         int64
+	Sequence      int64
+	CheckpointURI string
+	Files         []CheckpointFile
+	CreatedAt     time.Time
+	CRC32C        uint32
 }
 
 // CheckpointFile represents a file within a checkpoint.
 type CheckpointFile struct {
-	Name         string
-	URI          string
-	Size         int64
-	CRC32C       uint32
+	Name   string
+	URI    string
+	Size   int64
+	CRC32C uint32
 }
 
 // RecoveryState represents the state of a recovery operation.
@@ -81,14 +83,14 @@ func (s RecoveryState) String() string {
 
 // Recovery represents a recovery operation.
 type Recovery struct {
-	JobID         string
-	NewEpoch      int64
-	Checkpoint    *CheckpointManifest
-	State         RecoveryState
-	ErrorMessage  string
-	StartedAt     time.Time
-	CompletedAt   *time.Time
-	mu            sync.RWMutex
+	JobID        string
+	NewEpoch     int64
+	Checkpoint   *CheckpointManifest
+	State        RecoveryState
+	ErrorMessage string
+	StartedAt    time.Time
+	CompletedAt  *time.Time
+	mu           sync.RWMutex
 }
 
 // NewRecovery creates a new recovery record.
@@ -151,12 +153,12 @@ type WALEntryReader interface {
 // WALEntry represents a WAL entry for checkpoint replication.
 type WALEntry struct {
 	Sequence      int64
-	Region       string
-	Epoch        int64
+	Region        string
+	Epoch         int64
 	CheckpointURI string
-	JobID        string
-	Timestamp    time.Time
-	CRC32C       uint32
+	JobID         string
+	Timestamp     time.Time
+	CRC32C        uint32
 }
 
 // ObjectStorage provides access to object storage.
@@ -281,6 +283,19 @@ func NewManager(
 // Recover performs checkpoint-coupled recovery for a job.
 func (m *Manager) Recover(ctx context.Context, jobID string, newEpoch int64) (*Recovery, error) {
 	recovery := NewRecovery(jobID, newEpoch)
+	fail := func(err error) (*Recovery, error) {
+		_ = recovery.TransitionTo(StateRecoveryFailed, err.Error())
+		if m.auditor != nil {
+			m.auditor.LogRecoveryFailed(ctx, jobID, recovery.ErrorMessage)
+		}
+		return recovery, err
+	}
+	if strings.TrimSpace(jobID) == "" || newEpoch < 0 {
+		return fail(ErrRecoveryAborted)
+	}
+	if m.walReader == nil || m.validator == nil || m.restorer == nil || m.storage == nil {
+		return fail(fmt.Errorf("%w: recovery dependencies are incomplete", ErrRecoveryAborted))
+	}
 
 	// Log start
 	if m.auditor != nil {
@@ -298,22 +313,40 @@ func (m *Manager) Recover(ctx context.Context, jobID string, newEpoch int64) (*R
 
 	manifest, err := m.walReader.GetLatestCheckpoint(ctx)
 	if err != nil {
-		recovery.TransitionTo(StateRecoveryFailed, fmt.Sprintf("locate checkpoint: %v", err))
-		if m.auditor != nil {
-			m.auditor.LogRecoveryFailed(ctx, jobID, recovery.ErrorMessage)
-		}
-		return recovery, fmt.Errorf("get latest checkpoint: %w", err)
+		return fail(fmt.Errorf("get latest checkpoint: %w", err))
+	}
+	if manifest == nil {
+		return fail(ErrCheckpointNotFound)
 	}
 
 	recovery.Checkpoint = manifest
 
-	// Validate epoch matches
-	if manifest.Epoch != newEpoch {
-		recovery.TransitionTo(StateRecoveryFailed, fmt.Sprintf("epoch mismatch: got %d, want %d", manifest.Epoch, newEpoch))
-		if m.auditor != nil {
-			m.auditor.LogRecoveryFailed(ctx, jobID, recovery.ErrorMessage)
+	// A promotion creates a new epoch; recovery must use the last successful
+	// checkpoint from that epoch or an earlier epoch, never a future writer.
+	if manifest.Epoch > newEpoch {
+		return fail(fmt.Errorf("%w: got %d, target %d", ErrCheckpointEpochMismatch, manifest.Epoch, newEpoch))
+	}
+	if manifest.JobID != jobID || strings.TrimSpace(manifest.CheckpointURI) == "" {
+		return fail(fmt.Errorf("%w: manifest does not belong to requested job", ErrCheckpointNotReplicated))
+	}
+	if manifest.Sequence <= 0 {
+		return fail(ErrCheckpointSeqMismatch)
+	}
+
+	if m.parser != nil {
+		manifestData, getErr := m.storage.GetObject(ctx, manifest.CheckpointURI)
+		if getErr != nil {
+			return fail(fmt.Errorf("%w: fetch manifest: %v", ErrCheckpointNotReplicated, getErr))
 		}
-		return recovery, ErrCheckpointEpochMismatch
+		parsed, parseErr := m.parser.Parse(manifestData)
+		if parseErr != nil {
+			return fail(fmt.Errorf("%w: parse manifest: %v", ErrCheckpointCorrupted, parseErr))
+		}
+		if parsed == nil || parsed.JobID != jobID || parsed.Sequence != manifest.Sequence || parsed.Epoch != manifest.Epoch {
+			return fail(ErrCheckpointCorrupted)
+		}
+		manifest = parsed
+		recovery.Checkpoint = parsed
 	}
 
 	if m.auditor != nil {
@@ -336,11 +369,7 @@ func (m *Manager) Recover(ctx context.Context, jobID string, newEpoch int64) (*R
 	defer cancel()
 
 	if err := m.validator.Validate(validationCtx, manifest); err != nil {
-		recovery.TransitionTo(StateRecoveryFailed, fmt.Sprintf("validate checkpoint: %v", err))
-		if m.auditor != nil {
-			m.auditor.LogRecoveryFailed(ctx, jobID, recovery.ErrorMessage)
-		}
-		return recovery, fmt.Errorf("validate checkpoint: %w", err)
+		return fail(fmt.Errorf("validate checkpoint: %w", err))
 	}
 
 	if m.auditor != nil {
@@ -360,11 +389,7 @@ func (m *Manager) Recover(ctx context.Context, jobID string, newEpoch int64) (*R
 
 	for _, file := range manifest.Files {
 		if err := m.downloadFile(downloadCtx, file); err != nil {
-			recovery.TransitionTo(StateRecoveryFailed, fmt.Sprintf("download file %s: %v", file.Name, err))
-			if m.auditor != nil {
-				m.auditor.LogRecoveryFailed(ctx, jobID, recovery.ErrorMessage)
-			}
-			return recovery, fmt.Errorf("download file %s: %w", file.Name, err)
+			return fail(fmt.Errorf("download file %s: %w", file.Name, err))
 		}
 	}
 
@@ -385,11 +410,7 @@ func (m *Manager) Recover(ctx context.Context, jobID string, newEpoch int64) (*R
 	defer cancel()
 
 	if err := m.restorer.Restore(restoreCtx, manifest); err != nil {
-		recovery.TransitionTo(StateRecoveryFailed, fmt.Sprintf("restore state: %v", err))
-		if m.auditor != nil {
-			m.auditor.LogRecoveryFailed(ctx, jobID, recovery.ErrorMessage)
-		}
-		return recovery, fmt.Errorf("restore state: %w", err)
+		return fail(fmt.Errorf("restore state: %w", err))
 	}
 
 	// Step 5: Mark complete
@@ -415,9 +436,18 @@ func (m *Manager) downloadFile(ctx context.Context, file CheckpointFile) error {
 		zap.String("name", file.Name),
 		zap.Int64("size", file.Size))
 
-	_, err := m.storage.GetObject(ctx, file.URI)
+	if strings.TrimSpace(file.URI) == "" {
+		return ErrCheckpointCorrupted
+	}
+	data, err := m.storage.GetObject(ctx, file.URI)
 	if err != nil {
 		return fmt.Errorf("get object: %w", err)
+	}
+	if file.Size >= 0 && int64(len(data)) != file.Size {
+		return fmt.Errorf("%w: file %s size got %d want %d", ErrCheckpointCorrupted, file.Name, len(data), file.Size)
+	}
+	if file.CRC32C != 0 && crc32.Checksum(data, crc32.MakeTable(crc32.Castagnoli)) != file.CRC32C {
+		return fmt.Errorf("%w: file %s checksum mismatch", ErrCheckpointCorrupted, file.Name)
 	}
 
 	return nil
@@ -425,7 +455,7 @@ func (m *Manager) downloadFile(ctx context.Context, file CheckpointFile) error {
 
 // RecoveryStats holds statistics for recoveries.
 type RecoveryStats struct {
-	TotalRecoveries    int64
+	TotalRecoveries      int64
 	SuccessfulRecoveries int64
-	FailedRecoveries   int64
+	FailedRecoveries     int64
 }

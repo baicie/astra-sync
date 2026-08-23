@@ -1,25 +1,63 @@
-version: '3.8'
-
 services:
+  compiler-validation-primary:
+    build:
+      context: ../../..
+      dockerfile: deployment/docker/Dockerfile.compiler-validation
+    image: astrasync/compiler-validation:integration
+    container_name: compiler-validation-us-east-1
+    environment:
+      - APP_ENV=development
+      - COMPILER_VALIDATION_PORT=50052
+      - COMPILER_BUILD=0.1.0-SNAPSHOT
+      - CONNECTOR_EXECUTION_PROFILE=standard
+    networks:
+      - astrasync-primary
+
+  compiler-validation-secondary:
+    build:
+      context: ../../..
+      dockerfile: deployment/docker/Dockerfile.compiler-validation
+    image: astrasync/compiler-validation:integration
+    container_name: compiler-validation-us-west-1
+    environment:
+      - APP_ENV=development
+      - COMPILER_VALIDATION_PORT=50052
+      - COMPILER_BUILD=0.1.0-SNAPSHOT
+      - CONNECTOR_EXECUTION_PROFILE=standard
+    networks:
+      - astrasync-secondary
+
   # Primary region: us-east-1
   api-server-primary:
-    image: ghcr.io/baicie/astra-sync/api-server:latest
+    build:
+      context: ../../..
+      dockerfile: deployment/docker/Dockerfile.api
+    image: astrasync/api-server:integration
     container_name: astrasync-us-east-1
     environment:
+      - APP_ENV=development
+      - DATABASE_URL=postgres://user:pass@postgres-primary:5432/astrasync?sslmode=disable
+      - COMPILER_VALIDATION_ENDPOINT=compiler-validation-primary:50052
+      - GRPC_GATEWAY_ENDPOINT=api-server-primary:50051
+      - HTTP_LISTEN_ADDRESS=:8080
+      - GRPC_LISTEN_ADDRESS=:50051
       - ASTRA_REGION=us-east-1
       - ASTRA_ROLE=primary
       - ASTRA_PEER_REGION=us-west-1
       - ASTRA_PEER_ENDPOINT=api-server-secondary:50051
-      - ASTRA_PEER_CA_CERT_PATH=/certs/cross-region-ca.crt
-      - ASTRA_PEER_CLIENT_CERT_PATH=/certs/us-east-1-client.crt
-      - ASTRA_PEER_CLIENT_KEY_PATH=/certs/us-east-1-client.key
     ports:
       - "50051:50051"
+      - "8080:8080"
     volumes:
       - ./certs:/certs:ro
     networks:
       - astrasync-primary
       - astrasync-cross-region
+    depends_on:
+      postgres-primary:
+        condition: service_healthy
+      compiler-validation-primary:
+        condition: service_started
 
   postgres-primary:
     image: postgres:15
@@ -30,26 +68,43 @@ services:
       - POSTGRES_PASSWORD=pass
     networks:
       - astrasync-primary
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d astrasync"]
+      interval: 2s
+      timeout: 5s
+      retries: 15
 
   # Secondary region: us-west-1
   api-server-secondary:
-    image: ghcr.io/baicie/astra-sync/api-server:latest
+    build:
+      context: ../../..
+      dockerfile: deployment/docker/Dockerfile.api
+    image: astrasync/api-server:integration
     container_name: astrasync-us-west-1
     environment:
+      - APP_ENV=development
+      - DATABASE_URL=postgres://user:pass@postgres-secondary:5432/astrasync?sslmode=disable
+      - COMPILER_VALIDATION_ENDPOINT=compiler-validation-secondary:50052
+      - GRPC_GATEWAY_ENDPOINT=api-server-secondary:50051
+      - HTTP_LISTEN_ADDRESS=:8080
+      - GRPC_LISTEN_ADDRESS=:50051
       - ASTRA_REGION=us-west-1
       - ASTRA_ROLE=secondary
       - ASTRA_PEER_REGION=us-east-1
       - ASTRA_PEER_ENDPOINT=api-server-primary:50051
-      - ASTRA_PEER_CA_CERT_PATH=/certs/cross-region-ca.crt
-      - ASTRA_PEER_CLIENT_CERT_PATH=/certs/us-west-1-client.crt
-      - ASTRA_PEER_CLIENT_KEY_PATH=/certs/us-west-1-client.key
     ports:
       - "50061:50051"
+      - "8081:8080"
     volumes:
       - ./certs:/certs:ro
     networks:
       - astrasync-secondary
       - astrasync-cross-region
+    depends_on:
+      postgres-secondary:
+        condition: service_healthy
+      compiler-validation-secondary:
+        condition: service_started
 
   postgres-secondary:
     image: postgres:15
@@ -60,6 +115,11 @@ services:
       - POSTGRES_PASSWORD=pass
     networks:
       - astrasync-secondary
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d astrasync"]
+      interval: 2s
+      timeout: 5s
+      retries: 15
 
 networks:
   astrasync-primary:

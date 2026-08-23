@@ -126,7 +126,7 @@ func (m *mockObjectStorage) GetObjectReader(ctx context.Context, uri string) (io
 
 type mockManifestParser struct {
 	manifest *CheckpointManifest
-	err     error
+	err      error
 }
 
 func (m *mockManifestParser) Parse(data []byte) (*CheckpointManifest, error) {
@@ -189,7 +189,7 @@ func TestManager_Recover(t *testing.T) {
 	manager := NewManager(
 		logger,
 		&mockWALEntryReader{checkpoint: manifest},
-		&mockObjectStorage{data: map[string][]byte{}},
+		&mockObjectStorage{data: map[string][]byte{"s3://bucket/checkpoint": []byte("manifest")}},
 		&mockManifestParser{manifest: manifest},
 		&mockValidator{},
 		&mockStateRestorer{},
@@ -233,7 +233,7 @@ func TestManager_Recover_EpochMismatch(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
 	manifest := &CheckpointManifest{
 		JobID:         "job-1",
-		Epoch:         41, // Different from requested epoch
+		Epoch:         43, // A future checkpoint must be rejected
 		Sequence:      100,
 		CheckpointURI: "s3://bucket/checkpoint",
 		Files:         []CheckpointFile{},
@@ -304,7 +304,7 @@ func TestManager_Recover_AuditEvents(t *testing.T) {
 	manager := NewManager(
 		logger,
 		&mockWALEntryReader{checkpoint: manifest},
-		&mockObjectStorage{data: map[string][]byte{}},
+		&mockObjectStorage{data: map[string][]byte{"s3://bucket/checkpoint": []byte("manifest")}},
 		&mockManifestParser{manifest: manifest},
 		&mockValidator{},
 		&mockStateRestorer{},

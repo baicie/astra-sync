@@ -1,9 +1,13 @@
 package io.astrasync.engine.worker;
 
+import io.astrasync.engine.observability.DataPlaneMetrics;
+import io.astrasync.engine.observability.DataPlaneMetricsServer;
 import io.astrasync.engine.runtime.BatchTaskFactory;
+import io.micrometer.prometheusmetrics.PrometheusMeterRegistry;
 import java.lang.reflect.InvocationTargetException;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -18,8 +22,16 @@ public final class WorkerApplication {
             Map<String, String> environment = System.getenv();
             WorkerConfiguration configuration = WorkerConfiguration.fromEnvironment(environment);
             WorkerService service = createService(configuration, environment);
-            Runtime.getRuntime().addShutdownHook(new Thread(service::close, "astrasync-worker-shutdown"));
+            Optional<DataPlaneMetricsServer> metricsServer = startMetricsServer(environment);
+            Runtime.getRuntime()
+                    .addShutdownHook(new Thread(
+                            () -> {
+                                metricsServer.ifPresent(DataPlaneMetricsServer::close);
+                                service.close();
+                            },
+                            "astrasync-worker-shutdown"));
             service.start();
+            metricsServer.ifPresent(server -> LOG.info("metrics endpoint listening on port {}", server.port()));
             System.out.println("READY workerId=" + configuration.workerId() + " port=" + service.port());
             service.await();
         } catch (InterruptedException exception) {
@@ -38,6 +50,16 @@ public final class WorkerApplication {
                 provider.create(Map.copyOf(Objects.requireNonNull(environment, "environment must not be null"))),
                 "task factory provider returned null");
         return new WorkerService(checked, taskFactory);
+    }
+
+    static Optional<DataPlaneMetricsServer> startMetricsServer(Map<String, String> environment) {
+        return startMetricsServer(environment, DataPlaneMetrics.processRegistry());
+    }
+
+    static Optional<DataPlaneMetricsServer> startMetricsServer(
+            Map<String, String> environment, PrometheusMeterRegistry registry) {
+        Map<String, String> checked = Map.copyOf(Objects.requireNonNull(environment, "environment must not be null"));
+        return DataPlaneMetricsServer.start(checked.getOrDefault("METRICS_LISTEN_ADDRESS", ""), registry);
     }
 
     private static WorkerTaskFactoryProvider loadProvider(String className) {

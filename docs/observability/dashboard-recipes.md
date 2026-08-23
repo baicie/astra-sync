@@ -19,9 +19,11 @@ against the PostgreSQL audit database.
 
 F4/F5 register the Go descriptors, expose `/metrics`, and wire Prometheus
 discovery. F7 activates the authentication availability/latency and audit
-query latency recipes. Other Go recipes remain descriptor-only, and the
-`coordinator_*` and `worker_*` families are not registered. Operators must
-check the status here before using a recipe as live SLO evidence.
+query latency recipes. F8 activates all Java data-plane batch, checkpoint,
+spill-byte, and record-count families. F9 activates Scheduler assignment,
+lease-takeover, and reconcile-duration samples. The remaining Go recipes are
+descriptor-only. Operators must check the status here before using a recipe as
+live SLO evidence.
 
 ## Availability recipes
 
@@ -90,6 +92,34 @@ histogram_quantile(
   0.95,
   sum by (job_id, le) (
     rate(coordinator_checkpoint_duration_seconds[5m])
+  )
+)
+```
+
+Suggested visualisation: `timeseries` panel with the P50, P95, and
+P99 lines.
+
+## Deliverability recipes (Scheduler)
+
+### Scheduler assignment outcome (per outcome)
+
+```promql
+sum by (outcome) (
+  rate(scheduler_job_assignment_total[5m])
+)
+```
+
+Suggested visualisation: `timeseries` panel with one series per
+outcome (`success`, `rejected`, `failure`). `tenant_id` and `worker_id`
+remain `_unknown` until the Scheduler receives a trusted binding.
+
+### Scheduler reconcile duration (per tenant)
+
+```promql
+histogram_quantile(
+  0.95,
+  sum by (tenant_id, le) (
+    rate(scheduler_job_reconcile_duration_seconds[5m])
   )
 )
 ```
