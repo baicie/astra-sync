@@ -15,18 +15,27 @@ import io.astrasync.connector.api.source.CheckpointableBatchSource;
 import io.astrasync.connector.api.source.SourceSplit;
 import io.astrasync.connector.api.source.SplitPosition;
 import io.astrasync.engine.kernel.SyncStage;
+import io.astrasync.engine.observability.DataPlaneMetrics;
 import io.astrasync.engine.runtime.AdaptiveBatchPolicy;
 import io.astrasync.engine.runtime.BatchTask;
 import io.astrasync.engine.runtime.BatchTaskException;
 import io.astrasync.engine.runtime.CheckpointExecutionContext;
 import io.astrasync.engine.runtime.EpochFence;
 import io.astrasync.engine.runtime.EpochFencedException;
+import io.astrasync.engine.runtime.SpillPolicy;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 class InProcessBatchWorkerTest {
+    @TempDir
+    Path spillRoot;
+
     @Test
     void runsSourceAndSinkThroughBoundedExchangeAndClosesBoth() {
         List<Row> written = new ArrayList<>();
@@ -45,6 +54,31 @@ class InProcessBatchWorkerTest {
         assertThat(source.closeCount).isEqualTo(1);
         assertThat(sink.openCount).isEqualTo(1);
         assertThat(sink.closeCount).isEqualTo(1);
+    }
+
+    @Test
+    void recordsSpillBytesWithUnknownLabelsForNonCheckpointExecution() {
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        LifecycleSource source = new LifecycleSource(RowBatch.last(List.of(Row.of("id", 1))));
+        LifecycleSink sink = new LifecycleSink(new ArrayList<>());
+        BatchTask task = new BatchTask(
+                split("split-1"),
+                source,
+                sink,
+                1,
+                1,
+                false,
+                AdaptiveBatchPolicy.fixed(1),
+                new SpillPolicy(true, spillRoot, 4096, 1));
+
+        new InProcessBatchWorker("worker-a", new DataPlaneMetrics(registry)).execute(task);
+
+        assertThat(registry.get("coordinator.spill.bytes")
+                        .tag("tenant_id", DataPlaneMetrics.UNKNOWN_TENANT_ID)
+                        .tag("job_id", DataPlaneMetrics.UNKNOWN_JOB_ID)
+                        .counter()
+                        .count())
+                .isPositive();
     }
 
     @Test
@@ -127,6 +161,32 @@ class InProcessBatchWorkerTest {
         assertThat(commits).hasSize(1);
         assertThat(commits.get(0).commitToken()).isEqualTo(sink.commitToken);
         assertThat(sink.writeCount).isEqualTo(1);
+    }
+
+    @Test
+    void recordsCheckpointCountsWithTheTrustedJobIdentifier() {
+        String jobId = UUID.randomUUID().toString();
+        EpochFence fence = new EpochFence();
+        fence.activate(jobId, 1);
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        ExactSource source = new ExactSource();
+        ExactSink sink = new ExactSink();
+        CheckpointExecutionContext context =
+                new CheckpointExecutionContext(jobId, 1, "split-1", "fingerprint", 0, SplitPosition.unbounded(), fence);
+
+        new InProcessBatchWorker("worker-a", new DataPlaneMetrics(registry))
+                .executeCheckpoint(context, new BatchTask(split("split-1"), source, sink, 1, 1, true), ignored -> {});
+
+        assertThat(registry.get("worker.records.read")
+                        .tag("job_id", jobId)
+                        .counter()
+                        .count())
+                .isEqualTo(1);
+        assertThat(registry.get("worker.records.written")
+                        .tag("job_id", jobId)
+                        .counter()
+                        .count())
+                .isEqualTo(1);
     }
 
     @Test

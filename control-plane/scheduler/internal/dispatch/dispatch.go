@@ -47,6 +47,7 @@ type Record struct {
 	LastHeartbeatAt time.Time
 	HeartbeatToken  string
 	Attempt         int32
+	LeaseTakenOver  bool
 	LastError       string
 	CreatedAt       time.Time
 	UpdatedAt       time.Time

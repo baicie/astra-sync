@@ -6,7 +6,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"go.uber.org/zap"
+	"io.astrasync/control-plane/replication/metrics"
 )
 
 func TestNewPromotion(t *testing.T) {
@@ -208,7 +211,7 @@ func TestManager_Promote(t *testing.T) {
 	}
 	m.revalidator = revalidator
 
-	promotion, err := m.Promote(context.Background(), "job-1", "eu-west-1", "key-123", 42)
+	promotion, err := m.Promote(context.Background(), "job-1", "eu-west-1", "key-1234567890123456", 42)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -218,6 +221,58 @@ func TestManager_Promote(t *testing.T) {
 	}
 	if promotion.NewEpoch != 43 {
 		t.Errorf("expected new epoch 43, got %d", promotion.NewEpoch)
+	}
+}
+
+func TestManager_Promote_ObservesMetrics(t *testing.T) {
+	logger, _ := zap.NewDevelopment()
+	registry := prometheus.NewRegistry()
+	recorder, err := metrics.NewRecorder(registry)
+	if err != nil {
+		t.Fatalf("create recorder: %v", err)
+	}
+	store := newMockPromotionStore()
+	assigner := &mockEpochAssigner{epoch: 42}
+	jobReader := &mockJobReader{epoch: 42}
+	jobWriter := &mockJobWriter{}
+	revalidator := &mockCapabilityRevalidator{}
+
+	m, err := NewManager(logger, store, assigner, jobReader, jobWriter, WithMetrics(recorder), WithCurrentRegion("us-east-1"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	m.revalidator = revalidator
+	if _, err := m.Promote(context.Background(), "job-1", "eu-west-1", "key-1234567890123456", 42); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if got := testutil.ToFloat64(recorder.PromotionsTotal.WithLabelValues("eu-west-1", "success")); got != 1 {
+		t.Fatalf("expected one success metric, got %v", got)
+	}
+}
+
+func TestManager_Promote_ObservesFailureMetrics(t *testing.T) {
+	logger, _ := zap.NewDevelopment()
+	registry := prometheus.NewRegistry()
+	recorder, err := metrics.NewRecorder(registry)
+	if err != nil {
+		t.Fatalf("create recorder: %v", err)
+	}
+	store := newMockPromotionStore()
+	assigner := &mockEpochAssigner{epoch: 42}
+	jobReader := &mockJobReader{epoch: 42}
+	jobWriter := &mockJobWriter{}
+
+	m, err := NewManager(logger, store, assigner, jobReader, jobWriter, WithMetrics(recorder), WithCurrentRegion("us-east-1"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, err := m.Promote(context.Background(), "job-1", "eu-west-1", "key-1234567890123456", 42); err == nil {
+		t.Fatal("expected capability failure")
+	}
+
+	if got := testutil.ToFloat64(recorder.PromotionsTotal.WithLabelValues("eu-west-1", "failure")); got != 1 {
+		t.Fatalf("expected one failure metric, got %v", got)
 	}
 }
 
@@ -236,13 +291,13 @@ func TestManager_Promote_Idempotent(t *testing.T) {
 	m.revalidator = revalidator
 
 	// First promotion
-	p1, err := m.Promote(context.Background(), "job-1", "eu-west-1", "key-123", 42)
+	p1, err := m.Promote(context.Background(), "job-1", "eu-west-1", "key-1234567890123456", 42)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	// Duplicate promotion with same idempotency key
-	p2, err := m.Promote(context.Background(), "job-1", "eu-west-1", "key-123", 42)
+	p2, err := m.Promote(context.Background(), "job-1", "eu-west-1", "key-1234567890123456", 42)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -267,7 +322,7 @@ func TestManager_Promote_VersionConflict(t *testing.T) {
 	m.revalidator = revalidator
 
 	// Wrong version
-	_, err = m.Promote(context.Background(), "job-1", "eu-west-1", "key-123", 99)
+	_, err = m.Promote(context.Background(), "job-1", "eu-west-1", "key-1234567890123456", 99)
 	if !errors.Is(err, ErrEpochConflict) {
 		t.Errorf("expected ErrEpochConflict, got %v", err)
 	}
@@ -288,7 +343,7 @@ func TestManager_Promote_CapabilityTimeout(t *testing.T) {
 	}
 	m.revalidator = revalidator
 
-	_, err = m.Promote(context.Background(), "job-1", "eu-west-1", "key-123", 42)
+	_, err = m.Promote(context.Background(), "job-1", "eu-west-1", "key-1234567890123456", 42)
 	if err == nil {
 		t.Error("expected error")
 	}
@@ -315,13 +370,13 @@ func TestManager_GetStatus(t *testing.T) {
 	m.revalidator = revalidator
 
 	// Create promotion
-	_, err = m.Promote(context.Background(), "job-1", "eu-west-1", "key-123", 42)
+	_, err = m.Promote(context.Background(), "job-1", "eu-west-1", "key-1234567890123456", 42)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	// Get status with idempotency key
-	status, err := m.GetStatus(context.Background(), "job-1", "key-123")
+	status, err := m.GetStatus(context.Background(), "job-1", "key-1234567890123456")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -354,8 +409,8 @@ func TestManager_Stats(t *testing.T) {
 	m.revalidator = revalidator
 
 	// Create promotions
-	m.Promote(context.Background(), "job-1", "eu-west-1", "key-1", 42)
-	m.Promote(context.Background(), "job-2", "eu-west-1", "key-2", 42)
+	m.Promote(context.Background(), "job-1", "eu-west-1", "key-0000000000000001", 42)
+	m.Promote(context.Background(), "job-2", "eu-west-1", "key-0000000000000002", 42)
 
 	stats, err := m.Stats(context.Background())
 	if err != nil {

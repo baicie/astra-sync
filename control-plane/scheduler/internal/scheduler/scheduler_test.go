@@ -10,11 +10,134 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 
 	"io.astrasync/control-plane/job"
 	"io.astrasync/control-plane/job/memory"
 	"io.astrasync/control-plane/scheduler/internal/dispatch"
+	"io.astrasync/control-plane/scheduler/internal/metrics"
 )
+
+func TestReconcilerRecordsAssignmentSuccessForAClaimedExecution(t *testing.T) {
+	clock := time.Date(2026, 8, 5, 12, 0, 0, 0, time.UTC)
+	repository := memory.New()
+	created := createRunningJob(t, repository, clock)
+	store := newFakeStore(dispatch.Record{
+		Identity: dispatch.Identity{JobUID: created.UID, Epoch: 1},
+		Key:      created.Key,
+		OwnerID:  "scheduler-a",
+		Phase:    dispatch.PhaseClaimed,
+		Attempt:  1,
+	})
+	dispatcher := &fakeDispatcher{observation: Observation{State: ObservationRunning}}
+	reconciler := newTestReconciler(t, store, repository, dispatcher, clock)
+	assignment := metrics.JobAssignmentTotal.WithLabelValues("_unknown", "_unknown", "success")
+	before := testutil.ToFloat64(assignment)
+
+	if err := reconciler.Tick(context.Background()); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if got := testutil.ToFloat64(assignment); got != before+1 {
+		t.Fatalf("assignment success samples = %v, want %v", got, before+1)
+	}
+}
+
+func TestReconcilerRecordsAssignmentRejectionForPermanentDispatchError(t *testing.T) {
+	clock := time.Date(2026, 8, 5, 12, 0, 0, 0, time.UTC)
+	repository := memory.New()
+	created := createRunningJob(t, repository, clock)
+	store := newFakeStore(dispatch.Record{
+		Identity: dispatch.Identity{JobUID: created.UID, Epoch: 1},
+		Key:      created.Key,
+		OwnerID:  "scheduler-a",
+		Phase:    dispatch.PhaseClaimed,
+		Attempt:  1,
+	})
+	dispatcher := &fakeDispatcher{err: Permanent(errors.New("connectionRef cannot be resolved"))}
+	reconciler := newTestReconciler(t, store, repository, dispatcher, clock)
+	assignment := metrics.JobAssignmentTotal.WithLabelValues("_unknown", "_unknown", "rejected")
+	before := testutil.ToFloat64(assignment)
+
+	if err := reconciler.Tick(context.Background()); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if got := testutil.ToFloat64(assignment); got != before+1 {
+		t.Fatalf("assignment rejection samples = %v, want %v", got, before+1)
+	}
+}
+
+func TestReconcilerRecordsReconcileDurationForClaimedExecution(t *testing.T) {
+	clock := time.Date(2026, 8, 5, 12, 0, 0, 0, time.UTC)
+	repository := memory.New()
+	created := createRunningJob(t, repository, clock)
+	store := newFakeStore(dispatch.Record{
+		Identity: dispatch.Identity{JobUID: created.UID, Epoch: 1},
+		Key:      created.Key,
+		OwnerID:  "scheduler-a",
+		Phase:    dispatch.PhaseClaimed,
+		Attempt:  1,
+	})
+	dispatcher := &fakeDispatcher{observation: Observation{State: ObservationRunning}}
+	reconciler := newTestReconciler(t, store, repository, dispatcher, clock)
+	before := reconcileDurationSamples(t)
+
+	if err := reconciler.Tick(context.Background()); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if got := reconcileDurationSamples(t); got <= before {
+		t.Fatalf("reconcile duration samples = %d, want more than %d", got, before)
+	}
+}
+
+func reconcileDurationSamples(t *testing.T) uint64 {
+	t.Helper()
+	metricFamilies, err := prometheus.DefaultGatherer.Gather()
+	if err != nil {
+		t.Fatalf("gather metrics: %v", err)
+	}
+	for _, family := range metricFamilies {
+		if family.GetName() != "scheduler_job_reconcile_duration_seconds" {
+			continue
+		}
+		for _, metric := range family.GetMetric() {
+			for _, label := range metric.GetLabel() {
+				if label.GetName() == "tenant_id" && label.GetValue() == "_unknown" {
+					return metric.GetHistogram().GetSampleCount()
+				}
+			}
+		}
+	}
+	return 0
+}
+
+func TestReconcilerRecordsLeaseTakeoverOncePerAttempt(t *testing.T) {
+	clock := time.Date(2026, 8, 5, 12, 0, 0, 0, time.UTC)
+	repository := memory.New()
+	created := createRunningJob(t, repository, clock)
+	store := newFakeStore(dispatch.Record{
+		Identity:       dispatch.Identity{JobUID: created.UID, Epoch: 1},
+		Key:            created.Key,
+		OwnerID:        "scheduler-a",
+		Phase:          dispatch.PhaseStarting,
+		Attempt:        2,
+		LeaseTakenOver: true,
+	})
+	dispatcher := &fakeDispatcher{observation: Observation{State: ObservationPending}}
+	reconciler := newTestReconciler(t, store, repository, dispatcher, clock)
+	takeover := metrics.LeaseTakeoverTotal.WithLabelValues("_unknown", "success")
+	before := testutil.ToFloat64(takeover)
+
+	if err := reconciler.Tick(context.Background()); err != nil {
+		t.Fatalf("first reconcile: %v", err)
+	}
+	if err := reconciler.Tick(context.Background()); err != nil {
+		t.Fatalf("second reconcile: %v", err)
+	}
+	if got := testutil.ToFloat64(takeover); got != before+1 {
+		t.Fatalf("lease takeover samples = %v, want %v", got, before+1)
+	}
+}
 
 func TestReconcilerCreatesRunningStateAndFencesCompletionToClaimedEpoch(t *testing.T) {
 	clock := time.Date(2026, 8, 5, 12, 0, 0, 0, time.UTC)
@@ -377,7 +500,9 @@ func (s *fakeStore) Claim(
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.record.OwnerID = owner
-	return []dispatch.Record{s.record}, nil
+	claimed := s.record
+	s.record.LeaseTakenOver = false
+	return []dispatch.Record{claimed}, nil
 }
 
 func (s *fakeStore) List(context.Context) ([]dispatch.Record, error) {

@@ -12,6 +12,7 @@ import io.astrasync.connector.api.source.SplitPosition;
 import io.astrasync.engine.kernel.SyncJobException;
 import io.astrasync.engine.kernel.SyncResult;
 import io.astrasync.engine.kernel.SyncStage;
+import io.astrasync.engine.observability.DataPlaneMetrics;
 import io.astrasync.engine.runtime.AdaptiveBatchController;
 import io.astrasync.engine.runtime.AdaptiveBatchSample;
 import io.astrasync.engine.runtime.BatchDigests;
@@ -37,9 +38,15 @@ import java.util.concurrent.atomic.AtomicInteger;
 /** A Worker implementation that runs a bounded Source-to-Sink exchange in one JVM. */
 public final class InProcessBatchWorker implements BatchWorker, CheckpointBatchWorker {
     private final String workerId;
+    private final DataPlaneMetrics metrics;
 
     public InProcessBatchWorker(String workerId) {
+        this(workerId, DataPlaneMetrics.global());
+    }
+
+    public InProcessBatchWorker(String workerId, DataPlaneMetrics metrics) {
         this.workerId = requireText(workerId, "workerId");
+        this.metrics = Objects.requireNonNull(metrics, "metrics must not be null");
     }
 
     @Override
@@ -51,7 +58,8 @@ public final class InProcessBatchWorker implements BatchWorker, CheckpointBatchW
     public WorkerResult execute(BatchTask task) {
         Objects.requireNonNull(task, "task must not be null");
         long startedNanos = System.nanoTime();
-        BatchExchange exchange = new BatchExchange(task.maxInFlightBatches(), task.spillPolicy());
+        BatchExchange exchange = new BatchExchange(
+                task.maxInFlightBatches(), task.spillPolicy(), bytes -> metrics.recordSpillBytes("_unknown", bytes));
         AdaptiveBatchController batchController =
                 new AdaptiveBatchController(task.batchPolicy(), task.maxBatchRecords());
         ExecutorService executor = Executors.newFixedThreadPool(2, new WorkerThreadFactory(workerId, task.taskId()));
@@ -146,6 +154,7 @@ public final class InProcessBatchWorker implements BatchWorker, CheckpointBatchW
                             "source returned " + batch.size() + " records, limit is " + requestedBatchRecords);
                 }
                 metrics.observe(batch);
+                this.metrics.recordRecordsRead(context.jobId(), batch.size());
                 if (!batch.rows().isEmpty()) {
                     context.assertCurrent();
                     sink.assertEpoch(context.executionEpoch());
@@ -186,6 +195,7 @@ public final class InProcessBatchWorker implements BatchWorker, CheckpointBatchW
                             token,
                             BatchDigests.sha256(batch)));
                     metrics.writtenCount += batch.size();
+                    this.metrics.recordRecordsWritten(context.jobId(), batch.size());
                 }
                 endOfInput = batch.endOfInput();
             }
@@ -256,6 +266,7 @@ public final class InProcessBatchWorker implements BatchWorker, CheckpointBatchW
                                 "source returned " + batch.size() + " records, limit is " + requestedBatchRecords);
                     }
                     metrics.observe(batch);
+                    this.metrics.recordRecordsRead("_unknown", batch.size());
                     int queueDepthBeforePublish = exchange.size();
                     long queueWaitNanos = exchange.publishMeasured(batch);
                     batchController.observe(new AdaptiveBatchSample(
@@ -308,6 +319,7 @@ public final class InProcessBatchWorker implements BatchWorker, CheckpointBatchW
                         long sinkWriteStartedNanos = System.nanoTime();
                         sink.writeBatch(batch);
                         metrics.writtenCount += batch.size();
+                        this.metrics.recordRecordsWritten("_unknown", batch.size());
                         batchController.observe(new AdaptiveBatchSample(
                                 batch.size(),
                                 Math.max(0, System.nanoTime() - sinkWriteStartedNanos),
@@ -327,6 +339,9 @@ public final class InProcessBatchWorker implements BatchWorker, CheckpointBatchW
                                     metrics,
                                     startedNanos);
                     directFailure = !(exception instanceof ExchangeFailureException);
+                    if (!(exception instanceof ExchangeFailureException)) {
+                        this.metrics.recordRecordsRejected("_unknown", "SINK_WRITE", 1);
+                    }
                     exchange.fail(failure);
                 }
             }

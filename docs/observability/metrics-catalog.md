@@ -33,12 +33,13 @@ The table separates descriptor availability from sampled runtime data.
 | `apiserver_auth_request_total`, `apiserver_auth_request_duration_seconds` | api-server | F4 descriptor + `/metrics` | emitted by F7 authentication interceptor |
 | `apiserver_audit_query_duration_seconds` | api-server | F4 descriptor + `/metrics` | emitted by F7 authorized audit-query path |
 | remaining `apiserver_*` listed below | api-server | F4 descriptor + `/metrics` | pending |
-| `scheduler_*` listed below | scheduler | F4 descriptor + `/metrics` | pending |
+| `scheduler_*` listed below | scheduler | F4 descriptor + `/metrics` | assignment, lease-takeover, and reconcile-duration samples emitted by the Scheduler |
+| `astrasync_multi_region_promotion_*` | control-plane replication | recorder registration; service exposition is embedding-owned | promotion attempt and duration samples emitted when a recorder is injected |
 | `connection_test_total` | connection-test-executor | F4 descriptor + `/metrics` | pending |
 | `console_*` listed below | console | F4 descriptor + `/metrics` | pending |
 | `auth_*` listed below | auth library | descriptor package only | pending |
 | controller-runtime built-ins | controller | upstream endpoint | emitted by controller-runtime |
-| `coordinator_*`, `worker_*` listed below | Java data plane | not registered | pending |
+| `coordinator_*`, `worker_*` listed below | Java data plane | F8 Micrometer registry + opt-in Worker `/metrics` | seven families emitted by checkpoint Coordinator and in-process Worker; spill bytes are sampled by the Worker-local exchange |
 
 ## Naming convention
 
@@ -51,6 +52,9 @@ Every metric name follows the
 - `_ratio` suffix for ratios in the `[0, 1]` range.
 - No `_gauge` or `_counter` suffix. The metric type is inferred from
   the suffix and the registered handler.
+
+Multi-region replication metrics use the `astrasync_multi_region_` prefix because they are
+owned by the shared control-plane replication package rather than one executable.
 
 Every metric name is prefixed with the component name:
 
@@ -131,7 +135,7 @@ emit `le` buckets; the dashboard recipes compose P50, P95, and P99 from them.
 ## Job lifecycle metrics
 
 The table reserves lifecycle metrics for the Controller and Scheduler
-(ADR-029, ADR-031). The F4 Scheduler descriptors exist but are not observed;
+(ADR-029, ADR-031). Scheduler emits assignment and lease-takeover samples;
 the named custom Controller metrics are not implemented by
 controller-runtime's generic collector.
 
@@ -140,12 +144,25 @@ controller-runtime's generic collector.
 | `controller_job_state_total` | counter | `tenant_id`, `namespace`, `from_state`, `to_state` | Job state transitions. |
 | `controller_job_controller_reconcile_duration_seconds` | histogram | `tenant_id`, `outcome` | Time to reconcile a single Job against the desired state. |
 | `controller_epoch_fence_total` | counter | `tenant_id`, `outcome` | Epoch-fence attempts from the Scheduler. |
-| `scheduler_job_assignment_total` | counter | `tenant_id`, `worker_id`, `outcome` | Job assignment attempts from the Scheduler. |
-| `scheduler_lease_takeover_total` | counter | `tenant_id`, `outcome` | Leader-lease takeover events. |
+| `scheduler_job_assignment_total` | counter | `tenant_id`, `worker_id`, `outcome` | Assignment outcome when the Scheduler first dispatches a claimed execution. The current dispatch contract has no trusted tenant or target worker identity, so both labels are `_unknown`; `outcome` is `success`, `rejected`, or `failure`. |
+| `scheduler_lease_takeover_total` | counter | `tenant_id`, `outcome` | Successful dispatch-lease takeovers returned by the durable claim transaction. `tenant_id` is `_unknown` until the Scheduler receives a trusted tenant binding; `outcome` is `success`. |
 | `scheduler_job_reconcile_duration_seconds` | histogram | `tenant_id` | Time to reconcile one scheduled Job. |
 
 Future call-site instrumentation can correlate these metrics to audit rows
 through exemplars; that wiring is not present in the current implementation.
+
+## Multi-region promotion metrics
+
+| Metric | Type | Labels | Description |
+|---|---|---|---|
+| `astrasync_multi_region_promotion_total` | counter | `target_region`, `outcome` | Promotion attempts after a promotion record is created; `outcome` is `success` or `failure`. |
+| `astrasync_multi_region_promotion_duration_seconds` | histogram | `target_region` | Duration of promotion attempts after a promotion record is created. |
+| `astrasync_multi_region_event_total` | counter | `peer_region`, `event_type`, `outcome` | Cross-region event delivery attempts. `event_type` is `checkpoint`, `topology`, or `health`; `outcome` is `success` or `failure`. |
+| `astrasync_multi_region_event_duration_seconds` | histogram | `peer_region`, `event_type` | Duration of cross-region event delivery attempts. |
+| `astrasync_multi_region_recovery_total` | counter | `target_region`, `outcome` | Checkpoint recovery attempts. `outcome` is `success` or `failure`; an unset target region is `_unknown`. |
+| `astrasync_multi_region_recovery_duration_seconds` | histogram | `target_region` | Duration of checkpoint recovery attempts. |
+The recorder uses an injected Prometheus registerer so embedding services can expose the
+families from their own endpoint without creating a second listener or global registration.
 
 ## Connection test and Console metrics
 
@@ -160,22 +177,29 @@ long-running executable. Their business call sites remain unwired.
 
 ## Data plane metrics
 
-The following names are reserved for future Coordinator and Worker
-instrumentation of the Phase 5 Arrow batch and checkpoint lifecycle
-(ADR-032, ADR-033). They are not registered or emitted today.
+The Java data plane activates all seven reserved families through Micrometer.
+`CheckpointBatchCoordinator` emits the three `coordinator_*` batch/checkpoint
+families, while `InProcessBatchWorker` emits the three `worker_*` record
+families. `coordinator_spill_bytes_total` retains its Coordinator semantic name
+but is sampled by the Worker-local spillable exchange after a payload is
+successfully written and enqueued. The Worker exposes the shared process
+registry at `/metrics` only when `METRICS_LISTEN_ADDRESS` is non-empty;
+Coordinator remains a one-shot process and does not bind a listener. The
+non-checkpoint spill path has no trusted job or tenant identity, so its labels
+are `tenant_id="_unknown"` and `job_id="_unknown"`.
 
 | Metric | Type | Labels | Description |
 |---|---|---|---|
 | `coordinator_batch_size_records` | histogram | `tenant_id`, `job_id` | Batch size in records after the adaptive parallelism policy. |
 | `coordinator_batch_duration_seconds` | histogram | `tenant_id`, `job_id`, `stage` | Time per stage (read, transform, write) in a single batch. |
-| `coordinator_spill_bytes_total` | counter | `tenant_id`, `job_id` | Bytes spilled to object storage when the spillable exchange overflows. |
-| `coordinator_checkpoint_duration_seconds` | histogram | `tenant_id`, `job_id` | Time to complete a single checkpoint, including the state-backend write. |
+| `coordinator_spill_bytes_total` | counter | `tenant_id`, `job_id` | Encoded payload bytes durably written to the Worker-local spill directory and successfully enqueued when the spillable exchange overflows; failed writes, filesystem metadata, consumption, and cleanup are excluded. |
+| `coordinator_checkpoint_duration_seconds` | histogram | `tenant_id`, `job_id`, `outcome` | Time to complete a single checkpoint, including the state-backend write. `outcome` is `success` or `failure`. |
 | `worker_records_read_total` | counter | `tenant_id`, `job_id` | Records read by the Worker. |
 | `worker_records_written_total` | counter | `tenant_id`, `job_id` | Records written by the Worker. |
 | `worker_records_rejected_total` | counter | `tenant_id`, `job_id`, `reason` | Records rejected by the sink writer; the `reason` is a stable code, not a free-form message. |
 
-The Java data plane has no Prometheus/Micrometer client wiring. These names
-remain a dashboard contract for a future implementation slice.
+The Java data plane exposes these families through Micrometer; the legacy
+sentence below is superseded by the F8 activation described above.
 
 ## CLI metrics
 
@@ -215,11 +239,11 @@ duplicate the shape.
 ## Follow-up
 
 F4 and F5 provide descriptor packages, HTTP exposition, and Helm discovery;
-F7 activates the three API Server SLO families documented above. Business
-observations for the remaining API Server, Console, Scheduler, Connection
-Test Executor, and auth-library descriptors, plus Java data-plane metrics,
-remain deferred. The landed work is recorded in
-[`changelog.md`](changelog.md).
+F7 activates the three API Server SLO families, F8 activates all Java
+data-plane families, and F9 activates Scheduler assignment and lease-takeover
+samples. Business observations for the remaining API Server, Controller,
+Console, Connection Test Executor, and auth-library descriptors remain
+deferred. The landed work is recorded in [`changelog.md`](changelog.md).
 
 ## Inline placeholders for the populated handbook
 

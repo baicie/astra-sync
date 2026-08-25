@@ -82,25 +82,43 @@ func (s *Store) Claim(
 	); err != nil {
 		return nil, fmt.Errorf("renew owned dispatch leases: %w", err)
 	}
-	if _, err := tx.ExecContext(
+	takeovers, err := tx.QueryContext(
 		ctx,
 		`UPDATE astrasync_scheduler_dispatches
-            SET owner_id = $1,
-                lease_expires_at = $2,
-                attempt = attempt + 1,
-                updated_at = $3
+		    SET owner_id = $1,
+		        lease_expires_at = $2,
+		        attempt = attempt + 1,
+		        updated_at = $3
 		  WHERE phase IN ('CLAIMED', 'STARTING', 'RUNNING', 'STOPPING')
 			AND (lease_expires_at <= $3
 				 OR (owner_id <> $1
 				     AND phase IN ('CLAIMED', 'STARTING', 'RUNNING')
 				     AND last_heartbeat_at IS NOT NULL
-				     AND last_heartbeat_at <= $4))`,
+				     AND last_heartbeat_at <= $4))
+		RETURNING job_uid::text, execution_epoch`,
 		ownerID,
 		leaseExpiresAt,
 		now,
 		now.Add(-heartbeatTimeout),
-	); err != nil {
+	)
+	if err != nil {
 		return nil, fmt.Errorf("take over expired dispatch leases: %w", err)
+	}
+	takenOver := make(map[dispatch.Identity]struct{})
+	for takeovers.Next() {
+		var identity dispatch.Identity
+		if err := takeovers.Scan(&identity.JobUID, &identity.Epoch); err != nil {
+			takeovers.Close()
+			return nil, fmt.Errorf("scan taken-over dispatch: %w", err)
+		}
+		takenOver[identity] = struct{}{}
+	}
+	if err := takeovers.Err(); err != nil {
+		takeovers.Close()
+		return nil, fmt.Errorf("iterate taken-over dispatches: %w", err)
+	}
+	if err := takeovers.Close(); err != nil {
+		return nil, fmt.Errorf("close taken-over dispatch rows: %w", err)
 	}
 	var activeCount int
 	if err := tx.QueryRowContext(
@@ -171,6 +189,9 @@ func (s *Store) Claim(
 		record, scanErr := scanRecord(rows)
 		if scanErr != nil {
 			return nil, fmt.Errorf("scan claimed dispatch: %w", scanErr)
+		}
+		if _, found := takenOver[record.Identity]; found {
+			record.LeaseTakenOver = true
 		}
 		claimed = append(claimed, record)
 	}

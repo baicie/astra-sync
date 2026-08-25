@@ -185,6 +185,7 @@ var RegionTopologyService_ServiceDesc = grpc.ServiceDesc{
 
 const (
 	ReplicationService_StreamCheckpoints_FullMethodName       = "/astra.control.v1.ReplicationService/StreamCheckpoints"
+	ReplicationService_PushCheckpoint_FullMethodName          = "/astra.control.v1.ReplicationService/PushCheckpoint"
 	ReplicationService_ReportReplicationStatus_FullMethodName = "/astra.control.v1.ReplicationService/ReportReplicationStatus"
 )
 
@@ -196,6 +197,9 @@ const (
 type ReplicationServiceClient interface {
 	// StreamCheckpoints streams checkpoint replication events from primary to secondary.
 	StreamCheckpoints(ctx context.Context, in *StreamCheckpointsRequest, opts ...grpc.CallOption) (ReplicationService_StreamCheckpointsClient, error)
+	// PushCheckpoint delivers one checkpoint event from a primary to a secondary.
+	// The caller may retry the same sequence; the receiver acknowledges the sequence.
+	PushCheckpoint(ctx context.Context, in *PushCheckpointRequest, opts ...grpc.CallOption) (*PushCheckpointResponse, error)
 	// ReportReplicationStatus reports replication lag and health to the primary region.
 	ReportReplicationStatus(ctx context.Context, in *ReportReplicationStatusRequest, opts ...grpc.CallOption) (*ReportReplicationStatusResponse, error)
 }
@@ -241,6 +245,16 @@ func (x *replicationServiceStreamCheckpointsClient) Recv() (*CheckpointEvent, er
 	return m, nil
 }
 
+func (c *replicationServiceClient) PushCheckpoint(ctx context.Context, in *PushCheckpointRequest, opts ...grpc.CallOption) (*PushCheckpointResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(PushCheckpointResponse)
+	err := c.cc.Invoke(ctx, ReplicationService_PushCheckpoint_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *replicationServiceClient) ReportReplicationStatus(ctx context.Context, in *ReportReplicationStatusRequest, opts ...grpc.CallOption) (*ReportReplicationStatusResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ReportReplicationStatusResponse)
@@ -259,6 +273,9 @@ func (c *replicationServiceClient) ReportReplicationStatus(ctx context.Context, 
 type ReplicationServiceServer interface {
 	// StreamCheckpoints streams checkpoint replication events from primary to secondary.
 	StreamCheckpoints(*StreamCheckpointsRequest, ReplicationService_StreamCheckpointsServer) error
+	// PushCheckpoint delivers one checkpoint event from a primary to a secondary.
+	// The caller may retry the same sequence; the receiver acknowledges the sequence.
+	PushCheckpoint(context.Context, *PushCheckpointRequest) (*PushCheckpointResponse, error)
 	// ReportReplicationStatus reports replication lag and health to the primary region.
 	ReportReplicationStatus(context.Context, *ReportReplicationStatusRequest) (*ReportReplicationStatusResponse, error)
 	mustEmbedUnimplementedReplicationServiceServer()
@@ -270,6 +287,9 @@ type UnimplementedReplicationServiceServer struct {
 
 func (UnimplementedReplicationServiceServer) StreamCheckpoints(*StreamCheckpointsRequest, ReplicationService_StreamCheckpointsServer) error {
 	return status.Errorf(codes.Unimplemented, "method StreamCheckpoints not implemented")
+}
+func (UnimplementedReplicationServiceServer) PushCheckpoint(context.Context, *PushCheckpointRequest) (*PushCheckpointResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method PushCheckpoint not implemented")
 }
 func (UnimplementedReplicationServiceServer) ReportReplicationStatus(context.Context, *ReportReplicationStatusRequest) (*ReportReplicationStatusResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ReportReplicationStatus not implemented")
@@ -308,6 +328,24 @@ func (x *replicationServiceStreamCheckpointsServer) Send(m *CheckpointEvent) err
 	return x.ServerStream.SendMsg(m)
 }
 
+func _ReplicationService_PushCheckpoint_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PushCheckpointRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ReplicationServiceServer).PushCheckpoint(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ReplicationService_PushCheckpoint_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ReplicationServiceServer).PushCheckpoint(ctx, req.(*PushCheckpointRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _ReplicationService_ReportReplicationStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ReportReplicationStatusRequest)
 	if err := dec(in); err != nil {
@@ -333,6 +371,10 @@ var ReplicationService_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "astra.control.v1.ReplicationService",
 	HandlerType: (*ReplicationServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "PushCheckpoint",
+			Handler:    _ReplicationService_PushCheckpoint_Handler,
+		},
 		{
 			MethodName: "ReportReplicationStatus",
 			Handler:    _ReplicationService_ReportReplicationStatus_Handler,
@@ -480,6 +522,105 @@ var RegionPromotionService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetPromotionStatus",
 			Handler:    _RegionPromotionService_GetPromotionStatus_Handler,
+		},
+	},
+	Streams:  []grpc.StreamDesc{},
+	Metadata: "v1/replication.proto",
+}
+
+const (
+	RegionRecoveryService_RecoverForPromotion_FullMethodName = "/astra.control.v1.RegionRecoveryService/RecoverForPromotion"
+)
+
+// RegionRecoveryServiceClient is the client API for RegionRecoveryService service.
+//
+// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+//
+// RegionRecoveryService performs checkpoint-coupled recovery after promotion.
+type RegionRecoveryServiceClient interface {
+	// RecoverForPromotion restores a promoted job on the target region.
+	// The promotion ID makes retries idempotent and prevents concurrent recovery.
+	RecoverForPromotion(ctx context.Context, in *RecoverForPromotionRequest, opts ...grpc.CallOption) (*RecoverForPromotionResponse, error)
+}
+
+type regionRecoveryServiceClient struct {
+	cc grpc.ClientConnInterface
+}
+
+func NewRegionRecoveryServiceClient(cc grpc.ClientConnInterface) RegionRecoveryServiceClient {
+	return &regionRecoveryServiceClient{cc}
+}
+
+func (c *regionRecoveryServiceClient) RecoverForPromotion(ctx context.Context, in *RecoverForPromotionRequest, opts ...grpc.CallOption) (*RecoverForPromotionResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RecoverForPromotionResponse)
+	err := c.cc.Invoke(ctx, RegionRecoveryService_RecoverForPromotion_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// RegionRecoveryServiceServer is the server API for RegionRecoveryService service.
+// All implementations must embed UnimplementedRegionRecoveryServiceServer
+// for forward compatibility
+//
+// RegionRecoveryService performs checkpoint-coupled recovery after promotion.
+type RegionRecoveryServiceServer interface {
+	// RecoverForPromotion restores a promoted job on the target region.
+	// The promotion ID makes retries idempotent and prevents concurrent recovery.
+	RecoverForPromotion(context.Context, *RecoverForPromotionRequest) (*RecoverForPromotionResponse, error)
+	mustEmbedUnimplementedRegionRecoveryServiceServer()
+}
+
+// UnimplementedRegionRecoveryServiceServer must be embedded to have forward compatible implementations.
+type UnimplementedRegionRecoveryServiceServer struct {
+}
+
+func (UnimplementedRegionRecoveryServiceServer) RecoverForPromotion(context.Context, *RecoverForPromotionRequest) (*RecoverForPromotionResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RecoverForPromotion not implemented")
+}
+func (UnimplementedRegionRecoveryServiceServer) mustEmbedUnimplementedRegionRecoveryServiceServer() {}
+
+// UnsafeRegionRecoveryServiceServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to RegionRecoveryServiceServer will
+// result in compilation errors.
+type UnsafeRegionRecoveryServiceServer interface {
+	mustEmbedUnimplementedRegionRecoveryServiceServer()
+}
+
+func RegisterRegionRecoveryServiceServer(s grpc.ServiceRegistrar, srv RegionRecoveryServiceServer) {
+	s.RegisterService(&RegionRecoveryService_ServiceDesc, srv)
+}
+
+func _RegionRecoveryService_RecoverForPromotion_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RecoverForPromotionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RegionRecoveryServiceServer).RecoverForPromotion(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RegionRecoveryService_RecoverForPromotion_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RegionRecoveryServiceServer).RecoverForPromotion(ctx, req.(*RecoverForPromotionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+// RegionRecoveryService_ServiceDesc is the grpc.ServiceDesc for RegionRecoveryService service.
+// It's only intended for direct use with grpc.RegisterService,
+// and not to be introspected or modified (even as a copy)
+var RegionRecoveryService_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "astra.control.v1.RegionRecoveryService",
+	HandlerType: (*RegionRecoveryServiceServer)(nil),
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "RecoverForPromotion",
+			Handler:    _RegionRecoveryService_RecoverForPromotion_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

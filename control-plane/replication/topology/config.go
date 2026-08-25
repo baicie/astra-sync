@@ -6,22 +6,25 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
+	"go.uber.org/zap"
+	"gopkg.in/yaml.v3"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
-	"go.uber.org/zap"
-	"gopkg.in/yaml.v3"
 )
 
 // Common errors for topology operations.
 var (
-	ErrRegionNotFound   = errors.New("topology: region not found")
+	ErrRegionNotFound  = errors.New("topology: region not found")
 	ErrInvalidConfig   = errors.New("topology: invalid configuration")
 	ErrNoPrimaryRegion = errors.New("topology: no primary region configured")
 	ErrDuplicateRegion = errors.New("topology: duplicate region name")
+	ErrMultiplePrimary = errors.New("topology: multiple primary regions configured")
+	ErrInvalidRegion   = errors.New("topology: invalid region")
 )
 
 // RegionRole represents the role of a region in the topology.
@@ -34,12 +37,12 @@ const (
 
 // Region represents a single region in the multi-region topology.
 type Region struct {
-	Name                 string    `yaml:"name"`
+	Name                string     `yaml:"name"`
 	Role                RegionRole `yaml:"role"`
-	APIServerEndpoint   string    `yaml:"apiServerEndpoint"`
-	PostgresEndpoint    string    `yaml:"postgresEndpoint"`
-	ObjectStorageBucket string    `yaml:"objectStorageBucket"`
-	ObjectStoragePrefix string    `yaml:"objectStoragePrefix"`
+	APIServerEndpoint   string     `yaml:"apiServerEndpoint"`
+	PostgresEndpoint    string     `yaml:"postgresEndpoint"`
+	ObjectStorageBucket string     `yaml:"objectStorageBucket"`
+	ObjectStoragePrefix string     `yaml:"objectStoragePrefix"`
 }
 
 // TopologyConfig represents the full topology configuration.
@@ -56,9 +59,10 @@ type Loader struct {
 	configMap string
 	key       string
 
-	mu      sync.RWMutex
-	config  *TopologyConfig
-	version int64
+	mu              sync.RWMutex
+	config          *TopologyConfig
+	version         int64
+	resourceVersion string
 }
 
 // LoaderOption is a functional option for topology loader configuration.
@@ -116,7 +120,29 @@ func NewLoader(ctx context.Context, logger *zap.Logger, configMap, ns, key strin
 		}
 	}
 
-	// Load initial config
+	// Load initial config. Outside Kubernetes, configMap is treated as a local
+	// YAML path (or ASTRA_TOPOLOGY_FILE can provide one explicitly).
+	if l.clientset == nil {
+		path := strings.TrimSpace(os.Getenv("ASTRA_TOPOLOGY_FILE"))
+		if path == "" {
+			path = configMap
+		}
+		if path == "" {
+			return nil, fmt.Errorf("%w: topology file is required outside Kubernetes", ErrInvalidConfig)
+		}
+		data, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return nil, fmt.Errorf("load topology file: %w", readErr)
+		}
+		parsed, parseErr := parseTopology(l.logger, data, 1)
+		if parseErr != nil {
+			return nil, fmt.Errorf("load initial topology: %w", parseErr)
+		}
+		l.config = parsed.config
+		l.version = parsed.version
+		l.resourceVersion = parsed.resourceVersion
+		return l, nil
+	}
 	if err := l.load(ctx); err != nil {
 		return nil, fmt.Errorf("load initial topology: %w", err)
 	}
@@ -143,24 +169,42 @@ func parseTopology(logger *zap.Logger, data []byte, version int64) (*Loader, err
 
 	// Validate regions
 	if len(cfg.Regions) == 0 {
-		return nil, errors.New("topology: at least one region is required")
+		return nil, fmt.Errorf("%w: at least one region is required", ErrInvalidConfig)
 	}
 
 	seenNames := make(map[string]bool)
+	primaryCount := 0
 	for _, r := range cfg.Regions {
+		if strings.TrimSpace(r.Name) == "" || strings.TrimSpace(string(r.Role)) == "" {
+			return nil, fmt.Errorf("%w: region name and role are required", ErrInvalidRegion)
+		}
 		if seenNames[r.Name] {
 			return nil, fmt.Errorf("%w: %q", ErrDuplicateRegion, r.Name)
 		}
 		seenNames[r.Name] = true
 
 		if r.Role != RegionRolePrimary && r.Role != RegionRoleStandby {
-			logger.Warn("unknown region role, treating as standby",
-				zap.String("region", r.Name),
-				zap.String("role", string(r.Role)))
+			return nil, fmt.Errorf("%w: unknown role %q for region %q", ErrInvalidRegion, r.Role, r.Name)
 		}
+		if strings.TrimSpace(r.APIServerEndpoint) == "" || strings.TrimSpace(r.PostgresEndpoint) == "" ||
+			strings.TrimSpace(r.ObjectStorageBucket) == "" || strings.TrimSpace(r.ObjectStoragePrefix) == "" {
+			return nil, fmt.Errorf("%w: endpoints and object storage are required for region %q", ErrInvalidRegion, r.Name)
+		}
+		if r.Role == RegionRolePrimary {
+			primaryCount++
+		}
+	}
+	if primaryCount == 0 {
+		return nil, ErrNoPrimaryRegion
+	}
+	if primaryCount > 1 {
+		return nil, ErrMultiplePrimary
 	}
 
 	// Set defaults
+	if cfg.ReplicationLagThresholdSec < 0 {
+		return nil, fmt.Errorf("%w: replication lag threshold cannot be negative", ErrInvalidConfig)
+	}
 	if cfg.ReplicationLagThresholdSec == 0 {
 		cfg.ReplicationLagThresholdSec = 5
 	}
@@ -210,6 +254,7 @@ func (l *Loader) load(ctx context.Context) error {
 
 	l.config = newLoader.config
 	l.version = newLoader.version
+	l.resourceVersion = newVersion
 
 	l.logger.Info("reloaded topology",
 		zap.Int("regionCount", len(l.config.Regions)),
@@ -220,6 +265,9 @@ func (l *Loader) load(ctx context.Context) error {
 
 // versionStringLocked returns the current version string. Caller must hold the lock.
 func (l *Loader) versionStringLocked() string {
+	if l.resourceVersion != "" {
+		return l.resourceVersion
+	}
 	if l.version == 0 {
 		return ""
 	}
@@ -231,6 +279,9 @@ func (l *Loader) GetRegion(name string) (*Region, error) {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 
+	if l.config == nil {
+		return nil, ErrInvalidConfig
+	}
 	for _, r := range l.config.Regions {
 		if r.Name == name {
 			return &r, nil
@@ -244,6 +295,9 @@ func (l *Loader) GetPrimaryRegion() (*Region, error) {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 
+	if l.config == nil {
+		return nil, ErrInvalidConfig
+	}
 	for _, r := range l.config.Regions {
 		if r.Role == RegionRolePrimary {
 			return &r, nil
@@ -282,7 +336,7 @@ func (l *Loader) GetConfig() *TopologyConfig {
 	defer l.mu.RUnlock()
 
 	cfg := &TopologyConfig{
-		Regions: make([]Region, len(l.config.Regions)),
+		Regions:                    make([]Region, len(l.config.Regions)),
 		ReplicationLagThresholdSec: l.config.ReplicationLagThresholdSec,
 	}
 	copy(cfg.Regions, l.config.Regions)
@@ -344,45 +398,58 @@ type TopologyWatcher struct {
 	loader   *Loader
 	logger   *zap.Logger
 	interval int64 // seconds between polls
+	watchMu  sync.Mutex
 	stopCh   chan struct{}
 	doneCh   chan struct{}
 	onChange func(*TopologyConfig)
+	started  bool
 }
 
 // Watch starts watching for topology changes.
 func (w *TopologyWatcher) Watch(ctx context.Context, onChange func(*TopologyConfig)) {
-	w.onChange = onChange
+	w.watchMu.Lock()
+	if w.started {
+		stopCh, doneCh := w.stopCh, w.doneCh
+		close(stopCh)
+		w.watchMu.Unlock()
+		<-doneCh
+		w.watchMu.Lock()
+	}
 	w.stopCh = make(chan struct{})
 	w.doneCh = make(chan struct{})
+	w.onChange = onChange
+	w.started = true
+	stopCh, doneCh := w.stopCh, w.doneCh
+	w.watchMu.Unlock()
 
-	go w.run(ctx)
+	go w.run(ctx, stopCh, doneCh, onChange)
 }
 
 // run is the main watcher loop.
-func (w *TopologyWatcher) run(ctx context.Context) {
-	defer close(w.doneCh)
+func (w *TopologyWatcher) run(ctx context.Context, stopCh <-chan struct{}, doneCh chan<- struct{}, onChange func(*TopologyConfig)) {
+	defer close(doneCh)
 
 	ticker := time.NewTicker(time.Duration(w.interval) * time.Second)
 	defer ticker.Stop()
 
 	// Initial callback
-	if w.onChange != nil {
-		w.onChange(w.loader.GetConfig())
+	if onChange != nil {
+		onChange(w.loader.GetConfig())
 	}
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-w.stopCh:
+		case <-stopCh:
 			return
 		case <-ticker.C:
 			if err := w.loader.Reload(ctx); err != nil {
 				w.logger.Warn("failed to reload topology", zap.Error(err))
 				continue
 			}
-			if w.onChange != nil {
-				w.onChange(w.loader.GetConfig())
+			if onChange != nil {
+				onChange(w.loader.GetConfig())
 			}
 		}
 	}
@@ -390,8 +457,16 @@ func (w *TopologyWatcher) run(ctx context.Context) {
 
 // Stop stops the watcher.
 func (w *TopologyWatcher) Stop() {
-	close(w.stopCh)
-	<-w.doneCh
+	w.watchMu.Lock()
+	if !w.started {
+		w.watchMu.Unlock()
+		return
+	}
+	stopCh, doneCh := w.stopCh, w.doneCh
+	w.started = false
+	close(stopCh)
+	w.watchMu.Unlock()
+	<-doneCh
 }
 
 // NewWatcher creates a new topology watcher.

@@ -7,6 +7,7 @@ import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.LongConsumer;
 
 /** A bounded, failure-aware exchange for one Source/Sink pair. */
 public final class BatchExchange implements AutoCloseable {
@@ -21,13 +22,20 @@ public final class BatchExchange implements AutoCloseable {
     }
 
     public BatchExchange(int capacity, SpillPolicy spillPolicy) {
+        this(capacity, spillPolicy, ignored -> {});
+    }
+
+    /** Creates an exchange that reports successfully enqueued spill payload bytes. */
+    public BatchExchange(int capacity, SpillPolicy spillPolicy, LongConsumer spillBytesRecorder) {
         if (capacity <= 0) {
             throw new IllegalArgumentException("capacity must be positive");
         }
         SpillPolicy checked = Objects.requireNonNull(spillPolicy, "spillPolicy must not be null");
+        LongConsumer checkedSpillBytesRecorder =
+                Objects.requireNonNull(spillBytesRecorder, "spillBytesRecorder must not be null");
         if (checked.enabled()) {
             this.batches = null;
-            this.spillStorage = new SpillableBatchStorage(capacity, checked);
+            this.spillStorage = new SpillableBatchStorage(capacity, checked, checkedSpillBytesRecorder);
         } else {
             this.batches = new ArrayBlockingQueue<>(capacity);
             this.spillStorage = null;

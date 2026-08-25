@@ -18,7 +18,7 @@ must combine all three to reach a root cause.
 
 | Signal | Source | Format | Sample destination |
 |---|---|---|---|
-| Metrics | Prometheus descriptors in the Go control plane; F7 emits API Server authentication and audit-query SLO samples | Prometheus/OpenMetrics exposition | `monitoring.prometheus.port: 9090` (deployment-side rewrite) |
+| Metrics | Prometheus descriptors in the Go control plane; F7 emits API Server authentication and audit-query SLO samples; F8 emits all seven Java data-plane families | Prometheus/OpenMetrics exposition | `monitoring.prometheus.port: 9090` (deployment-side rewrite) |
 | Logs | SLF4J + Logback in Java error paths, zap in the Controller, and `log/slog` in the other migrated Go entry points | line-delimited JSON | Loki / stdout / deployment log store |
 | Audit | PostgreSQL `audit_events` table (Slice 18) | relational rows | PostgreSQL → deployment audit store |
 
@@ -31,9 +31,14 @@ Executor, and auth admin CLI use module-local `slog` JSON loggers.
 Prometheus descriptors and dedicated `/metrics` listeners are wired for
 the long-running Go executables. F7 instruments the API Server authentication
 interceptor and authorized audit-query path, and negotiates OpenMetrics so a
-canonical UUID `request_id` can be emitted as a bounded exemplar. Other
-control-plane business call sites and all Java data-plane metric families
-remain pending; the catalog marks each family separately.
+canonical UUID `request_id` can be emitted as a bounded exemplar. F8 adds a
+Micrometer-backed Java data-plane registry: `CheckpointBatchCoordinator` emits
+batch/checkpoint samples, `InProcessBatchWorker` emits record-count samples,
+and the Worker-local spillable exchange emits
+`coordinator_spill_bytes_total` after successful durable enqueue. The Worker
+exposes that shared registry only when `METRICS_LISTEN_ADDRESS` is set;
+Coordinator remains one-shot. Other control-plane business call sites remain
+pending; the catalog marks each family separately.
 
 ## Documents
 
@@ -95,8 +100,9 @@ The handbook does not:
   sections. The chart exposes the knobs the operator uses to wire
   the platform's signal store; the handbook documents the
   conventions the wire must follow.
-- Claim that descriptor registration alone produces business samples. Only
-  the three API Server SLO families activated by F7 are live; the remaining
+- Claim that descriptor registration alone produces business samples. F7 emits
+  the three API Server SLO families and F8 emits all seven Java data-plane
+  batch/checkpoint, spill-byte, and record-count families; remaining
   descriptor-only families stay follow-up work.
 
 The handbook does:
@@ -105,6 +111,8 @@ The handbook does:
   metric names and fields that still need business call-site wiring.
 - Record the F7 authentication and audit-query observations, including their
   fixed fallback tenant labels and UUID-only exemplar contract.
+- Record F8 Java data-plane observations, their `_unknown` tenant fallback,
+  and the explicit Worker metrics listener contract.
 - Provide the per-tenant SLI/SLO definitions and the reference
   queries that the operator uses to derive an SLO dashboard.
 - Document the `request_id` join key that links the three signals.

@@ -158,7 +158,12 @@ func auditQueryDurationOpts() prometheus.HistogramOpts {
 // Handler returns the OpenMetrics-capable HTTP handler that scrapes the
 // process-global gatherer.
 func Handler() http.Handler {
-	return handler(prometheus.DefaultGatherer)
+	return HandlerFor(prometheus.DefaultGatherer)
+}
+
+// HandlerFor returns an OpenMetrics-capable handler for the supplied gatherer.
+func HandlerFor(gatherer prometheus.Gatherer) http.Handler {
+	return handler(gatherer)
 }
 
 func handler(gatherer prometheus.Gatherer) http.Handler {

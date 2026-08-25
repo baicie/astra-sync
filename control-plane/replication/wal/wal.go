@@ -11,6 +11,8 @@ import (
 	"hash/crc32"
 	"io"
 	"sort"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -24,7 +26,11 @@ var (
 	ErrEmptySequence     = errors.New("wal: sequence must be positive")
 	ErrInvalidCheckpoint = errors.New("wal: checkpoint URI cannot be empty")
 	ErrMismatchedRegion  = errors.New("wal: region mismatch between writer and entry")
+	ErrGap               = errors.New("wal: sequence gap")
+	ErrInvalidEntry      = errors.New("wal: invalid entry")
 )
+
+var crc32CTable = crc32.MakeTable(crc32.Castagnoli)
 
 // Entry represents a WAL entry for cross-region replication.
 type Entry struct {
@@ -39,13 +45,17 @@ type Entry struct {
 
 // MarshalBinary encodes an Entry into a binary format suitable for storage.
 // Format: sequence(8) | epoch(8) | job_id_len(4) | job_id | region_len(4) | region |
-//         | checkpoint_uri_len(4) | checkpoint_uri | timestamp_unix_nano(8) | crc32c(4)
+//
+//	| checkpoint_uri_len(4) | checkpoint_uri | timestamp_unix_nano(8) | crc32c(4)
 func (e *Entry) MarshalBinary() ([]byte, error) {
 	if e.Sequence <= 0 {
 		return nil, ErrEmptySequence
 	}
 	if e.CheckpointURI == "" {
 		return nil, ErrInvalidCheckpoint
+	}
+	if uint64(len(e.JobID)) > uint64(^uint32(0)) || uint64(len(e.Region)) > uint64(^uint32(0)) || uint64(len(e.CheckpointURI)) > uint64(^uint32(0)) {
+		return nil, fmt.Errorf("%w: field exceeds uint32 length", ErrInvalidEntry)
 	}
 
 	// Calculate required size
@@ -83,7 +93,7 @@ func (e *Entry) MarshalBinary() ([]byte, error) {
 
 	// Calculate CRC over everything except the CRC field itself
 	dataLen := totalSize - 4
-	e.CRC32C = crc32.ChecksumIEEE(buf[:dataLen])
+	e.CRC32C = crc32.Checksum(buf[:dataLen], crc32CTable)
 	binary.LittleEndian.PutUint32(buf[offset:], e.CRC32C)
 
 	return buf, nil
@@ -92,7 +102,7 @@ func (e *Entry) MarshalBinary() ([]byte, error) {
 // UnmarshalBinary decodes a binary-encoded Entry.
 func (e *Entry) UnmarshalBinary(data []byte) error {
 	if len(data) < 44 { // Minimum size: 8+8+4+0+4+0+4+0+8+4
-		return errors.New("wal: data too short")
+		return fmt.Errorf("%w: data too short", ErrInvalidEntry)
 	}
 
 	offset := 0
@@ -105,38 +115,47 @@ func (e *Entry) UnmarshalBinary(data []byte) error {
 
 	jobIDLen := int(binary.LittleEndian.Uint32(data[offset:]))
 	offset += 4
-	if offset+jobIDLen > len(data) {
-		return errors.New("wal: truncated job_id")
+	if jobIDLen < 0 || offset > len(data)-jobIDLen {
+		return fmt.Errorf("%w: truncated job_id", ErrInvalidEntry)
 	}
 	e.JobID = string(data[offset : offset+jobIDLen])
 	offset += jobIDLen
 
 	regionLen := int(binary.LittleEndian.Uint32(data[offset:]))
 	offset += 4
-	if offset+regionLen > len(data) {
-		return errors.New("wal: truncated region")
+	if regionLen < 0 || offset > len(data)-regionLen {
+		return fmt.Errorf("%w: truncated region", ErrInvalidEntry)
 	}
 	e.Region = string(data[offset : offset+regionLen])
 	offset += regionLen
 
 	checkpointLen := int(binary.LittleEndian.Uint32(data[offset:]))
 	offset += 4
-	if offset+checkpointLen > len(data) {
-		return errors.New("wal: truncated checkpoint_uri")
+	if checkpointLen < 0 || offset > len(data)-checkpointLen {
+		return fmt.Errorf("%w: truncated checkpoint_uri", ErrInvalidEntry)
 	}
 	e.CheckpointURI = string(data[offset : offset+checkpointLen])
 	offset += checkpointLen
 
 	e.Timestamp = time.Unix(0, int64(binary.LittleEndian.Uint64(data[offset:])))
 	offset += 8
+	if offset+4 != len(data) {
+		return fmt.Errorf("%w: unexpected trailing data", ErrInvalidEntry)
+	}
 
 	storedCRC := binary.LittleEndian.Uint32(data[offset:])
 
 	// Verify CRC
 	dataLen := len(data) - 4
-	computedCRC := crc32.ChecksumIEEE(data[:dataLen])
+	computedCRC := crc32.Checksum(data[:dataLen], crc32CTable)
 	if storedCRC != computedCRC {
 		return fmt.Errorf("wal: CRC mismatch: expected 0x%08x, got 0x%08x", computedCRC, storedCRC)
+	}
+	if e.Sequence <= 0 {
+		return ErrEmptySequence
+	}
+	if e.CheckpointURI == "" {
+		return ErrInvalidCheckpoint
 	}
 	e.CRC32C = storedCRC
 
@@ -157,11 +176,11 @@ type ObjectStorage interface {
 
 // Config holds the configuration for a WAL writer.
 type Config struct {
-	Region      string
-	Bucket      string
-	WALPrefix   string
+	Region        string
+	Bucket        string
+	WALPrefix     string
 	FlushInterval time.Duration
-	BatchSize   int
+	BatchSize     int
 }
 
 // Option is a functional option for WAL writer configuration.
@@ -187,10 +206,14 @@ type Writer struct {
 	store  ObjectStorage
 	logger *zap.Logger
 
-	mu       sync.Mutex
-	closed   bool
-	sequence int64
-	pending  []*Entry
+	mu          sync.Mutex
+	closed      bool
+	closing     bool
+	sequence    int64
+	pending     []*Entry
+	flushCtx    context.Context
+	flushCancel context.CancelFunc
+	flushDone   chan struct{}
 }
 
 // NewWriter creates a new WAL writer.
@@ -205,19 +228,34 @@ func NewWriter(ctx context.Context, store ObjectStorage, logger *zap.Logger, reg
 	for _, opt := range opts {
 		opt(&cfg)
 	}
+	if store == nil || logger == nil {
+		return nil, fmt.Errorf("%w: store and logger are required", ErrInvalidEntry)
+	}
+	if cfg.Region == "" || cfg.WALPrefix == "" {
+		return nil, fmt.Errorf("%w: region and WAL prefix are required", ErrInvalidEntry)
+	}
+	if cfg.FlushInterval <= 0 || cfg.BatchSize <= 0 {
+		return nil, fmt.Errorf("%w: flush interval and batch size must be positive", ErrInvalidEntry)
+	}
 
+	flushCtx, flushCancel := context.WithCancel(context.Background())
 	w := &Writer{
-		cfg:     cfg,
-		store:   store,
-		logger:  logger.With(zap.String("region", region), zap.String("walPrefix", walPrefix)),
-		sequence: 0,
-		pending:  make([]*Entry, 0, cfg.BatchSize),
+		cfg:         cfg,
+		store:       store,
+		logger:      logger.With(zap.String("region", region), zap.String("walPrefix", walPrefix)),
+		sequence:    0,
+		pending:     make([]*Entry, 0, cfg.BatchSize),
+		flushCtx:    flushCtx,
+		flushCancel: flushCancel,
+		flushDone:   make(chan struct{}),
 	}
 
 	// Resume sequence from existing entries
 	if err := w.resumeSequence(ctx); err != nil {
-		logger.Warn("failed to resume sequence, starting from 0", zap.Error(err))
+		flushCancel()
+		return nil, fmt.Errorf("resume WAL sequence: %w", err)
 	}
+	go w.runFlusher()
 
 	return w, nil
 }
@@ -235,14 +273,17 @@ func (w *Writer) resumeSequence(ctx context.Context) error {
 		return nil
 	}
 
-	// Parse sequence numbers from entry keys: <prefix>/<region>/<sequence>.wal
+	// Parse sequence numbers from entry keys: <prefix>/<region>/<sequence>.wal.
 	maxSeq := int64(0)
 	for _, entry := range entries {
-		var seq int64
-		if _, err := fmt.Sscanf(entry, fmt.Sprintf("%s%%s/%%d.wal", w.cfg.WALPrefix), &seq); err == nil {
-			if seq > maxSeq {
-				maxSeq = seq
-			}
+		parts := strings.Split(strings.TrimSuffix(entry, ".wal"), "/")
+		prefixParts := strings.Split(strings.TrimSuffix(w.cfg.WALPrefix, "/"), "/")
+		if len(parts) != len(prefixParts)+2 || strings.Join(parts[:len(prefixParts)], "/") != strings.Join(prefixParts, "/") || parts[len(prefixParts)] != w.cfg.Region {
+			continue
+		}
+		seq, parseErr := strconv.ParseInt(parts[len(parts)-1], 10, 64)
+		if parseErr == nil && seq > maxSeq {
+			maxSeq = seq
 		}
 	}
 
@@ -254,29 +295,44 @@ func (w *Writer) resumeSequence(ctx context.Context) error {
 // Append adds a new entry to the WAL. The entry's Sequence, Region, and CRC32C
 // are set by the writer. The caller should set Epoch, CheckpointURI, JobID, and Timestamp.
 func (w *Writer) Append(ctx context.Context, entry *Entry) error {
+	return w.append(ctx, entry, false)
+}
+
+// AppendDurable appends an entry and flushes it before returning successfully.
+// Checkpoint producers use this method when a successful publish is the WAL durability boundary.
+func (w *Writer) AppendDurable(ctx context.Context, entry *Entry) error {
+	return w.append(ctx, entry, true)
+}
+
+func (w *Writer) append(ctx context.Context, entry *Entry, durable bool) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	if w.closed {
+	if w.closed || w.closing {
 		return ErrClosed
+	}
+	if entry == nil {
+		return fmt.Errorf("%w: entry is nil", ErrInvalidEntry)
 	}
 	if entry.Region != "" && entry.Region != w.cfg.Region {
 		return fmt.Errorf("%w: got %q, want %q", ErrMismatchedRegion, entry.Region, w.cfg.Region)
 	}
 
-	w.sequence++
-	entry.Sequence = w.sequence
+	nextSequence := w.sequence + 1
+	entry.Sequence = nextSequence
 	entry.Region = w.cfg.Region
 	entry.Timestamp = time.Now().UTC()
 
-	data, err := entry.MarshalBinary()
-	if err != nil {
+	if _, err := entry.MarshalBinary(); err != nil {
+		entry.Sequence = 0
 		return fmt.Errorf("marshal entry: %w", err)
 	}
-
-	key := w.entryKey(entry.Sequence)
-	if err := w.store.PutObject(ctx, key, data); err != nil {
-		return fmt.Errorf("put object %s: %w", key, err)
+	w.sequence = nextSequence
+	w.pending = append(w.pending, entry)
+	if durable || w.cfg.BatchSize <= 0 || len(w.pending) >= w.cfg.BatchSize {
+		if err := w.flushLocked(ctx); err != nil {
+			return fmt.Errorf("flush WAL: %w", err)
+		}
 	}
 
 	w.logger.Debug("appended WAL entry",
@@ -289,6 +345,26 @@ func (w *Writer) Append(ctx context.Context, entry *Entry) error {
 	return nil
 }
 
+func (w *Writer) runFlusher() {
+	defer close(w.flushDone)
+	ticker := time.NewTicker(w.cfg.FlushInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-w.flushCtx.Done():
+			return
+		case <-ticker.C:
+			w.mu.Lock()
+			if !w.closed && len(w.pending) > 0 {
+				if err := w.flushLocked(w.flushCtx); err != nil {
+					w.logger.Error("failed to flush WAL", zap.Error(err))
+				}
+			}
+			w.mu.Unlock()
+		}
+	}
+}
+
 // entryKey generates the object storage key for a WAL entry.
 func (w *Writer) entryKey(sequence int64) string {
 	return fmt.Sprintf("%s/%s/%016d.wal", w.cfg.WALPrefix, w.cfg.Region, sequence)
@@ -297,18 +373,29 @@ func (w *Writer) entryKey(sequence int64) string {
 // Close flushes any pending entries and closes the writer.
 func (w *Writer) Close(ctx context.Context) error {
 	w.mu.Lock()
-	defer w.mu.Unlock()
-
-	if w.closed {
+	if w.closed || w.closing {
+		w.mu.Unlock()
 		return nil
 	}
-	w.closed = true
+	w.closing = true
+	w.mu.Unlock()
+	if w.flushCancel != nil {
+		w.flushCancel()
+	}
+	if w.flushDone != nil {
+		<-w.flushDone
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
 
 	if len(w.pending) > 0 {
 		if err := w.flushLocked(ctx); err != nil {
+			w.closing = false
 			return err
 		}
 	}
+	w.closed = true
+	w.closing = false
 
 	w.logger.Info("closed WAL writer", zap.Int64("finalSequence", w.sequence))
 	return nil
@@ -351,12 +438,19 @@ type Reader struct {
 
 // NewReader creates a new WAL reader for a secondary region.
 func NewReader(ctx context.Context, store ObjectStorage, logger *zap.Logger, region, bucket, walPrefix string, resumeFrom int64) (*Reader, error) {
+	if store == nil || logger == nil {
+		return nil, fmt.Errorf("%w: store and logger are required", ErrInvalidEntry)
+	}
+	if region == "" || walPrefix == "" || resumeFrom < 0 {
+		return nil, fmt.Errorf("%w: region, WAL prefix and non-negative resume sequence are required", ErrInvalidEntry)
+	}
 	r := &Reader{
-		cfg:      Config{Region: region, Bucket: bucket, WALPrefix: walPrefix},
-		store:    store,
-		logger:   logger.With(zap.String("region", region)),
-		region:   region,
-		resumeSeq: resumeFrom,
+		cfg:         Config{Region: region, Bucket: bucket, WALPrefix: walPrefix},
+		store:       store,
+		logger:      logger.With(zap.String("region", region)),
+		region:      region,
+		resumeSeq:   resumeFrom,
+		lastReadSeq: resumeFrom,
 	}
 	return r, nil
 }
@@ -370,6 +464,9 @@ func (r *Reader) ReadNext(ctx context.Context) (*Entry, error) {
 	entry, err := r.readEntry(ctx, startSeq)
 	if err != nil {
 		return nil, err
+	}
+	if entry.Sequence != startSeq || entry.Region != r.region {
+		return nil, fmt.Errorf("%w: expected sequence=%d region=%q, got sequence=%d region=%q", ErrGap, startSeq, r.region, entry.Sequence, entry.Region)
 	}
 
 	r.mu.Lock()
@@ -397,6 +494,9 @@ func (r *Reader) readEntry(ctx context.Context, sequence int64) (*Entry, error) 
 
 // ReadBatch reads multiple entries starting from the last read sequence.
 func (r *Reader) ReadBatch(ctx context.Context, maxCount int) ([]*Entry, error) {
+	if maxCount <= 0 {
+		return []*Entry{}, nil
+	}
 	r.mu.Lock()
 	startSeq := r.lastReadSeq + 1
 	r.mu.Unlock()
@@ -423,11 +523,15 @@ func (r *Reader) ReadBatch(ctx context.Context, maxCount int) ([]*Entry, error) 
 
 	entries := make([]*Entry, 0, len(entrySeqs))
 	for _, seq := range entrySeqs {
+		if seq != startSeq+int64(len(entries)) {
+			return nil, fmt.Errorf("%w: expected sequence=%d, got %d", ErrGap, startSeq+int64(len(entries)), seq)
+		}
 		entry, err := r.readEntry(ctx, seq)
 		if err != nil {
-			// Skip missing entries (gap)
-			r.logger.Warn("skipped missing entry", zap.Int64("sequence", seq), zap.Error(err))
-			continue
+			return nil, fmt.Errorf("read sequence %d: %w", seq, err)
+		}
+		if entry.Sequence != seq || entry.Region != r.region {
+			return nil, fmt.Errorf("%w: expected sequence=%d region=%q, got sequence=%d region=%q", ErrGap, seq, r.region, entry.Sequence, entry.Region)
 		}
 		entries = append(entries, entry)
 	}

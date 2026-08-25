@@ -10,6 +10,7 @@ import (
 
 	"io.astrasync/control-plane/job"
 	"io.astrasync/control-plane/scheduler/internal/dispatch"
+	"io.astrasync/control-plane/scheduler/internal/metrics"
 )
 
 type ObservationState string
@@ -149,6 +150,11 @@ func (r *Reconciler) Tick(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	for _, record := range records {
+		if record.LeaseTakenOver {
+			metrics.LeaseTakeoverTotal.WithLabelValues("_unknown", "success").Inc()
+		}
+	}
 	var wait sync.WaitGroup
 	errorsChannel := make(chan error, len(records))
 	for _, record := range records {
@@ -156,6 +162,8 @@ func (r *Reconciler) Tick(ctx context.Context) error {
 		wait.Add(1)
 		go func() {
 			defer wait.Done()
+			startedAt := r.clock().UTC()
+			defer r.recordReconcileDuration(startedAt)
 			operationContext, cancel := context.WithTimeout(ctx, r.operationTimeout)
 			defer cancel()
 			if reconcileErr := r.reconcile(operationContext, record); reconcileErr != nil {
@@ -235,6 +243,7 @@ func (r *Reconciler) reconcile(ctx context.Context, record dispatch.Record) erro
 		return r.finishHeartbeatFailure(ctx, record)
 	}
 
+	claimedExecution := record.Phase == dispatch.PhaseClaimed
 	workingPhase := record.Phase
 	if workingPhase == dispatch.PhaseClaimed {
 		workingPhase = dispatch.PhaseStarting
@@ -245,14 +254,21 @@ func (r *Reconciler) reconcile(ctx context.Context, record dispatch.Record) erro
 	record.Phase = workingPhase
 	observation, err := r.dispatcher.Reconcile(ctx, current, record)
 	if err != nil {
+		if claimedExecution {
+			var permanent *PermanentError
+			if errors.As(err, &permanent) {
+				r.recordAssignment("rejected")
+				return r.failPermanently(ctx, record, "DispatchRejected", permanent.Error())
+			}
+			r.recordAssignment("failure")
+		}
 		if r.heartbeatExpired(record) {
 			return r.failHeartbeat(ctx, record, err.Error())
 		}
-		var permanent *PermanentError
-		if errors.As(err, &permanent) {
-			return r.failPermanently(ctx, record, "DispatchRejected", permanent.Error())
-		}
 		return r.recordTransientError(ctx, record, err)
+	}
+	if claimedExecution {
+		r.recordAssignment("success")
 	}
 	switch observation.State {
 	case ObservationPending:
@@ -283,6 +299,18 @@ func (r *Reconciler) reconcile(ctx context.Context, record dispatch.Record) erro
 	default:
 		return r.recordTransientError(ctx, record, fmt.Errorf("unknown dispatch observation %q", observation.State))
 	}
+}
+
+func (r *Reconciler) recordAssignment(outcome string) {
+	metrics.JobAssignmentTotal.WithLabelValues("_unknown", "_unknown", outcome).Inc()
+}
+
+func (r *Reconciler) recordReconcileDuration(startedAt time.Time) {
+	elapsed := r.clock().UTC().Sub(startedAt).Seconds()
+	if elapsed < 0 {
+		elapsed = 0
+	}
+	metrics.JobReconcileDuration.WithLabelValues("_unknown").Observe(elapsed)
 }
 
 func (r *Reconciler) heartbeatExpired(record dispatch.Record) bool {

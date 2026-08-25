@@ -17,15 +17,19 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
+
+	"io.astrasync/control-plane/replication/metrics"
 )
 
 // Common errors for channel operations.
 var (
-	ErrClosed             = errors.New("channel: client is closed")
-	ErrNoPeerEndpoint     = errors.New("channel: no peer endpoint configured")
-	ErrTLSConfigMissing    = errors.New("channel: TLS configuration incomplete")
-	ErrCertLoadFailed      = errors.New("channel: failed to load certificates")
+	ErrClosed               = errors.New("channel: client is closed")
+	ErrNoPeerEndpoint       = errors.New("channel: no peer endpoint configured")
+	ErrTLSConfigMissing     = errors.New("channel: TLS configuration incomplete")
+	ErrCertLoadFailed       = errors.New("channel: failed to load certificates")
 	ErrCAVerificationFailed = errors.New("channel: CA verification failed")
+	ErrTransportUnavailable = errors.New("channel: replication transport is not configured")
+	ErrInvalidEvent         = errors.New("channel: event is invalid")
 )
 
 // EventType defines the type of cross-region event.
@@ -54,23 +58,26 @@ func (e EventType) String() string {
 
 // Event represents a cross-region event.
 type Event struct {
-	Type        EventType
+	Type         EventType
 	SourceRegion string
 	TargetRegion string
-	Timestamp   time.Time
-	Payload     []byte
+	Timestamp    time.Time
+	Payload      []byte
 }
 
 // Config holds the configuration for a cross-region channel.
 type Config struct {
-	Region         string
-	PeerRegion     string
-	PeerEndpoint   string
-	CACertPath     string
-	ClientCertPath string
-	ClientKeyPath  string
-	ServerName     string
-	EnableTLS      bool
+	Region             string
+	PeerRegion         string
+	PeerEndpoint       string
+	CACertPath         string
+	ClientCertPath     string
+	ClientKeyPath      string
+	ServerName         string
+	EnableTLS          bool
+	eventSender        EventSender
+	eventSenderFactory EventSenderFactory
+	metrics            *metrics.Recorder
 }
 
 // Option is a functional option for channel configuration.
@@ -107,16 +114,32 @@ func (f EventHandlerFunc) HandleEvent(ctx context.Context, event *Event) error {
 	return f(ctx, event)
 }
 
+// EventSender is the transport bridge used to deliver events. The API Server
+// supplies a gRPC implementation; keeping it injected avoids a module cycle.
+type EventSender interface {
+	SendEvent(context.Context, *Event) error
+}
+
+// EventSenderFactory creates the protocol-specific sender after Connect succeeds.
+// The channel package stays independent from generated API packages.
+type EventSenderFactory interface {
+	NewEventSender(*grpc.ClientConn, string, string) EventSender
+}
+
 // Client manages the cross-region gRPC connection.
 type Client struct {
 	cfg     Config
 	logger  *zap.Logger
 	handler EventHandler
+	metrics *metrics.Recorder
 
-	mu          sync.RWMutex
-	conn        *grpc.ClientConn
-	closed      atomic.Bool
-	reconnectCh chan struct{}
+	mu             sync.RWMutex
+	conn           *grpc.ClientConn
+	closed         atomic.Bool
+	eventsSent     atomic.Int64
+	eventsReceived atomic.Int64
+	lastError      atomic.Value
+	reconnectCh    chan struct{}
 }
 
 // NewClient creates a new cross-region channel client.
@@ -132,11 +155,15 @@ func NewClient(ctx context.Context, logger *zap.Logger, region string, handler E
 	if cfg.PeerEndpoint == "" {
 		return nil, ErrNoPeerEndpoint
 	}
+	if cfg.EnableTLS && (cfg.CACertPath == "" || cfg.ClientCertPath == "" || cfg.ClientKeyPath == "" || cfg.ServerName == "") {
+		return nil, ErrTLSConfigMissing
+	}
 
 	c := &Client{
 		cfg:         cfg,
 		logger:      logger.With(zap.String("region", region), zap.String("peer", cfg.PeerRegion)),
 		handler:     handler,
+		metrics:     cfg.metrics,
 		reconnectCh: make(chan struct{}, 1),
 	}
 
@@ -168,14 +195,52 @@ func (c *Client) Close() error {
 	return nil
 }
 
-// SendEvent sends an event to the peer region.
-// Note: This is a placeholder for the actual gRPC stream implementation.
-func (c *Client) SendEvent(ctx context.Context, event *Event) error {
+// SendEvent sends an event through the configured transport.
+func (c *Client) SendEvent(ctx context.Context, event *Event) (err error) {
+	startedAt := time.Now()
+	defer func() {
+		if c.metrics == nil || event == nil {
+			return
+		}
+		outcome := "success"
+		if err != nil {
+			outcome = "failure"
+		}
+		peerRegion := c.cfg.PeerRegion
+		if peerRegion == "" {
+			peerRegion = event.TargetRegion
+		}
+		if peerRegion == "" {
+			peerRegion = "_unknown"
+		}
+		c.metrics.ObserveEvent(peerRegion, event.Type.String(), outcome, time.Since(startedAt))
+	}()
 	if c.closed.Load() {
 		return ErrClosed
 	}
+	if event == nil || event.Type == EventTypeUnknown || event.SourceRegion == "" {
+		return ErrInvalidEvent
+	}
+	sender := c.cfg.eventSender
+	if sender == nil {
+		c.mu.RLock()
+		conn := c.conn
+		factory := c.cfg.eventSenderFactory
+		c.mu.RUnlock()
+		if conn != nil && factory != nil {
+			sender = factory.NewEventSender(conn, c.cfg.Region, c.cfg.PeerRegion)
+		}
+	}
+	if sender == nil {
+		return ErrTransportUnavailable
+	}
+	if err := sender.SendEvent(ctx, event); err != nil {
+		c.lastError.Store(err.Error())
+		return fmt.Errorf("send %s event: %w", event.Type, err)
+	}
+	c.eventsSent.Add(1)
 
-	c.logger.Debug("event queued for transmission",
+	c.logger.Debug("event sent to peer",
 		zap.String("type", event.Type.String()),
 		zap.String("source", event.SourceRegion),
 		zap.String("target", event.TargetRegion))
@@ -197,6 +262,7 @@ func (c *Client) dial(ctx context.Context) error {
 		opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	}
 
+	opts = append(opts, grpc.WithBlock())
 	conn, err := grpc.DialContext(ctx, c.cfg.PeerEndpoint, opts...)
 	if err != nil {
 		return fmt.Errorf("dial %s: %w", c.cfg.PeerEndpoint, err)
@@ -241,6 +307,14 @@ func (c *Client) loadTLSConfig() (*tls.Config, error) {
 	}, nil
 }
 
+// Connection returns the active peer connection, if one has been established.
+// Callers must not close the returned connection; Client owns its lifecycle.
+func (c *Client) Connection() *grpc.ClientConn {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.conn
+}
+
 // IsConnected returns true if the client is connected.
 func (c *Client) IsConnected() bool {
 	c.mu.RLock()
@@ -262,7 +336,7 @@ type Server struct {
 	logger  *zap.Logger
 	handler EventHandler
 
-	mu     sync.RWMutex
+	mu      sync.RWMutex
 	streams map[string]chan *Event
 }
 
@@ -352,9 +426,11 @@ type ChannelStats struct {
 func (c *Client) Stats() ChannelStats {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	return ChannelStats{
-		Connected: c.conn != nil,
+	stats := ChannelStats{Connected: c.conn != nil, EventsSent: c.eventsSent.Load(), EventsReceived: c.eventsReceived.Load()}
+	if value := c.lastError.Load(); value != nil {
+		stats.LastError, _ = value.(string)
 	}
+	return stats
 }
 
 // NewHealthEvent creates a health event.
@@ -395,4 +471,19 @@ func NewTopologyEvent(sourceRegion, targetRegion string, version int64) *Event {
 		Timestamp:    time.Now().UTC(),
 		Payload:      []byte(fmt.Sprintf("topology-version:%d", version)),
 	}
+}
+
+// WithEventSender attaches the concrete replication transport.
+func WithEventSender(sender EventSender) Option {
+	return func(c *Config) { c.eventSender = sender }
+}
+
+// WithEventSenderFactory attaches a protocol-specific transport factory.
+func WithEventSenderFactory(factory EventSenderFactory) Option {
+	return func(c *Config) { c.eventSenderFactory = factory }
+}
+
+// WithMetrics attaches a multi-region metrics recorder.
+func WithMetrics(recorder *metrics.Recorder) Option {
+	return func(c *Config) { c.metrics = recorder }
 }

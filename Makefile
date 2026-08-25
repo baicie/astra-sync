@@ -1,6 +1,6 @@
 # Makefile for AstraSync
 
-.PHONY: all build build-java build-go build-connectors test test-java test-go vet-go check-security check-runbooks check clean install format check verify catalog-check docker-build docker-push proto-generate proto-go-generate proto-lint crd-generate install-hooks test-integration-go
+.PHONY: all build build-java build-go build-connectors test test-java test-go test-integration-go test-integration-multi-region vet-go check-security check-runbooks check clean install format check verify catalog-check docker-build docker-push proto-generate proto-go-generate proto-lint crd-generate install-hooks
 
 GO_MODULES := control-plane control-plane/api-server control-plane/controller control-plane/scheduler control-plane/catalog control-plane/auth console
 JAVA_PROTO_MODULES := connector-api,protocol/data-protocol,protocol/connector-protocol,protocol/worker-protocol,control-plane/compiler-validation
@@ -54,7 +54,14 @@ test-integration:
 
 test-integration-go:
 	@echo "Running Go integration tests..."
+	@python scripts/run-go-modules.py test-integration
 	cd tests/integration && go test ./...
+
+test-integration-multi-region:
+	@echo "Running multi-region Docker Compose acceptance..."
+	@docker info
+	@docker compose -f tests/integration/multi-region/docker-compose.yaml config --quiet
+	@python scripts/run-multi-region-acceptance.py
 
 # E2E tests
 test-e2e:
@@ -112,7 +119,7 @@ check-mtls: vet-go
 catalog-check:
 	mvn -pl cli -am package -DskipTests -DskipITs
 	java -jar cli/target/astrasync-cli-0.1.0-SNAPSHOT-all.jar catalog-export target/connector-inventory.pb --compiler-build 0.1.0-SNAPSHOT --execution-profile standard
-	cmp deployment/catalog/connector-inventory.pb target/connector-inventory.pb
+	python scripts/check-files-identical.py deployment/catalog/connector-inventory.pb target/connector-inventory.pb
 
 # Clean build artifacts
 clean:

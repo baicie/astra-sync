@@ -8,6 +8,7 @@ import io.astrasync.engine.checkpoint.CheckpointRecord;
 import io.astrasync.engine.checkpoint.CheckpointStore;
 import io.astrasync.engine.checkpoint.SplitPlan;
 import io.astrasync.engine.kernel.SyncResult;
+import io.astrasync.engine.observability.DataPlaneMetrics;
 import io.astrasync.engine.runtime.BatchTask;
 import io.astrasync.engine.runtime.BatchTaskFactory;
 import io.astrasync.engine.runtime.BatchWorker;
@@ -27,8 +28,14 @@ import java.util.concurrent.atomic.AtomicLong;
 public final class CheckpointBatchCoordinator {
     private final List<BatchWorker> workers;
     private final CheckpointStore checkpointStore;
+    private final DataPlaneMetrics metrics;
 
     public CheckpointBatchCoordinator(List<? extends BatchWorker> workers, CheckpointStore checkpointStore) {
+        this(workers, checkpointStore, DataPlaneMetrics.global());
+    }
+
+    public CheckpointBatchCoordinator(
+            List<? extends BatchWorker> workers, CheckpointStore checkpointStore, DataPlaneMetrics metrics) {
         Objects.requireNonNull(workers, "workers must not be null");
         if (workers.isEmpty()) {
             throw new IllegalArgumentException("at least one worker is required");
@@ -44,6 +51,7 @@ public final class CheckpointBatchCoordinator {
         }
         this.workers = List.copyOf(copy);
         this.checkpointStore = Objects.requireNonNull(checkpointStore, "checkpointStore must not be null");
+        this.metrics = Objects.requireNonNull(metrics, "metrics must not be null");
     }
 
     public CheckpointRunResult run(String jobId, SplitEnumerator enumerator, BatchTaskFactory taskFactory) {
@@ -107,11 +115,14 @@ public final class CheckpointBatchCoordinator {
                         "Worker does not support checkpoint execution: " + worker.workerId());
             }
             AtomicLong durableSequence = new AtomicLong(context.checkpointSequence());
+            metrics.recordBatchSize(jobId, task.maxBatchRecords());
+            long executionStartedNanos = System.nanoTime();
             WorkerResult result = checkpointWorker.executeCheckpoint(
                     context,
                     task,
                     progress -> durableSequence.set(record(jobId, epoch, split.splitId(), splitFingerprint, progress)
                             .checkpointSequence()));
+            metrics.recordBatchDuration(jobId, "read", System.nanoTime() - executionStartedNanos);
             if (!split.splitId().equals(result.taskId())) {
                 throw new BatchCoordinatorException(
                         "Worker returned an unexpected task result: " + result.taskId(), null);
@@ -140,12 +151,19 @@ public final class CheckpointBatchCoordinator {
                 progress.sourcePosition(),
                 progress.sinkCommitToken(),
                 progress.batchDigest());
-        CheckpointRecord durable = checkpointStore.record(record);
-        if (!durable.equals(record)) {
-            throw new BatchCoordinatorException(
-                    "checkpoint store returned a different record for " + progress.taskId(), null);
+        long startedNanos = System.nanoTime();
+        try {
+            CheckpointRecord durable = checkpointStore.record(record);
+            if (!durable.equals(record)) {
+                throw new BatchCoordinatorException(
+                        "checkpoint store returned a different record for " + progress.taskId(), null);
+            }
+            metrics.recordCheckpointDuration(jobId, "success", System.nanoTime() - startedNanos);
+            return durable;
+        } catch (RuntimeException exception) {
+            metrics.recordCheckpointDuration(jobId, "failure", System.nanoTime() - startedNanos);
+            throw exception;
         }
-        return durable;
     }
 
     private static SyncResult aggregate(List<WorkerResult> results) {

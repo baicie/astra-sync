@@ -21,13 +21,14 @@ GO_MODULES = (
 
 
 def main(argv: list[str]) -> int:
-    if len(argv) != 2 or argv[1] not in {"build", "test", "vet", "fmt"}:
-        print(f"usage: {Path(argv[0]).name} <build|test|vet|fmt>", file=sys.stderr)
+    if len(argv) != 2 or argv[1] not in {"build", "test", "vet", "fmt", "test-integration"}:
+        print(f"usage: {Path(argv[0]).name} <build|test|vet|fmt|test-integration>", file=sys.stderr)
         return 2
 
     command = {
         "build": ["go", "build", "./..."],
         "test": ["go", "test", "./..."],
+        "test-integration": ["go", "test", "-tags=integration", "./..."],
         "vet": ["go", "vet", "./..."],
         "fmt": ["go", "fmt", "./..."],
     }[argv[1]]
