@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"go.uber.org/zap"
+
+	"io.astrasync/control-plane/replication/metrics"
 )
 
 // Common errors for promotion operations.
@@ -19,6 +21,7 @@ var (
 	ErrEpochConflict     = errors.New("promotion: epoch conflict")
 	ErrCapabilityTimeout = errors.New("promotion: sink capability revalidation timeout")
 	ErrCapabilityFailed  = errors.New("promotion: sink capability revalidation failed")
+	ErrRecoveryFailed    = errors.New("promotion: checkpoint recovery failed")
 	ErrPromotionAborted  = errors.New("promotion: promotion aborted")
 	ErrInvalidRequest    = errors.New("promotion: invalid request")
 )
@@ -178,6 +181,11 @@ type CapabilityRevalidator interface {
 	Revalidate(ctx context.Context, jobID string, timeout time.Duration) error
 }
 
+// RecoveryCoordinator performs checkpoint-coupled recovery for a new epoch.
+type RecoveryCoordinator interface {
+	Recover(ctx context.Context, jobID string, newEpoch int64, promotionID string) error
+}
+
 // RegionTopology validates promotion targets and identifies the active region.
 type RegionTopology interface {
 	IsStandby(region string) bool
@@ -197,7 +205,9 @@ type Manager struct {
 	jobReader   JobReader
 	jobWriter   JobWriter
 	revalidator CapabilityRevalidator
+	recovery    RecoveryCoordinator
 	fencer      EpochFencer
+	metrics     *metrics.Recorder
 
 	mu         sync.RWMutex
 	promotions map[string]*Promotion // key: jobID
@@ -209,6 +219,10 @@ type Config struct {
 	CapabilityTimeout time.Duration
 	CurrentRegion     string
 	Topology          RegionTopology
+	Revalidator       CapabilityRevalidator
+	Recovery          RecoveryCoordinator
+	Fencer            EpochFencer
+	Metrics           *metrics.Recorder
 }
 
 // Option is a functional option for manager configuration.
@@ -231,6 +245,26 @@ func WithTopology(topology RegionTopology) Option {
 	return func(c *Config) { c.Topology = topology }
 }
 
+// WithCapabilityRevalidator attaches sink capability validation.
+func WithCapabilityRevalidator(revalidator CapabilityRevalidator) Option {
+	return func(c *Config) { c.Revalidator = revalidator }
+}
+
+// WithRecoveryCoordinator attaches checkpoint-coupled recovery to promotion.
+func WithRecoveryCoordinator(coordinator RecoveryCoordinator) Option {
+	return func(c *Config) { c.Recovery = coordinator }
+}
+
+// WithEpochFencer attaches the previous-epoch fencing implementation.
+func WithEpochFencer(fencer EpochFencer) Option {
+	return func(c *Config) { c.Fencer = fencer }
+}
+
+// WithMetrics attaches a multi-region metrics recorder.
+func WithMetrics(recorder *metrics.Recorder) Option {
+	return func(c *Config) { c.Metrics = recorder }
+}
+
 // NewManager creates a new promotion manager.
 func NewManager(logger *zap.Logger, store PromotionStore, assigner EpochAssigner, jobReader JobReader, jobWriter JobWriter, opts ...Option) (*Manager, error) {
 	cfg := Config{
@@ -245,18 +279,34 @@ func NewManager(logger *zap.Logger, store PromotionStore, assigner EpochAssigner
 		return nil, fmt.Errorf("%w: manager dependencies are required", ErrInvalidRequest)
 	}
 	return &Manager{
-		cfg:        cfg,
-		logger:     logger.With(zap.String("component", "promotion")),
-		store:      store,
-		assigner:   assigner,
-		jobReader:  jobReader,
-		jobWriter:  jobWriter,
-		promotions: make(map[string]*Promotion),
+		cfg:         cfg,
+		logger:      logger.With(zap.String("component", "promotion")),
+		store:       store,
+		assigner:    assigner,
+		jobReader:   jobReader,
+		jobWriter:   jobWriter,
+		revalidator: cfg.Revalidator,
+		recovery:    cfg.Recovery,
+		fencer:      cfg.Fencer,
+		metrics:     cfg.Metrics,
+		promotions:  make(map[string]*Promotion),
 	}, nil
 }
 
 // Promote initiates a region promotion.
-func (m *Manager) Promote(ctx context.Context, jobID, targetRegion, idempotencyKey string, expectedVersion int64) (*Promotion, error) {
+func (m *Manager) Promote(ctx context.Context, jobID, targetRegion, idempotencyKey string, expectedVersion int64) (promotion *Promotion, err error) {
+	startedAt := time.Now()
+	metricsStarted := false
+	defer func() {
+		if !metricsStarted || m.metrics == nil {
+			return
+		}
+		outcome := "success"
+		if err != nil {
+			outcome = "failure"
+		}
+		m.metrics.ObservePromotion(targetRegion, outcome, time.Since(startedAt))
+	}()
 	if jobID == "" || targetRegion == "" || len(idempotencyKey) < 16 || len(idempotencyKey) > 128 || expectedVersion < 0 {
 		return nil, ErrInvalidRequest
 	}
@@ -290,7 +340,9 @@ func (m *Manager) Promote(ctx context.Context, jobID, targetRegion, idempotencyK
 
 	// Create promotion
 	previousRegion := m.cfg.CurrentRegion
-	promotion := NewPromotion(jobID, previousRegion, targetRegion, idempotencyKey, currentEpoch)
+	promotion = NewPromotion(jobID, previousRegion, targetRegion, idempotencyKey, currentEpoch)
+
+	metricsStarted = true
 
 	// Track in memory
 	m.mu.Lock()
@@ -306,6 +358,17 @@ func (m *Manager) Promote(ctx context.Context, jobID, targetRegion, idempotencyK
 		return nil, fmt.Errorf("transition to epoch bumped: %w", err)
 	}
 
+	// Fence the current writer before allocating the next epoch. The PostgreSQL
+	// assigner persists the increment itself, so fencing after Assign would
+	// incorrectly reject the promotion as stale.
+	if m.fencer != nil {
+		if err := m.fencer.Fence(ctx, jobID, currentEpoch); err != nil {
+			promotion.TransitionTo(StatePromotionFailed, err.Error())
+			_ = m.store.Update(ctx, promotion)
+			return nil, fmt.Errorf("fence previous epoch: %w", err)
+		}
+	}
+
 	// Assign new epoch
 	newEpoch, err := m.assigner.Assign(ctx, jobID)
 	if err != nil {
@@ -314,13 +377,6 @@ func (m *Manager) Promote(ctx context.Context, jobID, targetRegion, idempotencyK
 		return nil, fmt.Errorf("assign epoch: %w", err)
 	}
 	promotion.SetEpoch(newEpoch)
-	if m.fencer != nil {
-		if err := m.fencer.Fence(ctx, jobID, currentEpoch); err != nil {
-			promotion.TransitionTo(StatePromotionFailed, err.Error())
-			_ = m.store.Update(ctx, promotion)
-			return nil, fmt.Errorf("fence previous epoch: %w", err)
-		}
-	}
 
 	// Transition to epoch written
 	if err := promotion.TransitionTo(StateEpochWritten, ""); err != nil {
@@ -355,6 +411,14 @@ func (m *Manager) Promote(ctx context.Context, jobID, targetRegion, idempotencyK
 	// Transition to capability confirmed
 	if err := promotion.TransitionTo(StateCapabilityConfirmed, ""); err != nil {
 		return nil, fmt.Errorf("transition to capability confirmed: %w", err)
+	}
+
+	if m.recovery != nil {
+		if err := m.recovery.Recover(ctx, jobID, newEpoch, promotion.ID); err != nil {
+			promotion.TransitionTo(StatePromotionFailed, err.Error())
+			_ = m.store.Update(ctx, promotion)
+			return nil, fmt.Errorf("recover promoted job: %w", err)
+		}
 	}
 
 	// Transition to failover complete

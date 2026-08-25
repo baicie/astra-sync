@@ -19,6 +19,7 @@ COPY control-plane/job ../job
 COPY control-plane/connection ../connection
 COPY control-plane/auth ../auth
 COPY control-plane/catalog ../catalog
+COPY control-plane/replication ../replication
 COPY control-plane/api-server ./
 
 # Build

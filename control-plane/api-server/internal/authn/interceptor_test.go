@@ -35,6 +35,7 @@ func TestRegistryCoversEveryPublicMethodExactly(t *testing.T) {
 		controlv1.RegionTopologyService_ServiceDesc,
 		controlv1.ReplicationService_ServiceDesc,
 		controlv1.RegionPromotionService_ServiceDesc,
+		controlv1.RegionRecoveryService_ServiceDesc,
 	); err != nil {
 		t.Fatalf("validate public method policy registry: %v", err)
 	}
@@ -53,6 +54,7 @@ func TestRegistryCoversCrossRegionUnaryMethods(t *testing.T) {
 		controlv1.RegionTopologyService_ServiceDesc,
 		controlv1.ReplicationService_ServiceDesc,
 		controlv1.RegionPromotionService_ServiceDesc,
+		controlv1.RegionRecoveryService_ServiceDesc,
 	); err != nil {
 		t.Fatalf("validate cross-region services: %v", err)
 	}

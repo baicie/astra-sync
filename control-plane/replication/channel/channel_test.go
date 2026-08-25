@@ -3,10 +3,16 @@ package channel
 import (
 	"context"
 	"errors"
+	"net"
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
+
+	"io.astrasync/control-plane/replication/metrics"
 )
 
 func TestConfig_Defaults(t *testing.T) {
@@ -74,6 +80,57 @@ func TestNewClient_WithPeerEndpoint(t *testing.T) {
 	}
 }
 
+func TestClient_ConnectWaitsForPeer(t *testing.T) {
+	logger := zap.NewNop()
+	client, err := NewClient(context.Background(), logger, "us-east-1", nil,
+		WithPeerEndpoint("127.0.0.1:1"),
+	)
+	if err != nil {
+		t.Fatalf("create client: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	t.Cleanup(cancel)
+	if err := client.Connect(ctx); err == nil {
+		t.Fatal("Connect() succeeded for an unavailable peer")
+	}
+	if client.IsConnected() {
+		t.Fatal("client reported connected after failed dial")
+	}
+}
+
+func TestClient_ConnectsToListeningPeer(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	grpcServer := grpc.NewServer()
+	serveDone := make(chan struct{})
+	go func() {
+		defer close(serveDone)
+		_ = grpcServer.Serve(listener)
+	}()
+	t.Cleanup(func() {
+		grpcServer.Stop()
+		_ = listener.Close()
+		<-serveDone
+	})
+	client, err := NewClient(context.Background(), zap.NewNop(), "us-east-1", nil,
+		WithPeerEndpoint(listener.Addr().String()),
+	)
+	if err != nil {
+		t.Fatalf("create client: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	t.Cleanup(cancel)
+	if err := client.Connect(ctx); err != nil {
+		t.Fatalf("Connect() failed: %v", err)
+	}
+	if !client.IsConnected() {
+		t.Fatal("client did not report connected after successful dial")
+	}
+}
+
 func TestClient_Close(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
 	handler := EventHandlerFunc(func(ctx context.Context, event *Event) error { return nil })
@@ -91,6 +148,37 @@ func TestClient_Close(t *testing.T) {
 
 	if err := client.Close(); err != nil {
 		t.Error("second close should not error")
+	}
+}
+
+type failingEventSender struct{}
+
+func (failingEventSender) SendEvent(context.Context, *Event) error {
+	return errors.New("transport failed")
+}
+
+func TestClient_SendEvent_ObservesFailure(t *testing.T) {
+	logger, _ := zap.NewDevelopment()
+	registry := prometheus.NewRegistry()
+	recorder, err := metrics.NewRecorder(registry)
+	if err != nil {
+		t.Fatalf("create recorder: %v", err)
+	}
+	client, err := NewClient(context.Background(), logger, "us-east-1", nil,
+		WithPeerEndpoint("eu-west-1.astrasync.example:50051"),
+		WithEventSender(failingEventSender{}),
+		WithMetrics(recorder),
+	)
+	if err != nil {
+		t.Fatalf("create client: %v", err)
+	}
+
+	err = client.SendEvent(context.Background(), NewHealthEvent("us-east-1", "eu-west-1", true))
+	if err == nil {
+		t.Fatal("expected transport error")
+	}
+	if got := testutil.ToFloat64(recorder.EventsTotal.WithLabelValues("eu-west-1", "health", "failure")); got != 1 {
+		t.Fatalf("expected one failed event metric, got %v", got)
 	}
 }
 

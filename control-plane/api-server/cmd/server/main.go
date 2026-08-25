@@ -13,12 +13,14 @@ import (
 	"net/netip"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
@@ -40,6 +42,10 @@ import (
 	"io.astrasync/control-plane/connection"
 	connectionpostgres "io.astrasync/control-plane/connection/postgres"
 	jobpostgres "io.astrasync/control-plane/job/postgres"
+	replicationadapters "io.astrasync/control-plane/replication/adapters"
+	replicationmetrics "io.astrasync/control-plane/replication/metrics"
+	replicationobjectstore "io.astrasync/control-plane/replication/objectstore"
+	replicationruntime "io.astrasync/control-plane/replication/runtime"
 )
 
 const shutdownTimeout = 10 * time.Second
@@ -78,6 +84,10 @@ type config struct {
 	regionRole                 string
 	peerRegion                 string
 	peerEndpoint               string
+	replicationRuntimeEnabled  bool
+	replicationObjectStoreRoot string
+	replicationWALPrefix       string
+	replicationWALResumeFrom   int64
 }
 
 func main() {
@@ -91,11 +101,16 @@ func main() {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	if _, err := metricsServer(ctx, logger, configuration.metricsListen); err != nil {
+	multiRegionMetrics, err := replicationmetrics.NewBundle()
+	if err != nil {
+		logger.Error("multi-region metrics failed to initialize", "error", err.Error())
+		os.Exit(1)
+	}
+	if _, err := metricsServer(ctx, logger, configuration.metricsListen, multiRegionMetrics.Registry); err != nil {
 		logger.Error("metrics listener failed to start", "error", err.Error())
 		os.Exit(1)
 	}
-	if err := run(ctx, configuration); err != nil {
+	if err := run(ctx, configuration, multiRegionMetrics); err != nil {
 		logger.Error("api-server terminated with error", "error", err.Error())
 		os.Exit(1)
 	}
@@ -221,6 +236,24 @@ func loadConfig(getenv func(string) string) (config, error) {
 	if regionRole != "primary" && regionRole != "standby" && regionRole != "secondary" {
 		return config{}, fmt.Errorf("ASTRA_ROLE must be primary, standby, or secondary")
 	}
+	peerRegion := strings.TrimSpace(getenv("ASTRA_PEER_REGION"))
+	peerEndpoint := strings.TrimSpace(getenv("ASTRA_PEER_ENDPOINT"))
+	replicationRuntimeEnabled, err := booleanSetting(getenv("ASTRA_REPLICATION_RUNTIME_ENABLED"), "ASTRA_REPLICATION_RUNTIME_ENABLED", false)
+	if err != nil {
+		return config{}, err
+	}
+	objectStoreRoot := strings.TrimSpace(getenv("ASTRA_REPLICATION_OBJECT_STORE_ROOT"))
+	walPrefix := strings.Trim(strings.TrimSpace(getenv("ASTRA_REPLICATION_WAL_PREFIX")), "/")
+	walResumeValue := valueOrDefault(getenv("ASTRA_REPLICATION_WAL_RESUME_FROM"), "0")
+	walResumeFrom, err := strconv.ParseInt(walResumeValue, 10, 64)
+	if err != nil || walResumeFrom < 0 {
+		return config{}, fmt.Errorf("ASTRA_REPLICATION_WAL_RESUME_FROM must be a non-negative integer")
+	}
+	if replicationRuntimeEnabled {
+		if peerRegion == "" || peerEndpoint == "" || objectStoreRoot == "" || walPrefix == "" {
+			return config{}, fmt.Errorf("replication runtime requires ASTRA_PEER_REGION, ASTRA_PEER_ENDPOINT, ASTRA_REPLICATION_OBJECT_STORE_ROOT, and ASTRA_REPLICATION_WAL_PREFIX")
+		}
+	}
 	return config{
 		databaseURL: databaseURL, grpcListen: valueOrDefault(getenv("GRPC_LISTEN_ADDRESS"), ":50051"),
 		grpcEndpoint:  valueOrDefault(getenv("GRPC_GATEWAY_ENDPOINT"), "127.0.0.1:50051"),
@@ -249,10 +282,17 @@ func loadConfig(getenv func(string) string) (config, error) {
 		regionRole:                 regionRole,
 		peerRegion:                 strings.TrimSpace(getenv("ASTRA_PEER_REGION")),
 		peerEndpoint:               strings.TrimSpace(getenv("ASTRA_PEER_ENDPOINT")),
+		replicationRuntimeEnabled:  replicationRuntimeEnabled,
+		replicationObjectStoreRoot: objectStoreRoot,
+		replicationWALPrefix:       walPrefix,
+		replicationWALResumeFrom:   walResumeFrom,
 	}, nil
 }
 
-func run(ctx context.Context, configuration config) error {
+func run(ctx context.Context, configuration config, multiRegionMetrics *replicationmetrics.Bundle) error {
+	if multiRegionMetrics == nil || multiRegionMetrics.Recorder == nil {
+		return fmt.Errorf("multi-region metrics bundle is required")
+	}
 	jobRepository, err := jobpostgres.Open(ctx, configuration.databaseURL)
 	if err != nil {
 		return err
@@ -320,6 +360,7 @@ func run(ctx context.Context, configuration config) error {
 		controlv1.RegionTopologyService_ServiceDesc,
 		controlv1.ReplicationService_ServiceDesc,
 		controlv1.RegionPromotionService_ServiceDesc,
+		controlv1.RegionRecoveryService_ServiceDesc,
 	); err != nil {
 		return fmt.Errorf("validate API authorization registry: %w", err)
 	}
@@ -417,7 +458,81 @@ func run(ctx context.Context, configuration config) error {
 			APIServerEndpoint: configuration.peerEndpoint,
 		})
 	}
-	replicationService := replication.NewService(regions, nil)
+	postgresStore, err := replicationadapters.NewPostgreSQLStore(jobRepository.DB())
+	if err != nil {
+		return fmt.Errorf("create replication PostgreSQL adapter: %w", err)
+	}
+	if err := postgresStore.Migrate(ctx); err != nil {
+		return err
+	}
+	replicationService := replication.NewService(regions, nil,
+		replication.WithMetrics(multiRegionMetrics.Recorder),
+		replication.WithCheckpointDeduplicator(postgresStore),
+	)
+	var replicationRuntime *replicationruntime.Runtime
+	if configuration.replicationRuntimeEnabled {
+		store, err := replicationobjectstore.NewFileStore(configuration.replicationObjectStoreRoot)
+		if err != nil {
+			return fmt.Errorf("create replication object store: %w", err)
+		}
+		eventBridge, err := replication.NewEventHandlerBridge(replicationService)
+		if err != nil {
+			return fmt.Errorf("create replication event handler: %w", err)
+		}
+		walReader, err := replicationadapters.NewWALReader(ctx, store, zap.NewNop(), configuration.region, configuration.replicationWALPrefix, configuration.replicationWALResumeFrom)
+		if err != nil {
+			return fmt.Errorf("create replication WAL reader: %w", err)
+		}
+		stateRestorer, err := replicationadapters.NewFileStateRestorer(store)
+		if err != nil {
+			return fmt.Errorf("create replication state restorer: %w", err)
+		}
+		auditor, err := replicationadapters.NewZapAuditLogger(zap.NewNop())
+		if err != nil {
+			return fmt.Errorf("create replication audit logger: %w", err)
+		}
+		remoteRecovery := replication.NewLazyRemoteRecoveryClient(func() *grpc.ClientConn {
+			if replicationRuntime == nil {
+				return nil
+			}
+			return replicationRuntime.Connection()
+		})
+		replicationRuntime, err = replicationruntime.New(zap.NewNop(), replicationruntime.Config{
+			Region: configuration.region, PeerRegion: configuration.peerRegion, PeerEndpoint: configuration.peerEndpoint,
+			Metrics: multiRegionMetrics, ReplicationResumeFrom: configuration.replicationWALResumeFrom,
+			ReplicatorConfig: replicationruntime.ReplicatorConfig{BatchSize: 128, PollInterval: time.Second, RetryInitial: 100 * time.Millisecond, RetryMax: 5 * time.Second},
+			EnableTLS:        configuration.tlsCertificateFile != "",
+			CACertPath:       configuration.tlsCertificateFile, ClientCertPath: configuration.tlsCertificateFile,
+			ClientKeyPath: configuration.tlsPrivateKeyFile, ServerName: configuration.tlsServerName,
+		}, replicationruntime.Dependencies{
+			EventHandler: eventBridge, EventSenderFactory: replication.EventSenderFactory{}, EventEncoder: replication.NewCheckpointEventEncoder(configuration.peerRegion),
+			PromotionStore: postgresStore, EpochAssigner: postgresStore, JobReader: postgresStore, JobWriter: postgresStore,
+			ProgressStore: postgresStore,
+			Fencer:        postgresStore, Topology: configuredReplicationTopology{current: configuration.region, standby: configuration.peerRegion}, RemoteRecovery: remoteRecovery,
+			WALEntryReader: walReader, ObjectStorage: store, ManifestParser: replicationadapters.JSONManifestParser{},
+			Validator: replicationadapters.CheckpointValidator{}, StateRestorer: stateRestorer, Auditor: auditor,
+		})
+		if err != nil {
+			return fmt.Errorf("create replication runtime: %w", err)
+		}
+		backend, err := replication.NewPromotionManagerBackend(replicationRuntime.Promotion())
+		if err != nil {
+			_ = replicationRuntime.Close()
+			return fmt.Errorf("create promotion backend: %w", err)
+		}
+		replicationService.SetPromotionBackend(backend)
+		recoveryBackend, err := replication.NewRecoveryManagerBackend(replicationRuntime.Recovery())
+		if err != nil {
+			_ = replicationRuntime.Close()
+			return fmt.Errorf("create recovery backend: %w", err)
+		}
+		replicationService.SetRecoveryBackend(recoveryBackend)
+		if err := replicationRuntime.Start(ctx); err != nil {
+			_ = replicationRuntime.Close()
+			return fmt.Errorf("start replication runtime: %w", err)
+		}
+		defer replicationRuntime.Close()
+	}
 	trustedProxyPrefixes, err := loadTrustedProxyPrefixes(configuration)
 	if err != nil {
 		return fmt.Errorf("configure trusted-proxy boundary: %w", err)
@@ -453,6 +568,7 @@ func run(ctx context.Context, configuration config) error {
 	controlv1.RegisterRegionTopologyServiceServer(grpcServer, replicationService)
 	controlv1.RegisterReplicationServiceServer(grpcServer, replicationService)
 	controlv1.RegisterRegionPromotionServiceServer(grpcServer, replicationService)
+	controlv1.RegisterRegionRecoveryServiceServer(grpcServer, replicationService)
 	if configuration.environment != "production" {
 		reflection.Register(grpcServer)
 	}
@@ -472,6 +588,7 @@ func run(ctx context.Context, configuration config) error {
 		"RegionTopologyService":   controlv1.RegisterRegionTopologyServiceHandlerFromEndpoint,
 		"ReplicationService":      controlv1.RegisterReplicationServiceHandlerFromEndpoint,
 		"RegionPromotionService":  controlv1.RegisterRegionPromotionServiceHandlerFromEndpoint,
+		"RegionRecoveryService":   controlv1.RegisterRegionRecoveryServiceHandlerFromEndpoint,
 	} {
 		if err := register(ctx, gateway, configuration.grpcEndpoint, dialOptions); err != nil {
 			grpcListener.Close()
@@ -493,7 +610,13 @@ func run(ctx context.Context, configuration config) error {
 					}
 				}
 				_, err := catalogRepository.Current(ctx, configuration.executionProfile)
-				return err
+				if err != nil {
+					return err
+				}
+				if configuration.replicationRuntimeEnabled && (replicationRuntime == nil || !replicationRuntime.Ready()) {
+					return errors.New("replication runtime is not ready")
+				}
+				return nil
 			},
 		),
 		ReadHeaderTimeout: 5 * time.Second,

@@ -21,6 +21,9 @@ service RegionTopologyService {
 service ReplicationService {
   // StreamCheckpoints streams checkpoint replication events from primary to secondary.
   rpc StreamCheckpoints(StreamCheckpointsRequest) returns (stream CheckpointEvent);
+  // PushCheckpoint delivers one checkpoint event from a primary to a secondary.
+  // The caller may retry the same sequence; the receiver acknowledges the sequence.
+  rpc PushCheckpoint(PushCheckpointRequest) returns (PushCheckpointResponse);
   // ReportReplicationStatus reports replication lag and health to the primary region.
   rpc ReportReplicationStatus(ReportReplicationStatusRequest) returns (ReportReplicationStatusResponse);
 }
@@ -128,6 +131,22 @@ message CheckpointEvent {
   bool is_gap_marker = 3;
 }
 
+// PushCheckpointRequest carries one checkpoint event to the peer region.
+message PushCheckpointRequest {
+  // The checkpoint event to publish.
+  CheckpointEvent event = 1;
+  // Region that initiated the push.
+  string source_region = 2;
+  // Region that must accept the event.
+  string target_region = 3;
+}
+
+// PushCheckpointResponse acknowledges the accepted checkpoint sequence.
+message PushCheckpointResponse {
+  // The WAL sequence accepted by the receiver.
+  int64 acknowledged_sequence = 1;
+}
+
 // CheckpointEventType defines the type of checkpoint event.
 enum CheckpointEventType {
   CHECKPOINT_EVENT_TYPE_UNSPECIFIED = 0;
@@ -171,6 +190,43 @@ service RegionPromotionService {
   rpc PromoteRegion(PromoteRegionRequest) returns (PromoteRegionResponse);
   // GetPromotionStatus returns the current promotion status for a job.
   rpc GetPromotionStatus(GetPromotionStatusRequest) returns (PromotionStatus);
+}
+
+// RegionRecoveryService performs checkpoint-coupled recovery after promotion.
+service RegionRecoveryService {
+  // RecoverForPromotion restores a promoted job on the target region.
+  // The promotion ID makes retries idempotent and prevents concurrent recovery.
+  rpc RecoverForPromotion(RecoverForPromotionRequest) returns (RecoverForPromotionResponse);
+}
+
+// RecoverForPromotionRequest requests recovery for a completed epoch transition.
+message RecoverForPromotionRequest {
+  // Job to recover.
+  string job_id = 1;
+  // Region that initiated the promotion.
+  string source_region = 2;
+  // Region that must perform recovery.
+  string target_region = 3;
+  // New fenced epoch assigned by promotion.
+  int64 new_epoch = 4;
+  // Durable promotion identifier used for idempotency.
+  string promotion_id = 5;
+  // Idempotency key supplied by the operator.
+  string idempotency_key = 6;
+}
+
+// RecoverForPromotionResponse reports checkpoint-coupled recovery progress.
+message RecoverForPromotionResponse {
+  // Job that was recovered.
+  string job_id = 1;
+  // Promotion identifier associated with recovery.
+  string promotion_id = 2;
+  // Recovery state represented as a stable string.
+  string state = 3;
+  // Checkpoint sequence restored by the target region.
+  int64 checkpoint_sequence = 4;
+  // Epoch restored by the target region.
+  int64 recovered_epoch = 5;
 }
 
 // PromoteRegionRequest is sent by the operator to promote a standby region.

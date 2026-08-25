@@ -99,6 +99,32 @@ func request_ReplicationService_StreamCheckpoints_0(ctx context.Context, marshal
 
 }
 
+func request_ReplicationService_PushCheckpoint_0(ctx context.Context, marshaler runtime.Marshaler, client ReplicationServiceClient, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
+	var protoReq PushCheckpointRequest
+	var metadata runtime.ServerMetadata
+
+	if err := marshaler.NewDecoder(req.Body).Decode(&protoReq); err != nil && err != io.EOF {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
+	}
+
+	msg, err := client.PushCheckpoint(ctx, &protoReq, grpc.Header(&metadata.HeaderMD), grpc.Trailer(&metadata.TrailerMD))
+	return msg, metadata, err
+
+}
+
+func local_request_ReplicationService_PushCheckpoint_0(ctx context.Context, marshaler runtime.Marshaler, server ReplicationServiceServer, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
+	var protoReq PushCheckpointRequest
+	var metadata runtime.ServerMetadata
+
+	if err := marshaler.NewDecoder(req.Body).Decode(&protoReq); err != nil && err != io.EOF {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
+	}
+
+	msg, err := server.PushCheckpoint(ctx, &protoReq)
+	return msg, metadata, err
+
+}
+
 func request_ReplicationService_ReportReplicationStatus_0(ctx context.Context, marshaler runtime.Marshaler, client ReplicationServiceClient, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
 	var protoReq ReportReplicationStatusRequest
 	var metadata runtime.ServerMetadata
@@ -177,6 +203,32 @@ func local_request_RegionPromotionService_GetPromotionStatus_0(ctx context.Conte
 
 }
 
+func request_RegionRecoveryService_RecoverForPromotion_0(ctx context.Context, marshaler runtime.Marshaler, client RegionRecoveryServiceClient, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
+	var protoReq RecoverForPromotionRequest
+	var metadata runtime.ServerMetadata
+
+	if err := marshaler.NewDecoder(req.Body).Decode(&protoReq); err != nil && err != io.EOF {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
+	}
+
+	msg, err := client.RecoverForPromotion(ctx, &protoReq, grpc.Header(&metadata.HeaderMD), grpc.Trailer(&metadata.TrailerMD))
+	return msg, metadata, err
+
+}
+
+func local_request_RegionRecoveryService_RecoverForPromotion_0(ctx context.Context, marshaler runtime.Marshaler, server RegionRecoveryServiceServer, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
+	var protoReq RecoverForPromotionRequest
+	var metadata runtime.ServerMetadata
+
+	if err := marshaler.NewDecoder(req.Body).Decode(&protoReq); err != nil && err != io.EOF {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
+	}
+
+	msg, err := server.RecoverForPromotion(ctx, &protoReq)
+	return msg, metadata, err
+
+}
+
 // RegisterRegionTopologyServiceHandlerServer registers the http handlers for service RegionTopologyService to "mux".
 // UnaryRPC     :call RegionTopologyServiceServer directly.
 // StreamingRPC :currently unsupported pending https://github.com/grpc/grpc-go/issues/906.
@@ -229,6 +281,31 @@ func RegisterReplicationServiceHandlerServer(ctx context.Context, mux *runtime.S
 		_, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
 		runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 		return
+	})
+
+	mux.Handle("POST", pattern_ReplicationService_PushCheckpoint_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+		ctx, cancel := context.WithCancel(req.Context())
+		defer cancel()
+		var stream runtime.ServerTransportStream
+		ctx = grpc.NewContextWithServerTransportStream(ctx, &stream)
+		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
+		var err error
+		var annotatedContext context.Context
+		annotatedContext, err = runtime.AnnotateIncomingContext(ctx, mux, req, "/astra.control.v1.ReplicationService/PushCheckpoint", runtime.WithHTTPPathPattern("/astra.control.v1.ReplicationService/PushCheckpoint"))
+		if err != nil {
+			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		resp, md, err := local_request_ReplicationService_PushCheckpoint_0(annotatedContext, inboundMarshaler, server, req, pathParams)
+		md.HeaderMD, md.TrailerMD = metadata.Join(md.HeaderMD, stream.Header()), metadata.Join(md.TrailerMD, stream.Trailer())
+		annotatedContext = runtime.NewServerMetadataContext(annotatedContext, md)
+		if err != nil {
+			runtime.HTTPError(annotatedContext, mux, outboundMarshaler, w, req, err)
+			return
+		}
+
+		forward_ReplicationService_PushCheckpoint_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
+
 	})
 
 	mux.Handle("POST", pattern_ReplicationService_ReportReplicationStatus_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
@@ -312,6 +389,40 @@ func RegisterRegionPromotionServiceHandlerServer(ctx context.Context, mux *runti
 		}
 
 		forward_RegionPromotionService_GetPromotionStatus_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
+
+	})
+
+	return nil
+}
+
+// RegisterRegionRecoveryServiceHandlerServer registers the http handlers for service RegionRecoveryService to "mux".
+// UnaryRPC     :call RegionRecoveryServiceServer directly.
+// StreamingRPC :currently unsupported pending https://github.com/grpc/grpc-go/issues/906.
+// Note that using this registration option will cause many gRPC library features to stop working. Consider using RegisterRegionRecoveryServiceHandlerFromEndpoint instead.
+func RegisterRegionRecoveryServiceHandlerServer(ctx context.Context, mux *runtime.ServeMux, server RegionRecoveryServiceServer) error {
+
+	mux.Handle("POST", pattern_RegionRecoveryService_RecoverForPromotion_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+		ctx, cancel := context.WithCancel(req.Context())
+		defer cancel()
+		var stream runtime.ServerTransportStream
+		ctx = grpc.NewContextWithServerTransportStream(ctx, &stream)
+		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
+		var err error
+		var annotatedContext context.Context
+		annotatedContext, err = runtime.AnnotateIncomingContext(ctx, mux, req, "/astra.control.v1.RegionRecoveryService/RecoverForPromotion", runtime.WithHTTPPathPattern("/astra.control.v1.RegionRecoveryService/RecoverForPromotion"))
+		if err != nil {
+			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		resp, md, err := local_request_RegionRecoveryService_RecoverForPromotion_0(annotatedContext, inboundMarshaler, server, req, pathParams)
+		md.HeaderMD, md.TrailerMD = metadata.Join(md.HeaderMD, stream.Header()), metadata.Join(md.TrailerMD, stream.Trailer())
+		annotatedContext = runtime.NewServerMetadataContext(annotatedContext, md)
+		if err != nil {
+			runtime.HTTPError(annotatedContext, mux, outboundMarshaler, w, req, err)
+			return
+		}
+
+		forward_RegionRecoveryService_RecoverForPromotion_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
 
 	})
 
@@ -475,6 +586,28 @@ func RegisterReplicationServiceHandlerClient(ctx context.Context, mux *runtime.S
 
 	})
 
+	mux.Handle("POST", pattern_ReplicationService_PushCheckpoint_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+		ctx, cancel := context.WithCancel(req.Context())
+		defer cancel()
+		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
+		var err error
+		var annotatedContext context.Context
+		annotatedContext, err = runtime.AnnotateContext(ctx, mux, req, "/astra.control.v1.ReplicationService/PushCheckpoint", runtime.WithHTTPPathPattern("/astra.control.v1.ReplicationService/PushCheckpoint"))
+		if err != nil {
+			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		resp, md, err := request_ReplicationService_PushCheckpoint_0(annotatedContext, inboundMarshaler, client, req, pathParams)
+		annotatedContext = runtime.NewServerMetadataContext(annotatedContext, md)
+		if err != nil {
+			runtime.HTTPError(annotatedContext, mux, outboundMarshaler, w, req, err)
+			return
+		}
+
+		forward_ReplicationService_PushCheckpoint_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
+
+	})
+
 	mux.Handle("POST", pattern_ReplicationService_ReportReplicationStatus_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
 		ctx, cancel := context.WithCancel(req.Context())
 		defer cancel()
@@ -503,11 +636,15 @@ func RegisterReplicationServiceHandlerClient(ctx context.Context, mux *runtime.S
 var (
 	pattern_ReplicationService_StreamCheckpoints_0 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1}, []string{"astra.control.v1.ReplicationService", "StreamCheckpoints"}, ""))
 
+	pattern_ReplicationService_PushCheckpoint_0 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1}, []string{"astra.control.v1.ReplicationService", "PushCheckpoint"}, ""))
+
 	pattern_ReplicationService_ReportReplicationStatus_0 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1}, []string{"astra.control.v1.ReplicationService", "ReportReplicationStatus"}, ""))
 )
 
 var (
 	forward_ReplicationService_StreamCheckpoints_0 = runtime.ForwardResponseStream
+
+	forward_ReplicationService_PushCheckpoint_0 = runtime.ForwardResponseMessage
 
 	forward_ReplicationService_ReportReplicationStatus_0 = runtime.ForwardResponseMessage
 )
@@ -607,4 +744,75 @@ var (
 	forward_RegionPromotionService_PromoteRegion_0 = runtime.ForwardResponseMessage
 
 	forward_RegionPromotionService_GetPromotionStatus_0 = runtime.ForwardResponseMessage
+)
+
+// RegisterRegionRecoveryServiceHandlerFromEndpoint is same as RegisterRegionRecoveryServiceHandler but
+// automatically dials to "endpoint" and closes the connection when "ctx" gets done.
+func RegisterRegionRecoveryServiceHandlerFromEndpoint(ctx context.Context, mux *runtime.ServeMux, endpoint string, opts []grpc.DialOption) (err error) {
+	conn, err := grpc.NewClient(endpoint, opts...)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err != nil {
+			if cerr := conn.Close(); cerr != nil {
+				grpclog.Errorf("Failed to close conn to %s: %v", endpoint, cerr)
+			}
+			return
+		}
+		go func() {
+			<-ctx.Done()
+			if cerr := conn.Close(); cerr != nil {
+				grpclog.Errorf("Failed to close conn to %s: %v", endpoint, cerr)
+			}
+		}()
+	}()
+
+	return RegisterRegionRecoveryServiceHandler(ctx, mux, conn)
+}
+
+// RegisterRegionRecoveryServiceHandler registers the http handlers for service RegionRecoveryService to "mux".
+// The handlers forward requests to the grpc endpoint over "conn".
+func RegisterRegionRecoveryServiceHandler(ctx context.Context, mux *runtime.ServeMux, conn *grpc.ClientConn) error {
+	return RegisterRegionRecoveryServiceHandlerClient(ctx, mux, NewRegionRecoveryServiceClient(conn))
+}
+
+// RegisterRegionRecoveryServiceHandlerClient registers the http handlers for service RegionRecoveryService
+// to "mux". The handlers forward requests to the grpc endpoint over the given implementation of "RegionRecoveryServiceClient".
+// Note: the gRPC framework executes interceptors within the gRPC handler. If the passed in "RegionRecoveryServiceClient"
+// doesn't go through the normal gRPC flow (creating a gRPC client etc.) then it will be up to the passed in
+// "RegionRecoveryServiceClient" to call the correct interceptors.
+func RegisterRegionRecoveryServiceHandlerClient(ctx context.Context, mux *runtime.ServeMux, client RegionRecoveryServiceClient) error {
+
+	mux.Handle("POST", pattern_RegionRecoveryService_RecoverForPromotion_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+		ctx, cancel := context.WithCancel(req.Context())
+		defer cancel()
+		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
+		var err error
+		var annotatedContext context.Context
+		annotatedContext, err = runtime.AnnotateContext(ctx, mux, req, "/astra.control.v1.RegionRecoveryService/RecoverForPromotion", runtime.WithHTTPPathPattern("/astra.control.v1.RegionRecoveryService/RecoverForPromotion"))
+		if err != nil {
+			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		resp, md, err := request_RegionRecoveryService_RecoverForPromotion_0(annotatedContext, inboundMarshaler, client, req, pathParams)
+		annotatedContext = runtime.NewServerMetadataContext(annotatedContext, md)
+		if err != nil {
+			runtime.HTTPError(annotatedContext, mux, outboundMarshaler, w, req, err)
+			return
+		}
+
+		forward_RegionRecoveryService_RecoverForPromotion_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
+
+	})
+
+	return nil
+}
+
+var (
+	pattern_RegionRecoveryService_RecoverForPromotion_0 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1}, []string{"astra.control.v1.RegionRecoveryService", "RecoverForPromotion"}, ""))
+)
+
+var (
+	forward_RegionRecoveryService_RecoverForPromotion_0 = runtime.ForwardResponseMessage
 )

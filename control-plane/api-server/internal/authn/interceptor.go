@@ -202,6 +202,9 @@ func NewRegistry() Registry {
 		controlv1.RegionTopologyService_GetRegionTopology_FullMethodName: {
 			Permission: auth.PermissionDiagnosticsRead, SelfScope: true,
 		},
+		controlv1.ReplicationService_PushCheckpoint_FullMethodName: {
+			Permission: auth.PermissionDiagnosticsRead, SelfScope: true,
+		},
 		controlv1.ReplicationService_ReportReplicationStatus_FullMethodName: {
 			Permission: auth.PermissionDiagnosticsRead, SelfScope: true,
 		},
@@ -209,6 +212,9 @@ func NewRegistry() Registry {
 			Permission: auth.PermissionDiagnosticsRead, SelfScope: true,
 		},
 		controlv1.RegionPromotionService_GetPromotionStatus_FullMethodName: {
+			Permission: auth.PermissionDiagnosticsRead, SelfScope: true,
+		},
+		controlv1.RegionRecoveryService_RecoverForPromotion_FullMethodName: {
 			Permission: auth.PermissionDiagnosticsRead, SelfScope: true,
 		},
 	}}

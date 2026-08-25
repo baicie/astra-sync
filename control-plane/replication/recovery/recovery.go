@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"go.uber.org/zap"
+
+	"io.astrasync/control-plane/replication/metrics"
 )
 
 // Common errors for recovery operations.
@@ -203,14 +205,16 @@ type AuditLogger interface {
 
 // Manager manages checkpoint-coupled recovery.
 type Manager struct {
-	cfg       Config
-	logger    *zap.Logger
-	walReader WALEntryReader
-	storage   ObjectStorage
-	parser    ManifestParser
-	validator Validator
-	restorer  StateRestorer
-	auditor   AuditLogger
+	cfg          Config
+	logger       *zap.Logger
+	walReader    WALEntryReader
+	storage      ObjectStorage
+	parser       ManifestParser
+	validator    Validator
+	restorer     StateRestorer
+	auditor      AuditLogger
+	metrics      *metrics.Recorder
+	targetRegion string
 }
 
 // Config holds the configuration for the recovery manager.
@@ -221,6 +225,8 @@ type Config struct {
 	ValidationTimeout time.Duration
 	// Timeout for restoring state.
 	RestoreTimeout time.Duration
+	Metrics        *metrics.Recorder
+	TargetRegion   string
 }
 
 // Option is a functional option for manager configuration.
@@ -247,6 +253,16 @@ func WithRestoreTimeout(d time.Duration) Option {
 	}
 }
 
+// WithMetrics attaches a multi-region metrics recorder.
+func WithMetrics(recorder *metrics.Recorder) Option {
+	return func(c *Config) { c.Metrics = recorder }
+}
+
+// WithTargetRegion identifies the region recovering the job.
+func WithTargetRegion(region string) Option {
+	return func(c *Config) { c.TargetRegion = region }
+}
+
 // NewManager creates a new recovery manager.
 func NewManager(
 	logger *zap.Logger,
@@ -269,20 +285,37 @@ func NewManager(
 	}
 
 	return &Manager{
-		cfg:       cfg,
-		logger:    logger.With(zap.String("component", "recovery")),
-		walReader: walReader,
-		storage:   storage,
-		parser:    parser,
-		validator: validator,
-		restorer:  restorer,
-		auditor:   auditor,
+		cfg:          cfg,
+		logger:       logger.With(zap.String("component", "recovery")),
+		walReader:    walReader,
+		storage:      storage,
+		parser:       parser,
+		validator:    validator,
+		restorer:     restorer,
+		auditor:      auditor,
+		metrics:      cfg.Metrics,
+		targetRegion: cfg.TargetRegion,
 	}
 }
 
 // Recover performs checkpoint-coupled recovery for a job.
-func (m *Manager) Recover(ctx context.Context, jobID string, newEpoch int64) (*Recovery, error) {
-	recovery := NewRecovery(jobID, newEpoch)
+func (m *Manager) Recover(ctx context.Context, jobID string, newEpoch int64) (recovery *Recovery, err error) {
+	recovery = NewRecovery(jobID, newEpoch)
+	startedAt := time.Now()
+	defer func() {
+		if m.metrics == nil {
+			return
+		}
+		outcome := "success"
+		if err != nil {
+			outcome = "failure"
+		}
+		targetRegion := m.targetRegion
+		if targetRegion == "" {
+			targetRegion = "_unknown"
+		}
+		m.metrics.ObserveRecovery(targetRegion, outcome, time.Since(startedAt))
+	}()
 	fail := func(err error) (*Recovery, error) {
 		_ = recovery.TransitionTo(StateRecoveryFailed, err.Error())
 		if m.auditor != nil {

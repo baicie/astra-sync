@@ -4,7 +4,6 @@ services:
       context: ../../..
       dockerfile: deployment/docker/Dockerfile.compiler-validation
     image: astrasync/compiler-validation:integration
-    container_name: compiler-validation-us-east-1
     environment:
       - APP_ENV=development
       - COMPILER_VALIDATION_PORT=50052
@@ -18,7 +17,6 @@ services:
       context: ../../..
       dockerfile: deployment/docker/Dockerfile.compiler-validation
     image: astrasync/compiler-validation:integration
-    container_name: compiler-validation-us-west-1
     environment:
       - APP_ENV=development
       - COMPILER_VALIDATION_PORT=50052
@@ -33,10 +31,13 @@ services:
       context: ../../..
       dockerfile: deployment/docker/Dockerfile.api
     image: astrasync/api-server:integration
-    container_name: astrasync-us-east-1
     environment:
       - APP_ENV=development
       - DATABASE_URL=postgres://user:pass@postgres-primary:5432/astrasync?sslmode=disable
+      - ASTRA_REPLICATION_RUNTIME_ENABLED=true
+      - ASTRA_REPLICATION_OBJECT_STORE_ROOT=/var/lib/astrasync/replication
+      - ASTRA_REPLICATION_WAL_PREFIX=replication/wal
+      - ASTRA_REPLICATION_WAL_RESUME_FROM=0
       - COMPILER_VALIDATION_ENDPOINT=compiler-validation-primary:50052
       - GRPC_GATEWAY_ENDPOINT=api-server-primary:50051
       - HTTP_LISTEN_ADDRESS=:8080
@@ -50,9 +51,15 @@ services:
       - "8080:8080"
     volumes:
       - ./certs:/certs:ro
+      - ./data/primary:/var/lib/astrasync/replication
     networks:
       - astrasync-primary
       - astrasync-cross-region
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/ready"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
     depends_on:
       postgres-primary:
         condition: service_healthy
@@ -60,8 +67,7 @@ services:
         condition: service_started
 
   postgres-primary:
-    image: postgres:15
-    container_name: postgres-us-east-1
+    image: postgres:16-alpine
     environment:
       - POSTGRES_DB=astrasync
       - POSTGRES_USER=user
@@ -80,10 +86,13 @@ services:
       context: ../../..
       dockerfile: deployment/docker/Dockerfile.api
     image: astrasync/api-server:integration
-    container_name: astrasync-us-west-1
     environment:
       - APP_ENV=development
       - DATABASE_URL=postgres://user:pass@postgres-secondary:5432/astrasync?sslmode=disable
+      - ASTRA_REPLICATION_RUNTIME_ENABLED=true
+      - ASTRA_REPLICATION_OBJECT_STORE_ROOT=/var/lib/astrasync/replication
+      - ASTRA_REPLICATION_WAL_PREFIX=replication/wal
+      - ASTRA_REPLICATION_WAL_RESUME_FROM=0
       - COMPILER_VALIDATION_ENDPOINT=compiler-validation-secondary:50052
       - GRPC_GATEWAY_ENDPOINT=api-server-secondary:50051
       - HTTP_LISTEN_ADDRESS=:8080
@@ -93,13 +102,19 @@ services:
       - ASTRA_PEER_REGION=us-east-1
       - ASTRA_PEER_ENDPOINT=api-server-primary:50051
     ports:
-      - "50061:50051"
+      - "15061:50051"
       - "8081:8080"
     volumes:
       - ./certs:/certs:ro
+      - ./data/secondary:/var/lib/astrasync/replication
     networks:
       - astrasync-secondary
       - astrasync-cross-region
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/ready"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
     depends_on:
       postgres-secondary:
         condition: service_healthy
@@ -107,8 +122,7 @@ services:
         condition: service_started
 
   postgres-secondary:
-    image: postgres:15
-    container_name: postgres-us-west-1
+    image: postgres:16-alpine
     environment:
       - POSTGRES_DB=astrasync
       - POSTGRES_USER=user

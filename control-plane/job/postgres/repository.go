@@ -63,6 +63,14 @@ func (r *Repository) Ping(ctx context.Context) error {
 	return r.db.PingContext(ctx)
 }
 
+// DB exposes the shared database handle to adapters owned by the same process.
+func (r *Repository) DB() *sql.DB {
+	if r == nil {
+		return nil
+	}
+	return r.db
+}
+
 func (r *Repository) Close() error {
 	return r.db.Close()
 }

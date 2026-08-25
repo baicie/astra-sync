@@ -9,7 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"io.astrasync/control-plane/api-server/internal/metrics"
+	"github.com/prometheus/client_golang/prometheus"
+
+	apimetrics "io.astrasync/control-plane/api-server/internal/metrics"
 )
 
 func newComponentLogger(component string, output io.Writer, levelText string) *slog.Logger {
@@ -23,7 +25,7 @@ func newComponentLogger(component string, output io.Writer, levelText string) *s
 // metricsServer hosts the /metrics endpoint on a dedicated port that is
 // independent of the API Server's gRPC and REST listeners. An empty address
 // disables the listener so the Helm monitoring toggle remains fail-closed.
-func metricsServer(ctx context.Context, logger *slog.Logger, listenAddress string) (*http.Server, error) {
+func metricsServer(ctx context.Context, logger *slog.Logger, listenAddress string, gatherer prometheus.Gatherer) (*http.Server, error) {
 	listenAddress = strings.TrimSpace(listenAddress)
 	if listenAddress == "" {
 		return nil, nil
@@ -32,8 +34,12 @@ func metricsServer(ctx context.Context, logger *slog.Logger, listenAddress strin
 	if err != nil {
 		return nil, err
 	}
+	handler := apimetrics.Handler()
+	if gatherer != nil {
+		handler = apimetrics.HandlerFor(prometheus.Gatherers{prometheus.DefaultGatherer, gatherer})
+	}
 	server := &http.Server{
-		Handler:           metrics.Handler(),
+		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	go func() {

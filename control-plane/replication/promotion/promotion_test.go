@@ -6,7 +6,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"go.uber.org/zap"
+	"io.astrasync/control-plane/replication/metrics"
 )
 
 func TestNewPromotion(t *testing.T) {
@@ -218,6 +221,58 @@ func TestManager_Promote(t *testing.T) {
 	}
 	if promotion.NewEpoch != 43 {
 		t.Errorf("expected new epoch 43, got %d", promotion.NewEpoch)
+	}
+}
+
+func TestManager_Promote_ObservesMetrics(t *testing.T) {
+	logger, _ := zap.NewDevelopment()
+	registry := prometheus.NewRegistry()
+	recorder, err := metrics.NewRecorder(registry)
+	if err != nil {
+		t.Fatalf("create recorder: %v", err)
+	}
+	store := newMockPromotionStore()
+	assigner := &mockEpochAssigner{epoch: 42}
+	jobReader := &mockJobReader{epoch: 42}
+	jobWriter := &mockJobWriter{}
+	revalidator := &mockCapabilityRevalidator{}
+
+	m, err := NewManager(logger, store, assigner, jobReader, jobWriter, WithMetrics(recorder), WithCurrentRegion("us-east-1"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	m.revalidator = revalidator
+	if _, err := m.Promote(context.Background(), "job-1", "eu-west-1", "key-1234567890123456", 42); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if got := testutil.ToFloat64(recorder.PromotionsTotal.WithLabelValues("eu-west-1", "success")); got != 1 {
+		t.Fatalf("expected one success metric, got %v", got)
+	}
+}
+
+func TestManager_Promote_ObservesFailureMetrics(t *testing.T) {
+	logger, _ := zap.NewDevelopment()
+	registry := prometheus.NewRegistry()
+	recorder, err := metrics.NewRecorder(registry)
+	if err != nil {
+		t.Fatalf("create recorder: %v", err)
+	}
+	store := newMockPromotionStore()
+	assigner := &mockEpochAssigner{epoch: 42}
+	jobReader := &mockJobReader{epoch: 42}
+	jobWriter := &mockJobWriter{}
+
+	m, err := NewManager(logger, store, assigner, jobReader, jobWriter, WithMetrics(recorder), WithCurrentRegion("us-east-1"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, err := m.Promote(context.Background(), "job-1", "eu-west-1", "key-1234567890123456", 42); err == nil {
+		t.Fatal("expected capability failure")
+	}
+
+	if got := testutil.ToFloat64(recorder.PromotionsTotal.WithLabelValues("eu-west-1", "failure")); got != 1 {
+		t.Fatalf("expected one failure metric, got %v", got)
 	}
 }
 

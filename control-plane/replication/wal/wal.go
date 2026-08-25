@@ -295,6 +295,16 @@ func (w *Writer) resumeSequence(ctx context.Context) error {
 // Append adds a new entry to the WAL. The entry's Sequence, Region, and CRC32C
 // are set by the writer. The caller should set Epoch, CheckpointURI, JobID, and Timestamp.
 func (w *Writer) Append(ctx context.Context, entry *Entry) error {
+	return w.append(ctx, entry, false)
+}
+
+// AppendDurable appends an entry and flushes it before returning successfully.
+// Checkpoint producers use this method when a successful publish is the WAL durability boundary.
+func (w *Writer) AppendDurable(ctx context.Context, entry *Entry) error {
+	return w.append(ctx, entry, true)
+}
+
+func (w *Writer) append(ctx context.Context, entry *Entry, durable bool) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
@@ -319,7 +329,7 @@ func (w *Writer) Append(ctx context.Context, entry *Entry) error {
 	}
 	w.sequence = nextSequence
 	w.pending = append(w.pending, entry)
-	if w.cfg.BatchSize <= 0 || len(w.pending) >= w.cfg.BatchSize {
+	if durable || w.cfg.BatchSize <= 0 || len(w.pending) >= w.cfg.BatchSize {
 		if err := w.flushLocked(ctx); err != nil {
 			return fmt.Errorf("flush WAL: %w", err)
 		}

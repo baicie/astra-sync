@@ -34,6 +34,7 @@ The table separates descriptor availability from sampled runtime data.
 | `apiserver_audit_query_duration_seconds` | api-server | F4 descriptor + `/metrics` | emitted by F7 authorized audit-query path |
 | remaining `apiserver_*` listed below | api-server | F4 descriptor + `/metrics` | pending |
 | `scheduler_*` listed below | scheduler | F4 descriptor + `/metrics` | assignment, lease-takeover, and reconcile-duration samples emitted by the Scheduler |
+| `astrasync_multi_region_promotion_*` | control-plane replication | recorder registration; service exposition is embedding-owned | promotion attempt and duration samples emitted when a recorder is injected |
 | `connection_test_total` | connection-test-executor | F4 descriptor + `/metrics` | pending |
 | `console_*` listed below | console | F4 descriptor + `/metrics` | pending |
 | `auth_*` listed below | auth library | descriptor package only | pending |
@@ -51,6 +52,9 @@ Every metric name follows the
 - `_ratio` suffix for ratios in the `[0, 1]` range.
 - No `_gauge` or `_counter` suffix. The metric type is inferred from
   the suffix and the registered handler.
+
+Multi-region replication metrics use the `astrasync_multi_region_` prefix because they are
+owned by the shared control-plane replication package rather than one executable.
 
 Every metric name is prefixed with the component name:
 
@@ -146,6 +150,19 @@ controller-runtime's generic collector.
 
 Future call-site instrumentation can correlate these metrics to audit rows
 through exemplars; that wiring is not present in the current implementation.
+
+## Multi-region promotion metrics
+
+| Metric | Type | Labels | Description |
+|---|---|---|---|
+| `astrasync_multi_region_promotion_total` | counter | `target_region`, `outcome` | Promotion attempts after a promotion record is created; `outcome` is `success` or `failure`. |
+| `astrasync_multi_region_promotion_duration_seconds` | histogram | `target_region` | Duration of promotion attempts after a promotion record is created. |
+| `astrasync_multi_region_event_total` | counter | `peer_region`, `event_type`, `outcome` | Cross-region event delivery attempts. `event_type` is `checkpoint`, `topology`, or `health`; `outcome` is `success` or `failure`. |
+| `astrasync_multi_region_event_duration_seconds` | histogram | `peer_region`, `event_type` | Duration of cross-region event delivery attempts. |
+| `astrasync_multi_region_recovery_total` | counter | `target_region`, `outcome` | Checkpoint recovery attempts. `outcome` is `success` or `failure`; an unset target region is `_unknown`. |
+| `astrasync_multi_region_recovery_duration_seconds` | histogram | `target_region` | Duration of checkpoint recovery attempts. |
+The recorder uses an injected Prometheus registerer so embedding services can expose the
+families from their own endpoint without creating a second listener or global registration.
 
 ## Connection test and Console metrics
 

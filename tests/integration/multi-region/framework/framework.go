@@ -142,11 +142,11 @@ func New(t *testing.T, opts ...Option) *Framework {
 // Bootstrap brings up the multi-region topology.
 func (f *Framework) Bootstrap(ctx context.Context) error {
 	f.mu.Lock()
-	defer f.mu.Unlock()
-
 	if f.ready {
+		f.mu.Unlock()
 		return nil
 	}
+	f.mu.Unlock()
 
 	if _, err := os.Stat(f.cfg.ComposeFile); err != nil {
 		return fmt.Errorf("%w: %v", ErrComposeFileNotFound, err)
@@ -157,7 +157,10 @@ func (f *Framework) Bootstrap(ctx context.Context) error {
 		return fmt.Errorf("create log directory: %w", err)
 	}
 
-	// Start docker-compose
+	// Integration runs own the Compose project and reset its disposable databases.
+	if err := f.runCompose(ctx, "down", "-v", "--remove-orphans"); err != nil {
+		f.logger.Debug("compose cleanup before bootstrap failed", zap.Error(err))
+	}
 	if err := f.runCompose(ctx, "up", "-d", "--wait"); err != nil {
 		return fmt.Errorf("%w: %v", ErrRegionBootstrapFailed, err)
 	}
@@ -175,7 +178,7 @@ func (f *Framework) Bootstrap(ctx context.Context) error {
 	f.regions[f.cfg.SecondaryRegion] = &Region{
 		Name:         f.cfg.SecondaryRegion,
 		Role:         "secondary",
-		APIServerURI: "localhost:50061",
+		APIServerURI: "localhost:15061",
 		PostgresURI:  "postgres://user:pass@localhost:5433/secondary",
 		Network:      "astrasync-secondary",
 		HTTPURI:      "http://localhost:8081",
@@ -187,7 +190,9 @@ func (f *Framework) Bootstrap(ctx context.Context) error {
 		return fmt.Errorf("wait for healthy: %w", err)
 	}
 
+	f.mu.Lock()
 	f.ready = true
+	f.mu.Unlock()
 	return nil
 }
 
@@ -368,7 +373,7 @@ func (f *Framework) runCompose(ctx context.Context, args ...string) error {
 	}
 	composeDir := filepath.Dir(composeFile)
 
-	cmd := exec.CommandContext(ctx, "docker-compose", append([]string{"-f", composeFile}, args...)...)
+	cmd := exec.CommandContext(ctx, "docker", append([]string{"compose", "-f", composeFile}, args...)...)
 	cmd.Dir = composeDir
 
 	output, err := cmd.CombinedOutput()
@@ -390,9 +395,18 @@ func (f *Framework) LogRegionCommand(regionName string, args ...string) error {
 		return fmt.Errorf("region not found: %s", regionName)
 	}
 
-	containerName := fmt.Sprintf("astrasync-%s", regionName)
-	args = append([]string{"exec", containerName}, args...)
+	serviceName := "api-server-primary"
+	if regionName == f.cfg.SecondaryRegion {
+		serviceName = "api-server-secondary"
+	}
+	composeFile, err := filepath.Abs(f.cfg.ComposeFile)
+	if err != nil {
+		return fmt.Errorf("resolve compose file path: %w", err)
+	}
+	composeDir := filepath.Dir(composeFile)
+	args = append([]string{"compose", "-f", composeFile, "exec", serviceName}, args...)
 	cmd := exec.Command("docker", args...)
+	cmd.Dir = composeDir
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("docker exec %s: %v\n%s", strings.Join(args, " "), err, output)
@@ -414,14 +428,102 @@ func (f *Framework) GetRegionLogs(regionName string) (string, error) {
 		return "", fmt.Errorf("region not found: %s", regionName)
 	}
 
-	containerName := fmt.Sprintf("astrasync-%s", regionName)
-	cmd := exec.Command("docker", "logs", containerName)
+	serviceName := "api-server-primary"
+	if regionName == f.cfg.SecondaryRegion {
+		serviceName = "api-server-secondary"
+	}
+	composeFile, err := filepath.Abs(f.cfg.ComposeFile)
+	if err != nil {
+		return "", fmt.Errorf("resolve compose file path: %w", err)
+	}
+	composeDir := filepath.Dir(composeFile)
+	cmd := exec.Command("docker", "compose", "-f", composeFile, "logs", serviceName)
+	cmd.Dir = composeDir
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return "", fmt.Errorf("docker logs %s: %v", containerName, err)
+		return "", fmt.Errorf("docker compose logs %s: %v", serviceName, err)
 	}
 
 	return string(output), nil
+}
+
+// StartRegion starts one API Server service without rebuilding the topology.
+func (f *Framework) StartRegion(ctx context.Context, regionName string) error {
+	return f.runCompose(ctx, "start", f.serviceName(regionName))
+}
+
+// StopRegion stops one API Server service and leaves its persistent state intact.
+func (f *Framework) StopRegion(ctx context.Context, regionName string) error {
+	f.mu.Lock()
+	if conn, ok := f.conns[regionName]; ok {
+		_ = conn.Close()
+		delete(f.conns, regionName)
+	}
+	f.mu.Unlock()
+	return f.runCompose(ctx, "stop", f.serviceName(regionName))
+}
+
+// RestartRegion restarts one API Server service and waits for its HTTP readiness endpoint.
+func (f *Framework) RestartRegion(ctx context.Context, regionName string) error {
+	if err := f.runCompose(ctx, "restart", f.serviceName(regionName)); err != nil {
+		return err
+	}
+	return f.WaitForHTTPReady(ctx, regionName)
+}
+
+// WaitForGRPCReady waits until a region accepts a gRPC connection.
+func (f *Framework) WaitForGRPCReady(ctx context.Context, regionName string) error {
+	return f.WaitForCondition(ctx, f.cfg.BootstrapTimeout, func() (bool, error) {
+		region, ok := f.GetRegion(regionName)
+		if !ok {
+			return false, fmt.Errorf("region not found: %s", regionName)
+		}
+		probeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		defer cancel()
+		conn, err := grpc.DialContext(probeCtx, region.APIServerURI, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithBlock())
+		if err != nil {
+			return false, nil
+		}
+		_ = conn.Close()
+		return true, nil
+	})
+}
+
+// WaitForHTTPReady waits until a region reports ready.
+func (f *Framework) WaitForHTTPReady(ctx context.Context, regionName string) error {
+	return f.WaitForCondition(ctx, f.cfg.BootstrapTimeout, func() (bool, error) {
+		region, ok := f.GetRegion(regionName)
+		if !ok {
+			return false, fmt.Errorf("region not found: %s", regionName)
+		}
+		request, err := http.NewRequestWithContext(ctx, http.MethodGet, region.HTTPURI+"/ready", nil)
+		if err != nil {
+			return false, err
+		}
+		response, err := (&http.Client{Timeout: 2 * time.Second}).Do(request)
+		if err != nil {
+			return false, nil
+		}
+		_ = response.Body.Close()
+		return response.StatusCode == http.StatusOK, nil
+	})
+}
+
+// DisconnectRegions stops the source API service to make delivery unavailable.
+func (f *Framework) DisconnectRegions(ctx context.Context, source, _ string) error {
+	return f.StopRegion(ctx, source)
+}
+
+// ReconnectRegions starts the source API service and waits for readiness.
+func (f *Framework) ReconnectRegions(ctx context.Context, source, _ string) error {
+	return f.StartRegion(ctx, source)
+}
+
+func (f *Framework) serviceName(regionName string) string {
+	if regionName == f.cfg.SecondaryRegion {
+		return "api-server-secondary"
+	}
+	return "api-server-primary"
 }
 
 // PromoteRegion promotes the secondary region.
