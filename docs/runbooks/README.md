@@ -21,6 +21,7 @@ public repository.
 | [audit-retention.md](audit-retention.md) | Monthly partition rollover, partition detach, retention window change. |
 | [backup.md](backup.md) | Daily / weekly snapshot cadence, restore drill, region failover input. |
 | [rollback.md](rollback.md) | Bad release, schema regression, accidental destructive admin action. |
+| [multi-region-disaster-recovery-drill-template.md](multi-region-disaster-recovery-drill-template.md) | Bounded primary outage drill, secondary continuity, and fail-closed promotion/recovery evidence. |
 
 ## How to populate
 

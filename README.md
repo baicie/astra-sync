@@ -222,6 +222,8 @@ constraints.
 - [Phase 6 Platform](./docs/phase6/README.md)
 - [Phase 7 Multi-Region](./docs/phase7/README.md)
 - [Phase 10 Multi-Region Observability Integration](./docs/phase10/README.md)
+- [Phase 11 Cross-Region Disaster Recovery Drills](./docs/phase11/README.md)
+- [Phase 12 CI/CD Pipeline Integration](./docs/phase12/README.md)
 - [CDC Usage and Delivery Boundary](./docs/phase3/01-native-cdc/README.md)
 - [Connector Development Guide](./docs/connector-dev.md)
 - [Deployment Guide](./docs/deployment.md)
@@ -241,6 +243,8 @@ constraints.
 | Phase 8 | Multi-Region Implementation | Complete|
 | Phase 9 | Multi-Region Integration Testing | Complete|
 | Phase 10 | Multi-Region Observability Integration | Complete|
+| Phase 11 | Cross-Region Disaster Recovery Drills | Complete|
+| Phase 12 | CI/CD Pipeline Integration for Multi-Region Tests | Complete|
 
 ## Contributing
 

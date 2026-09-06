@@ -56,3 +56,9 @@ already owned by the API Server process. It does not alter any architecture
 invariant or ADR decision. The existing replication services remain the
 owners of business observations; the test proves that their shared registry
 is exposed by the API Server endpoint.
+
+## Next Delivery
+
+Phase 11 completed the bounded [cross-region disaster recovery drill](../phase11/README.md),
+and Phase 12 completed the [CI pipeline integration](../phase12/README.md)
+for the multi-region acceptance suite.

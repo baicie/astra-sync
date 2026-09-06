@@ -21,11 +21,13 @@ jobs:
     timeout-minutes: 5
     outputs:
       go: ${{ steps.filter.outputs.go }}
+      java: ${{ steps.filter.outputs.java }}
       helm: ${{ steps.filter.outputs.helm }}
       docs: ${{ steps.filter.outputs.docs }}
+      multi_region: ${{ steps.filter.outputs.multi_region }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
 
@@ -45,6 +47,11 @@ jobs:
           else
             echo "go=true" >> "${GITHUB_OUTPUT}"
           fi
+          if git diff --quiet "${base_sha}" HEAD -- engine connectors formats transforms protocol connector-api cli pom.xml; then
+            echo "java=false" >> "${GITHUB_OUTPUT}"
+          else
+            echo "java=true" >> "${GITHUB_OUTPUT}"
+          fi
           if git diff --quiet "${base_sha}" HEAD -- deployment/helm; then
             echo "helm=false" >> "${GITHUB_OUTPUT}"
           else
@@ -55,6 +62,17 @@ jobs:
           else
             echo "docs=true" >> "${GITHUB_OUTPUT}"
           fi
+          if git diff --quiet "${base_sha}" HEAD -- \
+            tests/integration \
+            scripts/run-multi-region-acceptance.py \
+            Makefile \
+            api/protobuf \
+            protocol \
+            deployment/docker; then
+            echo "multi_region=false" >> "${GITHUB_OUTPUT}"
+          else
+            echo "multi_region=true" >> "${GITHUB_OUTPUT}"
+          fi
 
   java:
     name: Java 21 Maven verification
@@ -62,10 +80,10 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Set up Java
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with:
           distribution: temurin
           java-version: '21'
@@ -121,10 +139,10 @@ jobs:
           - console
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Set up Go
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version: '1.26.x'
           cache: true
@@ -177,10 +195,10 @@ jobs:
           --health-retries 10
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Set up Go
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version: '1.26.x'
           cache-dependency-path: |
@@ -257,15 +275,15 @@ jobs:
   multi-region-acceptance:
     name: Multi-region Docker Compose acceptance
     needs: changes
-    if: needs.changes.outputs.go == 'true'
+    if: needs.changes.outputs.go == 'true' || needs.changes.outputs.multi_region == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Set up Go
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version: '1.26.x'
           cache: true
@@ -274,13 +292,29 @@ jobs:
       - name: Run multi-region acceptance
         run: make test-integration-multi-region
 
+      - name: Collect Compose logs
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          log_file="tests/integration/multi-region/test-logs/compose.log"
+          mkdir -p "$(dirname "${log_file}")"
+          if [[ ! -s "${log_file}" ]]; then
+            docker compose -f tests/integration/multi-region/docker-compose.yaml logs --no-color >"${log_file}" 2>&1 || true
+          fi
+
       - name: Upload Compose logs
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: multi-region-compose-logs
           path: tests/integration/multi-region/test-logs
           if-no-files-found: ignore
+
+      - name: Ensure Compose resources are removed
+        if: always()
+        shell: bash
+        run: docker compose -f tests/integration/multi-region/docker-compose.yaml down -v --remove-orphans || true
 
   protocols:
     name: Protocol and YAML validation
@@ -289,22 +323,22 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Set up Java
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with:
           distribution: temurin
           java-version: '21'
 
       - name: Set up Go
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version: '1.26.x'
           cache: false
 
       - name: Set up Buf
-        uses: bufbuild/buf-setup-action@v1
+        uses: bufbuild/buf-setup-action@a47c93e0b1648d5651a065437926377d060baa99 # v1.50.0
         with:
           github_token: ${{ github.token }}
           version: '1.34.0'
@@ -339,7 +373,7 @@ jobs:
 
       - name: Set up Helm
         if: needs.changes.outputs.helm == 'true'
-        uses: azure/setup-helm@v5
+        uses: azure/setup-helm@59b1c81c6280f5abebb1fb1bc585696daa7dfb42 # v5
         with:
           version: v3.15.4
 
@@ -427,10 +461,10 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Set up Go
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version: '1.26.x'
           cache: true
@@ -453,10 +487,10 @@ jobs:
     timeout-minutes: 5
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: '3.12'
 
@@ -503,13 +537,13 @@ jobs:
             tag: astrasync/worker:ci
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       - name: Build image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           file: ${{ matrix.file }}
@@ -522,7 +556,7 @@ jobs:
     timeout-minutes: 5
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
 
@@ -538,6 +572,6 @@ jobs:
           test -f .githooks/commit-msg
 
       - name: Check for accidental secrets
-        uses: gitleaks/gitleaks-action@v3
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
