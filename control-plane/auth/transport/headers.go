@@ -49,6 +49,14 @@ func ClientAddressFromContext(ctx context.Context) (ClientAddress, bool) {
 // is honoured, which avoids surprising proxies that fold response headers into
 // their own state.
 func SecurityHeaders() func(http.Handler) http.Handler {
+	return SecurityHeadersWithHSTSObserver(nil)
+}
+
+// SecurityHeadersWithHSTSObserver returns the security-header middleware and
+// invokes observeHSTS after this middleware adds an HSTS header. The observer
+// is optional and is intended for component-owned metrics; it is never called
+// when an upstream handler supplied the header or when the request is plaintext.
+func SecurityHeadersWithHSTSObserver(observeHSTS func(*http.Request)) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 			if writer.Header().Get(HeaderXContentTypeOptions) == "" {
@@ -59,6 +67,9 @@ func SecurityHeaders() func(http.Handler) http.Handler {
 			}
 			if writer.Header().Get(HeaderStrictTransportSecurity) == "" && requestWarrantsHSTS(request) {
 				writer.Header().Set(HeaderStrictTransportSecurity, ValueStrictTransportSecurity)
+				if observeHSTS != nil {
+					observeHSTS(request)
+				}
 			}
 			next.ServeHTTP(writer, request)
 		})

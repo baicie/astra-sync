@@ -594,7 +594,7 @@ func run(ctx context.Context, configuration config, multiRegionMetrics *replicat
 		Addr: configuration.httpListen,
 		Handler: apiHandler(
 			transport.TrustedProxyMiddleware(trustedProxyPrefixes)(
-				transport.SecurityHeaders()(gateway),
+				transport.SecurityHeadersWithHSTSObserver(observeTrustedProxyHSTS)(gateway),
 			),
 			func(ctx context.Context) error {
 				for _, check := range []func(context.Context) error{
@@ -685,6 +685,17 @@ func apiHandler(gateway http.Handler, ping func(context.Context) error) http.Han
 	})
 	mux.Handle("/", gateway)
 	return mux
+}
+
+func observeTrustedProxyHSTS(request *http.Request) {
+	if request == nil {
+		return
+	}
+	address, ok := transport.ClientAddressFromContext(request.Context())
+	if !ok || !address.Trusted || !strings.EqualFold(address.Scheme, "https") {
+		return
+	}
+	metrics.TrustedProxyHSTS.WithLabelValues("_unknown").Inc()
 }
 
 func valueOrDefault(value, defaultValue string) string {

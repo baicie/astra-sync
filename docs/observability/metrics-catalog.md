@@ -23,8 +23,10 @@ canonical UUID `request_id` through `AddWithExemplar` or
 negotiation, which is required to transmit those exemplars. F10 activates
 `connection_test_total` after the executor durably completes a claimed test;
 F11 activates `console_request_total` and
-`console_render_duration_seconds`; the remaining descriptors are still
-registration-only.
+`console_render_duration_seconds`. F12 activates
+`apiserver_trusted_proxy_hsts_total` when the API Server emits HSTS for a
+trusted proxy request; sign-in and session-revoke descriptors remain
+registration-only because those flows are owned by the Console/auth boundary.
 
 ## Implementation status
 
@@ -34,7 +36,8 @@ The table separates descriptor availability from sampled runtime data.
 |---|---|---|---|
 | `apiserver_auth_request_total`, `apiserver_auth_request_duration_seconds` | api-server | F4 descriptor + `/metrics` | emitted by F7 authentication interceptor |
 | `apiserver_audit_query_duration_seconds` | api-server | F4 descriptor + `/metrics` | emitted by F7 authorized audit-query path |
-| remaining `apiserver_*` listed below | api-server | F4 descriptor + `/metrics` | pending |
+| `apiserver_sign_in_total`, `apiserver_session_revoke_total` | api-server | F4 descriptor + `/metrics` | pending; no API Server business call site owns these Console/auth flows |
+| `apiserver_trusted_proxy_hsts_total` | api-server | F4 descriptor + `/metrics` | emitted by F12 trusted-proxy HSTS middleware |
 | `scheduler_*` listed below | scheduler | F4 descriptor + `/metrics` | assignment, lease-takeover, and reconcile-duration samples emitted by the Scheduler |
 | `astrasync_multi_region_promotion_*` | control-plane replication | recorder registration; service exposition is embedding-owned | promotion attempt and duration samples emitted when a recorder is injected |
 | `connection_test_total` | connection-test-executor | F4 descriptor + `/metrics` | emitted by F10 after durable test completion |
@@ -107,7 +110,7 @@ descriptor-only.
 | `apiserver_sign_in_total` | counter | `tenant_id`, `outcome` | Sign-in events, including denied sign-ins. |
 | `apiserver_session_revoke_total` | counter | `tenant_id`, `actor_id` | Sessions revoked by the admin CLI or by the audit-driven revocation path. |
 | `apiserver_audit_query_duration_seconds` | histogram | `tenant_id` | Time to fulfil one authorized audit query, including failures after authorization. |
-| `apiserver_trusted_proxy_hsts_total` | counter | `tenant_id` | HSTS responses reserved for trusted-proxy middleware instrumentation. |
+| `apiserver_trusted_proxy_hsts_total` | counter | `tenant_id` | HSTS responses emitted for HTTPS requests accepted from a trusted proxy; F12 records the pre-auth `_unknown` tenant value. |
 | `auth_sign_in_total` | counter | `tenant_id`, `outcome` | Auth-library sign-in descriptor; the admin CLI does not expose it. |
 | `auth_session_revoke_total` | counter | `tenant_id` | Auth-library revoke descriptor; the admin CLI does not expose it. |
 
