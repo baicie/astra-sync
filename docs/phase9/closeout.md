@@ -66,11 +66,11 @@ tests/integration/multi-region/docker-compose.yaml | +70 lines
 
 ## Next Steps
 
-Phase 9 is complete. Potential next phases:
+Phase 9 is complete. Phase 10 completed the first multi-region observability
+integration slice. The remaining roadmap is:
 
-1. **Phase 10**: Multi-region observability integration
-2. **Phase 11**: Cross-region disaster recovery drills
-3. **Phase 12**: CI/CD pipeline integration for multi-region tests
+1. **Phase 11**: Cross-region disaster recovery drills
+2. **Phase 12**: CI/CD pipeline integration for multi-region tests
 
 ## Sign-Off
 

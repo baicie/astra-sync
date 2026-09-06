@@ -24,7 +24,9 @@ spill-byte, and record-count families. F9 activates Scheduler assignment,
 lease-takeover, and reconcile-duration samples. F10 activates Connection Test
 Executor outcome samples. F11 activates Console BFF request and render
 samples. F12 activates trusted-proxy HSTS samples. F13 activates Controller
-reconcile-duration samples. Remaining Go recipes are descriptor-only.
+reconcile-duration samples. Phase 10 verifies the multi-region recipes
+against the API Server shared registry. Remaining unlisted Go recipes are
+descriptor-only.
 Operators must check the status here before using a recipe as live SLO
 evidence.
 
@@ -145,6 +147,46 @@ histogram_quantile(
 
 Suggested visualisation: `timeseries` panel with the P50, P95, and P99 lines.
 F13 records the pre-tenant `_unknown` value and uses `success` or `failure`.
+
+## Multi-region failover recipes
+
+### Promotion outcomes (per target region and outcome)
+
+```promql
+sum by (target_region, outcome) (
+  rate(astrasync_multi_region_promotion_total[5m])
+)
+```
+
+Suggested visualisation: `timeseries` panel with one series per target
+region and outcome. `success` and `failure` are the only promotion outcomes.
+
+### Cross-region event delivery (per peer, event type, and outcome)
+
+```promql
+sum by (peer_region, event_type, outcome) (
+  rate(astrasync_multi_region_event_total[5m])
+)
+```
+
+Suggested visualisation: `timeseries` panel with event type and outcome in
+the legend. Checkpoint, topology, and health events use the bounded event
+type allowlist.
+
+### Recovery duration (per target region)
+
+```promql
+histogram_quantile(
+  0.95,
+  sum by (target_region, le) (
+    rate(astrasync_multi_region_recovery_duration_seconds_bucket[5m])
+  )
+)
+```
+
+Suggested visualisation: `timeseries` panel with the P50, P95, and P99 lines.
+Use `astrasync_multi_region_recovery_total` beside it to distinguish
+successful and failed recovery attempts.
 
 ## Connection test outcomes (per tenant and outcome)
 
@@ -293,7 +335,8 @@ reconcile boundary. F7 covers API Server authentication decisions and
 authorized audit queries with bounded exemplars; F10 covers Connection Test
 Executor completion outcomes; F11 covers Console BFF requests and HTML
 rendering; F12 covers trusted-proxy HSTS responses; F13 covers Controller
-reconcile duration.
+reconcile duration; Phase 10 covers the API Server multi-region scrape
+integration.
 
 ## Inline placeholders for the populated handbook
 

@@ -18,7 +18,7 @@ must combine all three to reach a root cause.
 
 | Signal | Source | Format | Sample destination |
 |---|---|---|---|
-| Metrics | Prometheus descriptors in the Go control plane; F7 emits API Server authentication and audit-query SLO samples; F8 emits all seven Java data-plane families; F10 emits Connection Test Executor outcomes; F11 emits Console BFF request outcomes and render latency; F12 emits trusted-proxy HSTS samples; F13 emits Controller reconcile-duration samples | Prometheus/OpenMetrics exposition | `monitoring.prometheus.port: 9090` (deployment-side rewrite) |
+| Metrics | Prometheus descriptors in the Go control plane; F7 emits API Server authentication and audit-query SLO samples; F8 emits all seven Java data-plane families; F10 emits Connection Test Executor outcomes; F11 emits Console BFF request outcomes and render latency; F12 emits trusted-proxy HSTS samples; F13 emits Controller reconcile-duration samples; Phase 10 verifies API Server multi-region promotion, event, and recovery samples | Prometheus/OpenMetrics exposition | `monitoring.prometheus.port: 9090` (deployment-side rewrite) |
 | Logs | SLF4J + Logback in Java error paths, zap in the Controller, and `log/slog` in the other migrated Go entry points | line-delimited JSON | Loki / stdout / deployment log store |
 | Audit | PostgreSQL `audit_events` table (Slice 18) | relational rows | PostgreSQL → deployment audit store |
 
@@ -44,6 +44,8 @@ HTML render latency with bounded handler names. F12 records trusted-proxy HSTS
 responses at the API Server security boundary. F13 records Controller
 reconcile duration with fixed `_unknown` tenant scope. Other control-plane
 business call sites remain pending; the catalog marks each family separately.
+Phase 10 verifies the multi-region families through the API Server shared
+registry and documents their dashboard recipes.
 
 ## Documents
 
@@ -129,6 +131,8 @@ The handbook does:
   header for a trusted HTTPS proxy request.
 - Record F13 Controller reconcile duration with bounded outcome labels and a
   fixed pre-tenant `_unknown` value.
+- Record the Phase 10 API Server scrape integration for multi-region
+  promotion, event-delivery, and recovery metrics.
 - Provide the per-tenant SLI/SLO definitions and the reference
   queries that the operator uses to derive an SLO dashboard.
 - Document the `request_id` join key that links the three signals.

@@ -221,6 +221,7 @@ constraints.
 - [Phase 5 Performance](./docs/phase5/README.md)
 - [Phase 6 Platform](./docs/phase6/README.md)
 - [Phase 7 Multi-Region](./docs/phase7/README.md)
+- [Phase 10 Multi-Region Observability Integration](./docs/phase10/README.md)
 - [CDC Usage and Delivery Boundary](./docs/phase3/01-native-cdc/README.md)
 - [Connector Development Guide](./docs/connector-dev.md)
 - [Deployment Guide](./docs/deployment.md)
@@ -239,6 +240,7 @@ constraints.
 | Phase 7 | Multi-Region and Operational Maturity | Complete|
 | Phase 8 | Multi-Region Implementation | Complete|
 | Phase 9 | Multi-Region Integration Testing | Complete|
+| Phase 10 | Multi-Region Observability Integration | Complete|
 
 ## Contributing
 

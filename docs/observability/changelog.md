@@ -57,6 +57,8 @@ row that explicitly activates business observations.
 | 26.F11 | (this slice) | feat(observability): activate Console BFF request and render samples | (Phase 7 Slice 26 follow-up F11) |
 | 26.F12 | (this slice) | feat(observability): activate trusted-proxy HSTS samples | (Phase 7 Slice 26 follow-up F12) |
 | 26.F13 | (this slice) | feat(observability): activate Controller reconcile metrics | (Phase 7 Slice 26 follow-up F13) |
+| 27.1 | (this slice) | test(api-server): verify multi-region business samples through shared metrics scrape | (Phase 10 Slice 27.1) |
+| 27.2 | (this slice) | docs(observability): publish multi-region dashboard recipes and Phase 10 status | (Phase 10 Slice 27.2) |
 
 The PR column is populated when the closeout pull request merges to `main`.
 The PR URLs follow the convention

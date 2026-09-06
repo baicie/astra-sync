@@ -29,6 +29,8 @@ trusted proxy request; sign-in and session-revoke descriptors remain
 registration-only because those flows are owned by the Console/auth boundary.
 F13 activates the Controller reconcile-duration sample with fixed `_unknown`
 tenant scope and a bounded outcome label.
+Phase 10 verifies that the API Server exposes the multi-region promotion,
+event, and recovery samples from one shared registry.
 
 ## Implementation status
 
@@ -41,7 +43,7 @@ The table separates descriptor availability from sampled runtime data.
 | `apiserver_sign_in_total`, `apiserver_session_revoke_total` | api-server | F4 descriptor + `/metrics` | pending; no API Server business call site owns these Console/auth flows |
 | `apiserver_trusted_proxy_hsts_total` | api-server | F4 descriptor + `/metrics` | emitted by F12 trusted-proxy HSTS middleware |
 | `scheduler_*` listed below | scheduler | F4 descriptor + `/metrics` | assignment, lease-takeover, and reconcile-duration samples emitted by the Scheduler |
-| `astrasync_multi_region_promotion_*` | control-plane replication | recorder registration; service exposition is embedding-owned | promotion attempt and duration samples emitted when a recorder is injected |
+| `astrasync_multi_region_promotion_*`, `astrasync_multi_region_event_*`, `astrasync_multi_region_recovery_*` | control-plane replication | recorder registration; API Server exposition is embedding-owned | promotion, event-delivery, and recovery samples emitted when a recorder is injected; Phase 10 verifies the API Server scrape path |
 | `connection_test_total` | connection-test-executor | F4 descriptor + `/metrics` | emitted by F10 after durable test completion |
 | `console_*` listed below | console | F4 descriptor + `/metrics` | Console BFF request and render samples emitted by F11 |
 | `auth_*` listed below | auth library | descriptor package only | pending |
@@ -174,6 +176,9 @@ through exemplars; that wiring is not present in the current implementation.
 | `astrasync_multi_region_recovery_duration_seconds` | histogram | `target_region` | Duration of checkpoint recovery attempts. |
 The recorder uses an injected Prometheus registerer so embedding services can expose the
 families from their own endpoint without creating a second listener or global registration.
+The API Server injects the recorder into the replication service and runtime,
+then combines that registry with its default registry on the optional
+`/metrics` listener.
 
 ## Connection test and Console metrics
 
@@ -255,9 +260,10 @@ F7 activates the three API Server SLO families, F8 activates all Java
 data-plane families, F9 activates Scheduler assignment and lease-takeover
 samples, F10 activates Connection Test Executor outcomes, F11 activates
 Console BFF request and render samples, F12 activates trusted-proxy HSTS
-samples, and F13 activates Controller reconcile duration. Business
-observations for the remaining API Server, Controller lifecycle, and
-auth-library descriptors remain deferred. The landed work is recorded in
+samples, F13 activates Controller reconcile duration, and Phase 10 verifies
+the API Server multi-region scrape path. Business observations for the
+remaining API Server, Controller lifecycle, and auth-library descriptors
+remain deferred. The landed work is recorded in
 [`changelog.md`](changelog.md).
 
 ## Inline placeholders for the populated handbook

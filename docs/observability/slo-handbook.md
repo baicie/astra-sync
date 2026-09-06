@@ -11,9 +11,10 @@ authentication decisions and authorized audit queries with bounded
 families; F10 activates Connection Test Executor outcomes after durable
 completion; F11 activates Console BFF request outcomes and HTML render
 latency; F12 activates trusted-proxy HSTS samples; F13 activates Controller
-reconcile-duration samples. Freshness and deliverability therefore have live
-metric sources, while the SQL audit-completeness query remains independently
-usable.
+reconcile-duration samples; Phase 10 verifies the API Server multi-region
+promotion, event, and recovery samples. Freshness and deliverability therefore
+have live metric sources, while the SQL audit-completeness query remains
+independently usable.
 
 ## SLI categories
 
@@ -28,9 +29,9 @@ dashboard.
 | Deliverability | The Worker writes records to the sink without rejection. | `worker_records_rejected_total` |
 | Audit completeness | The audit table records every authenticated mutation. | `apiserver_audit_query_duration_seconds` |
 
-The four categories cover the Phase 6 acceptance criteria. The
-handbook defers the multi-region SLI categories to the Slice 25
-follow-up.
+The four categories cover the Phase 6 acceptance criteria. Multi-region
+failover diagnostics are recorded separately below because they describe
+regional promotion and recovery health rather than tenant-scoped job SLOs.
 
 ## Availability
 
@@ -186,6 +187,35 @@ server-written scope response header; unauthenticated and unscoped responses
 use `_unknown`. HTML render latency is available through
 `console_render_duration_seconds` for the fixed `static` handler.
 
+## Multi-region failover diagnostics
+
+Phase 10 verifies the API Server scrape path for the shared multi-region
+registry. Operators can use these expressions to inspect regional failover
+health:
+
+```promql
+sum(rate(astrasync_multi_region_promotion_total{outcome="failure"}[5m]))
+/
+sum(rate(astrasync_multi_region_promotion_total[5m]))
+```
+
+The expression reports the promotion failure ratio. Pair it with the
+recovery P95 duration and event delivery outcomes from
+[`dashboard-recipes.md`](dashboard-recipes.md):
+
+```promql
+histogram_quantile(
+  0.95,
+  sum by (target_region, le) (
+    rate(astrasync_multi_region_recovery_duration_seconds_bucket[5m])
+  )
+)
+```
+
+The metric labels are bounded to target or peer region, event type, and
+success or failure outcome. An unset recovery target is recorded as
+`_unknown`.
+
 ## Per-slice SLIs
 
 The Phase 6 acceptance document records the SLIs that the Phase 6
@@ -202,6 +232,7 @@ the acceptance document. The cross-reference is:
 | Slice 26.F11 (Console BFF observations) | Console request health | `console_request_total`, `console_render_duration_seconds` |
 | Slice 26.F12 (trusted-proxy HSTS observations) | Transport security header coverage | `apiserver_trusted_proxy_hsts_total` |
 | Slice 26.F13 (Controller observations) | Controller reconcile health | `controller_job_controller_reconcile_duration_seconds` |
+| Phase 10 (multi-region observability integration) | Regional failover health | `astrasync_multi_region_promotion_total`, `astrasync_multi_region_event_total`, `astrasync_multi_region_recovery_total` |
 
 The cross-reference is the source of truth for the SLI mapping. The
 Phase 7 acceptance document will record the Phase 7 SLIs when the
