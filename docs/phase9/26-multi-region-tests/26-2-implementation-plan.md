@@ -30,11 +30,11 @@ The tests cover the main failover scenarios.
 
 ## Implementation Tasks
 
-- [ ] Create failover test package
-- [ ] Implement happy path test
-- [ ] Implement idempotency test
-- [ ] Implement version mismatch test
-- [ ] Implement capability timeout test
+- [x] Create failover test package
+- [x] Implement happy path test
+- [x] Implement idempotency test
+- [x] Implement version mismatch test
+- [x] Implement capability timeout test
 
 ## Out-of-Scope
 
@@ -43,9 +43,9 @@ The tests cover the main failover scenarios.
 
 ## Verification
 
-- [ ] All tests pass
-- [ ] Tests use shared framework
-- [ ] Assertions match ADR-049
+- [x] All failover tests pass
+- [x] Tests use shared framework
+- [x] Assertions match ADR-049
 
 ## Open Questions
 

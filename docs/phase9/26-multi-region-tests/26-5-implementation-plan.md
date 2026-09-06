@@ -6,8 +6,14 @@
 
 ## Tasks
 
-- [ ] Create chaos test package
-- [ ] Implement network partition simulation
-- [ ] Implement pod failure simulation
-- [ ] Implement recovery after partition
-- [ ] Add chaos state machine
+- [x] Create chaos test package
+- [x] Implement network partition simulation
+- [x] Implement pod failure simulation
+- [x] Implement recovery after partition
+- [x] Add chaos state machine
+
+## Verification
+
+- [x] Chaos package tests pass
+- [x] Network, pod, and region failure scenarios are covered
+- [x] Recovery sequencing and context cancellation are covered

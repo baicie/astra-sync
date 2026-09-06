@@ -26,15 +26,15 @@ The two regions share a network but have isolated state stores.
 | Dependency | ADR | Status | Notes |
 |------------|-----|--------|-------|
 | Phase 8 | ADR-048/049 | Complete | Multi-region replication |
-| Docker Compose | — | Available | Container orchestration |
+| Docker Compose | — | Implemented; host daemon unavailable during current verification | Container orchestration |
 
 ## Implementation Tasks
 
-- [ ] Create Docker Compose topology
-- [ ] Implement Framework struct
-- [ ] Implement Topology configuration
-- [ ] Implement Assertions
-- [ ] Add smoke test
+- [x] Create Docker Compose topology
+- [x] Implement Framework struct
+- [x] Implement Topology configuration
+- [x] Implement Assertions
+- [x] Add smoke test
 
 ## Out-of-Scope
 
@@ -44,9 +44,12 @@ The two regions share a network but have isolated state stores.
 
 ## Verification
 
-- [ ] Smoke test passes
-- [ ] Framework compiles
-- [ ] Tests can be run locally
+- [x] Framework compiles
+- [x] Deterministic framework tests pass
+- [x] Integration test command is wired through the Make target
+- [ ] Docker Compose smoke acceptance — blocked by the local Docker Desktop
+  Linux daemon failing to initialize; rerun `make test-integration-multi-region`
+  after the host daemon is repaired
 
 ## Open Questions
 

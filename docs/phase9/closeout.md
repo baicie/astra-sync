@@ -34,13 +34,23 @@ benchmarks, and chaos tests.
 
 | Criterion | Status |
 |-----------|--------|
-| Multi-region e2e testing framework | ✅ |
+| Multi-region e2e testing framework | ✅ (implementation; Compose smoke pending) |
 | Failover integration tests | ✅ |
 | Recovery integration tests | ✅ |
 | Performance benchmarks | ✅ |
 | Chaos tests | ✅ |
-| All tests passing | ✅ |
+| Go, Java, and script test suites passing | ✅ |
+| Docker Compose acceptance | Blocked by the local Docker Desktop Linux daemon |
 | Tests use tables-drivers + subtests | ✅ |
+
+The verification suites that do not require a running container daemon pass,
+including `make check`, `make test-go`, `make test-java`, `make test-scripts`,
+and the non-Docker portions of the multi-region framework, failover, recovery,
+benchmark, and chaos packages. The framework bootstrap and
+`make test-integration-multi-region` could not run because Docker Desktop
+failed to initialize its Linux daemon while cleaning a residual
+`dockerInference` reparse point. After repairing the host daemon, rerun that
+target to complete the Compose acceptance check.
 
 ## Files Changed
 

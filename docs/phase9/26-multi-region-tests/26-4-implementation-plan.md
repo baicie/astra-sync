@@ -6,8 +6,14 @@
 
 ## Tasks
 
-- [ ] Create benchmark package
-- [ ] Implement replication benchmark
-- [ ] Implement promotion benchmark
-- [ ] Implement capability benchmark
-- [ ] Implement recovery benchmark
+- [x] Create benchmark package
+- [x] Implement replication benchmark
+- [x] Implement promotion benchmark
+- [x] Implement capability benchmark
+- [x] Implement recovery benchmark
+
+## Verification
+
+- [x] Benchmark package tests pass
+- [x] Latency recording and quantile boundaries are covered
+- [x] All four multi-region operations are covered

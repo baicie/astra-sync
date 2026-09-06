@@ -2,7 +2,9 @@
 
 ## Status
 
-Proposed. Implements performance benchmarks for multi-region operations.
+**Complete.** Implemented performance benchmarks for multi-region operations
+on 2026-08-19. The benchmark package tests pass; live Docker measurements
+remain host-dependent and are recorded in the Phase 9 closeout.
 
 ## Context
 

@@ -2,7 +2,9 @@
 
 ## Status
 
-Proposed. Implements recovery integration tests for multi-region topology.
+**Complete.** Implemented recovery integration tests for the multi-region
+topology on 2026-08-19. The recovery test suite passes; Docker Compose
+acceptance remains host-dependent and is recorded in the Phase 9 closeout.
 
 ## Context
 

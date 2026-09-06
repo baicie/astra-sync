@@ -2,7 +2,9 @@
 
 ## Status
 
-Proposed. Implements chaos tests for multi-region failure scenarios.
+**Complete.** Implemented chaos tests for multi-region failure scenarios on
+2026-08-19. The deterministic chaos suite passes; Docker Compose acceptance
+remains host-dependent and is recorded in the Phase 9 closeout.
 
 ## Context
 
