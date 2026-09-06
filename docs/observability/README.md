@@ -18,7 +18,7 @@ must combine all three to reach a root cause.
 
 | Signal | Source | Format | Sample destination |
 |---|---|---|---|
-| Metrics | Prometheus descriptors in the Go control plane; F7 emits API Server authentication and audit-query SLO samples; F8 emits all seven Java data-plane families; F10 emits Connection Test Executor outcomes | Prometheus/OpenMetrics exposition | `monitoring.prometheus.port: 9090` (deployment-side rewrite) |
+| Metrics | Prometheus descriptors in the Go control plane; F7 emits API Server authentication and audit-query SLO samples; F8 emits all seven Java data-plane families; F10 emits Connection Test Executor outcomes; F11 emits Console BFF request outcomes and render latency | Prometheus/OpenMetrics exposition | `monitoring.prometheus.port: 9090` (deployment-side rewrite) |
 | Logs | SLF4J + Logback in Java error paths, zap in the Controller, and `log/slog` in the other migrated Go entry points | line-delimited JSON | Loki / stdout / deployment log store |
 | Audit | PostgreSQL `audit_events` table (Slice 18) | relational rows | PostgreSQL → deployment audit store |
 
@@ -39,8 +39,9 @@ and the Worker-local spillable exchange emits
 exposes that shared registry only when `METRICS_LISTEN_ADDRESS` is set;
 Coordinator remains one-shot. F10 records `connection_test_total` only after
 the executor durably completes a claimed operation; policy-denied probes use
-the bounded `rejected` outcome. Other control-plane business call sites
-remain pending; the catalog marks each family separately.
+the bounded `rejected` outcome. F11 records Console BFF request outcomes and
+HTML render latency with bounded handler names. Other control-plane business
+call sites remain pending; the catalog marks each family separately.
 
 ## Documents
 
@@ -104,9 +105,10 @@ The handbook does not:
   conventions the wire must follow.
 - Claim that descriptor registration alone produces business samples. F7 emits
   the three API Server SLO families, F8 emits all seven Java data-plane
-  batch/checkpoint, spill-byte, and record-count families, and F10 emits the
-  Connection Test Executor outcome family; remaining descriptor-only families
-  stay follow-up work.
+  batch/checkpoint, spill-byte, and record-count families, F10 emits the
+  Connection Test Executor outcome family, and F11 emits the Console BFF
+  request and HTML render families; remaining descriptor-only families stay
+  follow-up work.
 
 The handbook does:
 
@@ -118,6 +120,8 @@ The handbook does:
   and the explicit Worker metrics listener contract.
 - Record F10 Connection Test Executor outcomes after durable completion, with
   policy rejection separated from executor or remote failures.
+- Record F11 Console BFF request outcomes and HTML render latency using a
+  fixed handler allowlist and trusted response tenant scope.
 - Provide the per-tenant SLI/SLO definitions and the reference
   queries that the operator uses to derive an SLO dashboard.
 - Document the `request_id` join key that links the three signals.

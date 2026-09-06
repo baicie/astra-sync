@@ -96,8 +96,20 @@ follow-up:
    credential, transport, and handshake failures as `failure`.
 4. Verify that lease loss does not create a business sample.
 
+## F11 work breakdown
+
+The Console BFF instrumentation follow-up is delivered as one focused slice:
+
+1. Add an isolated recorder with bounded tenant, outcome, and handler labels.
+2. Observe each completed HTTP request at the BFF boundary and classify 2xx/3xx,
+   4xx, and 5xx responses as `success`, `rejected`, and `failure`.
+3. Take tenant identity only from the server-written scope response header and
+   use `_unknown` for unauthenticated or unscoped responses.
+4. Observe HTML response latency only for the fixed static render handler.
+5. Verify that incoming tenant headers cannot create a metric tenant series.
+
 ## Open questions
 
-F10 completes Connection Test Executor outcome observations. Other Go business
+F11 completes Console BFF request and render observations. Other Go business
 call sites remain intentionally deferred. The boundary is documented in
 ADR-047 and the observability handbook.

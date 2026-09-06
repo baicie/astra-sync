@@ -24,6 +24,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"io.astrasync/console/internal/authflow"
+	consolemetrics "io.astrasync/console/observability"
 	jobv1 "io.astrasync/control-plane/api-server/gen/go/v1"
 	"io.astrasync/control-plane/auth"
 )
@@ -49,6 +50,11 @@ type SessionManager interface {
 	Logout(context.Context, authflow.Session) error
 }
 
+// RequestMetrics records bounded Console request observations.
+type RequestMetrics interface {
+	ObserveRequest(tenantID, outcome, handler string, duration time.Duration, rendered bool)
+}
+
 type Config struct {
 	Backend      any
 	Sessions     SessionManager
@@ -57,6 +63,8 @@ type Config struct {
 	AuthMode     string
 	Ready        func(context.Context) error
 	MaximumBody  int64
+	Metrics      RequestMetrics
+	Clock        func() time.Time
 }
 
 type Server struct {
@@ -73,6 +81,8 @@ type Server struct {
 	ready        func(context.Context) error
 	legacy       bool
 	maximumBody  int64
+	metrics      RequestMetrics
+	clock        func() time.Time
 }
 
 // New preserves the development-only read-only constructor used by the first
@@ -90,7 +100,7 @@ func New(reader JobReader, namespace string) (*Server, error) {
 		return nil, err
 	}
 	return &Server{jobs: reader, sessions: development, namespace: namespace, authMode: "disabled", legacy: true,
-		maximumBody: maximumBodySize}, nil
+		maximumBody: maximumBodySize, metrics: consolemetrics.DefaultRecorder(), clock: time.Now}, nil
 }
 
 func NewWithConfig(configuration Config) (*Server, error) {
@@ -111,9 +121,17 @@ func NewWithConfig(configuration Config) (*Server, error) {
 	if maximumBody < 1024 || maximumBody > 4*1024*1024 {
 		return nil, fmt.Errorf("Console maximum body size is invalid")
 	}
+	requestMetrics := configuration.Metrics
+	if requestMetrics == nil {
+		requestMetrics = consolemetrics.DefaultRecorder()
+	}
+	clock := configuration.Clock
+	if clock == nil {
+		clock = time.Now
+	}
 	server := &Server{sessions: configuration.Sessions, namespace: strings.TrimSpace(configuration.Namespace),
 		publicOrigin: strings.TrimRight(strings.TrimSpace(configuration.PublicOrigin), "/"), authMode: authMode,
-		ready: configuration.Ready, maximumBody: maximumBody}
+		ready: configuration.Ready, maximumBody: maximumBody, metrics: requestMetrics, clock: clock}
 	server.jobs, _ = configuration.Backend.(JobReader)
 	server.catalog, _ = configuration.Backend.(CatalogReader)
 	server.connections, _ = configuration.Backend.(ConnectionClient)
@@ -175,7 +193,8 @@ func (s *Server) Handler() http.Handler {
 		panic(fmt.Sprintf("embedded Console assets: %v", err))
 	}
 	mux.Handle("/", http.FileServer(http.FS(content)))
-	return securityHeaders(mux)
+	handler := securityHeaders(mux)
+	return observeRequests(handler, s.metrics, s.clock)
 }
 
 func (s *Server) health(response http.ResponseWriter, _ *http.Request) {

@@ -9,7 +9,8 @@ Server availability and audit-query latency expressions live by instrumenting
 authentication decisions and authorized audit queries with bounded
 `request_id` exemplars. F8 and F9 activate the Java data-plane and Scheduler
 families; F10 activates Connection Test Executor outcomes after durable
-completion. Freshness and deliverability therefore have live metric sources,
+completion; F11 activates Console BFF request outcomes and HTML render
+latency. Freshness and deliverability therefore have live metric sources,
 while the SQL audit-completeness query remains independently usable.
 
 ## SLI categories
@@ -166,6 +167,23 @@ denial, and `failure` covers timeout, cancellation, credential, transport, and
 handshake failures. The executor records the sample only after the durable
 operation completion succeeds, so a lost lease does not create an observation.
 
+## Console diagnostics
+
+Console BFF request outcomes show per-tenant request health while keeping the
+handler label fixed and bounded:
+
+```promql
+sum by (tenant_id, outcome, handler) (
+  rate(console_request_total[5m])
+)
+```
+
+The Console records 2xx/3xx responses as `success`, 4xx responses as
+`rejected`, and 5xx responses as `failure`. It takes the tenant only from a
+server-written scope response header; unauthenticated and unscoped responses
+use `_unknown`. HTML render latency is available through
+`console_render_duration_seconds` for the fixed `static` handler.
+
 ## Per-slice SLIs
 
 The Phase 6 acceptance document records the SLIs that the Phase 6
@@ -179,6 +197,7 @@ the acceptance document. The cross-reference is:
 | Slice 21 (audit explorer) | Audit completeness | `apiserver_audit_query_duration_seconds` |
 | Slice 22 (transport hardening) | Availability | `apiserver_auth_request_total` |
 | Slice 23 (control-plane mTLS) | Availability | `apiserver_auth_request_total` |
+| Slice 26.F11 (Console BFF observations) | Console request health | `console_request_total`, `console_render_duration_seconds` |
 
 The cross-reference is the source of truth for the SLI mapping. The
 Phase 7 acceptance document will record the Phase 7 SLIs when the
@@ -198,9 +217,10 @@ follow-up migration slice lands.
 ## Follow-up
 
 F7 completes API Server authentication and audit-query observations with
-bounded `request_id` exemplars. F8, F9, and F10 activate the Java data-plane,
-Scheduler, and Connection Test Executor families. Remaining follow-up work
-must instrument the other Go control-plane descriptors. The completed slices
+bounded `request_id` exemplars. F8, F9, F10, and F11 activate the Java
+data-plane, Scheduler, Connection Test Executor, and Console families.
+Remaining follow-up work must instrument the other Go control-plane
+descriptors. The completed slices
 are recorded in ADR-047 and the observability changelog.
 
 <!-- placeholders: slo-availability-target, slo-freshness-budget, slo-deliverability-target, audit-retention-days -->

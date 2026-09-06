@@ -2,6 +2,7 @@ package server_test
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -68,6 +69,24 @@ type fakeBFFBackend struct {
 	auditRequest  *jobv1.ListAuditEventsRequest
 	updateError   error
 	authorization string
+}
+
+type requestObservation struct {
+	tenantID string
+	outcome  string
+	handler  string
+	duration time.Duration
+	rendered bool
+}
+
+type memoryRequestMetrics struct {
+	observations []requestObservation
+}
+
+func (m *memoryRequestMetrics) ObserveRequest(tenantID, outcome, handler string, duration time.Duration, rendered bool) {
+	m.observations = append(m.observations, requestObservation{
+		tenantID: tenantID, outcome: outcome, handler: handler, duration: duration, rendered: rendered,
+	})
 }
 
 func (f *fakeBFFBackend) capture(ctx context.Context) {
@@ -170,13 +189,99 @@ func testDescriptor() *jobv1.ConnectorDescriptor {
 }
 
 func newBFFHandler(t *testing.T, backend *fakeBFFBackend) http.Handler {
+	return newBFFHandlerWithMetrics(t, backend, nil)
+}
+
+func newBFFHandlerWithMetrics(t *testing.T, backend *fakeBFFBackend, requestMetrics server.RequestMetrics) http.Handler {
+	return newBFFHandlerWithClock(t, backend, requestMetrics, nil)
+}
+
+func newBFFHandlerWithClock(t *testing.T, backend *fakeBFFBackend, requestMetrics server.RequestMetrics, clock func() time.Time) http.Handler {
 	t.Helper()
 	console, err := server.NewWithConfig(server.Config{Backend: backend, Sessions: newFakeSessions(t),
-		AuthMode: "oidc", PublicOrigin: "https://console.example"})
+		AuthMode: "oidc", PublicOrigin: "https://console.example", Metrics: requestMetrics, Clock: clock})
 	if err != nil {
 		t.Fatalf("create BFF server: %v", err)
 	}
 	return console.Handler()
+}
+
+func TestBFFRecordsRequestOutcomesWithTrustedTenant(t *testing.T) {
+	backend := &fakeBFFBackend{}
+	requestMetrics := &memoryRequestMetrics{}
+	handler := newBFFHandlerWithClock(t, backend, requestMetrics, func() time.Time { return time.Unix(100, 0) })
+
+	response := bffRequest(handler, http.MethodGet, "/api/connectors", "", map[string]string{
+		"X-Astra-Tenant-ID": testTenantID,
+	})
+	if response.Code != http.StatusOK {
+		t.Fatalf("authenticated request returned %d: %s", response.Code, response.Body.String())
+	}
+	response = unauthenticatedRequest(handler, http.MethodGet, "/api/connectors")
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated request returned %d: %s", response.Code, response.Body.String())
+	}
+	request := httptest.NewRequest(http.MethodGet, "/", nil)
+	staticResponse := httptest.NewRecorder()
+	handler.ServeHTTP(staticResponse, request)
+	if staticResponse.Code != http.StatusOK {
+		t.Fatalf("static request returned %d: %s", staticResponse.Code, staticResponse.Body.String())
+	}
+
+	if len(requestMetrics.observations) != 3 {
+		t.Fatalf("observations = %d, want 3: %+v", len(requestMetrics.observations), requestMetrics.observations)
+	}
+	success := requestMetrics.observations[0]
+	if success.tenantID != testTenantID || success.outcome != "success" || success.handler != "connectors" ||
+		success.duration < 0 || success.rendered {
+		t.Fatalf("unexpected success observation: %+v", success)
+	}
+	rejected := requestMetrics.observations[1]
+	if rejected.tenantID != "_unknown" || rejected.outcome != "rejected" || rejected.handler != "connectors" || rejected.rendered {
+		t.Fatalf("unexpected rejected observation: %+v", rejected)
+	}
+	rendered := requestMetrics.observations[2]
+	if rendered.tenantID != "_unknown" || rendered.outcome != "success" || rendered.handler != "static" ||
+		rendered.duration < 0 || !rendered.rendered {
+		t.Fatalf("unexpected rendered observation: %+v", rendered)
+	}
+}
+
+func TestBFFDoesNotTrustIncomingTenantHeaderForUnscopedEndpoint(t *testing.T) {
+	requestMetrics := &memoryRequestMetrics{}
+	handler := newBFFHandlerWithClock(t, &fakeBFFBackend{}, requestMetrics, func() time.Time { return time.Unix(100, 0) })
+	response := bffRequest(handler, http.MethodGet, "/api/session", "", map[string]string{
+		"X-Astra-Tenant-ID": "attacker-controlled",
+	})
+	if response.Code != http.StatusOK || len(requestMetrics.observations) != 1 {
+		t.Fatalf("unexpected session response or observation: code=%d observations=%+v", response.Code, requestMetrics.observations)
+	}
+	observation := requestMetrics.observations[0]
+	if observation.tenantID != "_unknown" || observation.outcome != "success" || observation.handler != "session" {
+		t.Fatalf("incoming tenant header was trusted: %+v", observation)
+	}
+}
+
+func TestBFFRecordsServerFailureAsFailure(t *testing.T) {
+	requestMetrics := &memoryRequestMetrics{}
+	console, err := server.NewWithConfig(server.Config{
+		Backend: &fakeBFFBackend{}, Sessions: newFakeSessions(t), AuthMode: "oidc",
+		PublicOrigin: "https://console.example", Metrics: requestMetrics,
+		Ready: func(context.Context) error { return errors.New("database unavailable") },
+		Clock: func() time.Time { return time.Unix(100, 0) },
+	})
+	if err != nil {
+		t.Fatalf("create BFF server: %v", err)
+	}
+	response := httptest.NewRecorder()
+	console.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/ready", nil))
+	if response.Code != http.StatusServiceUnavailable || len(requestMetrics.observations) != 1 {
+		t.Fatalf("unexpected ready response or observation: code=%d observations=%+v", response.Code, requestMetrics.observations)
+	}
+	observation := requestMetrics.observations[0]
+	if observation.tenantID != "_unknown" || observation.outcome != "failure" || observation.handler != "ready" || observation.rendered {
+		t.Fatalf("unexpected server failure observation: %+v", observation)
+	}
 }
 
 func TestBFFSessionAndTenantScopeNeverExposeBearer(t *testing.T) {

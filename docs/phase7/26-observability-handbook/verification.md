@@ -22,12 +22,16 @@ The closeout verifies two layers of the observability delivery:
   and OpenMetrics negotiation.
 - F10: Connection Test Executor outcome observations after durable completion,
   bounded outcome labels, and lease-loss suppression.
+- F11: Console BFF request outcome and HTML render observations, bounded
+  handler labels, trusted response tenant scope, and incoming tenant-header
+  suppression.
 
 The three F7 metric families, all Java data-plane families, the Scheduler
-families, and `connection_test_total` now produce business samples. Other
-control-plane counter/histogram call sites remain outside this follow-up. The
-handbook and dashboard recipes label those contracts as pending rather than
-claiming that registration has produced samples.
+families, `connection_test_total`, and the Console request/render families now
+produce business samples. Other control-plane counter/histogram call sites
+remain outside this follow-up. The handbook and dashboard recipes label those
+contracts as pending rather than claiming that registration has produced
+samples.
 
 ## Test plan
 
@@ -71,6 +75,8 @@ The closeout is accepted when:
    descriptor or reserved family pending.
 7. F10 records only durable Connection Test Executor completions and keeps
    policy rejection distinct from executor failure.
+8. F11 records every completed Console request once, bounds handler and tenant
+   labels, and never trusts the incoming tenant header for metric identity.
 
 ## Evidence
 

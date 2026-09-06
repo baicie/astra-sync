@@ -22,7 +22,8 @@ discovery. F7 activates the authentication availability/latency and audit
 query latency recipes. F8 activates all Java data-plane batch, checkpoint,
 spill-byte, and record-count families. F9 activates Scheduler assignment,
 lease-takeover, and reconcile-duration samples. F10 activates Connection Test
-Executor outcome samples. The remaining Go recipes are descriptor-only.
+Executor outcome samples. F11 activates Console BFF request and render
+samples. The remaining Go recipes are descriptor-only.
 Operators must check the status here before using a recipe as live SLO
 evidence.
 
@@ -141,6 +142,34 @@ Suggested visualisation: `timeseries` panel with one series per outcome
 egress-policy decision; timeout, credential, transport, and handshake errors
 are included in `failure`.
 
+## Console BFF recipes
+
+### Console request outcomes (per tenant and handler)
+
+```promql
+sum by (tenant_id, outcome, handler) (
+  rate(console_request_total[5m])
+)
+```
+
+Suggested visualisation: `timeseries` panel with the fixed handler name as
+the legend. `success` contains 2xx/3xx responses, `rejected` contains 4xx
+responses, and `failure` contains 5xx responses.
+
+### Console HTML render latency (per handler)
+
+```promql
+histogram_quantile(
+  0.95,
+  sum by (handler, le) (
+    rate(console_render_duration_seconds_bucket[5m])
+  )
+)
+```
+
+Suggested visualisation: `timeseries` panel with the P50, P95, and P99 lines.
+The current `static` handler covers the embedded HTML response path.
+
 ## Deliverability recipes
 
 ### Record rejection rate (per job)
@@ -240,10 +269,11 @@ exemplar call sites land.
 
 ## Follow-up
 
-The remaining implementation must instrument the other API Server, Console,
-and auth-library call sites. F7 already covers API Server authentication
-decisions and authorized audit queries with bounded exemplars; F10 covers
-Connection Test Executor completion outcomes.
+The remaining implementation must instrument the other API Server, Controller,
+and auth-library call sites. F7 covers API Server authentication decisions and
+authorized audit queries with bounded exemplars; F10 covers Connection Test
+Executor completion outcomes; F11 covers Console BFF requests and HTML
+rendering.
 
 ## Inline placeholders for the populated handbook
 

@@ -48,7 +48,7 @@ This slice does not:
 
 ## Follow-up records
 
-The Phase 7 Slice 26 follow-up slices (F1–F10) provide the logging,
+The Phase 7 Slice 26 follow-up slices (F1–F11) provide the logging,
 descriptor, exposition, deployment, closeout, and first business
 instrumentation layers. They are recorded in
 [`../../observability/changelog.md`](../../observability/changelog.md)
@@ -80,10 +80,12 @@ whose business samples are active.
   observations.
 - F10: Connection Test Executor outcome observations after durable completion;
   policy-denied probes use `rejected` and execution failures use `failure`.
+- F11: Console BFF request outcomes and HTML render latency using a fixed
+  handler allowlist and trusted response tenant scope.
 
 The API Server availability, audit-query latency, scheduler, Java data-plane,
 and connection-test recipes can now use live metric samples. Remaining
-observability work covers the deferred API Server, Console, and auth-library
+observability work covers the deferred API Server, Controller, and auth-library
 call sites.
 
 ## Records

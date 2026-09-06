@@ -22,7 +22,9 @@ canonical UUID `request_id` through `AddWithExemplar` or
 `ObserveWithExemplar`. The API Server handler enables OpenMetrics content
 negotiation, which is required to transmit those exemplars. F10 activates
 `connection_test_total` after the executor durably completes a claimed test;
-the remaining descriptors are still registration-only.
+F11 activates `console_request_total` and
+`console_render_duration_seconds`; the remaining descriptors are still
+registration-only.
 
 ## Implementation status
 
@@ -36,7 +38,7 @@ The table separates descriptor availability from sampled runtime data.
 | `scheduler_*` listed below | scheduler | F4 descriptor + `/metrics` | assignment, lease-takeover, and reconcile-duration samples emitted by the Scheduler |
 | `astrasync_multi_region_promotion_*` | control-plane replication | recorder registration; service exposition is embedding-owned | promotion attempt and duration samples emitted when a recorder is injected |
 | `connection_test_total` | connection-test-executor | F4 descriptor + `/metrics` | emitted by F10 after durable test completion |
-| `console_*` listed below | console | F4 descriptor + `/metrics` | pending |
+| `console_*` listed below | console | F4 descriptor + `/metrics` | Console BFF request and render samples emitted by F11 |
 | `auth_*` listed below | auth library | descriptor package only | pending |
 | controller-runtime built-ins | controller | upstream endpoint | emitted by controller-runtime |
 | `coordinator_*`, `worker_*` listed below | Java data plane | F8 Micrometer registry + opt-in Worker `/metrics` | seven families emitted by checkpoint Coordinator and in-process Worker; spill bytes are sampled by the Worker-local exchange |
@@ -167,14 +169,14 @@ families from their own endpoint without creating a second listener or global re
 ## Connection test and Console metrics
 
 F4 registers the descriptors and exposes them from the owning long-running
-executables. F10 wires the Connection Test Executor completion path; Console
-business call sites remain unwired.
+executables. F10 wires the Connection Test Executor completion path and F11
+wires the Console BFF request path.
 
 | Metric | Type | Labels | Description |
 |---|---|---|---|
 | `connection_test_total` | counter | `tenant_id`, `outcome` | Completed Connection Test Executor operations. `outcome` is `success`, `rejected` for an egress-policy denial, or `failure` for timeout, cancellation, credential, transport, or handshake failure. The sample is recorded only after the durable completion succeeds. |
-| `console_request_total` | counter | `tenant_id`, `outcome`, `handler` | Console request outcomes by stable handler name. |
-| `console_render_duration_seconds` | histogram | `handler` | Console rendering duration. |
+| `console_request_total` | counter | `tenant_id`, `outcome`, `handler` | Console request outcomes by stable handler name. F11 records `success` for 2xx/3xx responses, `rejected` for 4xx responses, and `failure` for 5xx responses. The tenant comes from the server-written scope response header and falls back to `_unknown`. |
+| `console_render_duration_seconds` | histogram | `handler` | HTML response duration for the Console's fixed `static` handler. |
 
 ## Data plane metrics
 
@@ -242,9 +244,10 @@ duplicate the shape.
 F4 and F5 provide descriptor packages, HTTP exposition, and Helm discovery;
 F7 activates the three API Server SLO families, F8 activates all Java
 data-plane families, F9 activates Scheduler assignment and lease-takeover
-samples, and F10 activates Connection Test Executor outcomes. Business
-observations for the remaining API Server, Controller, Console, and
-auth-library descriptors remain deferred. The landed work is recorded in
+samples, F10 activates Connection Test Executor outcomes, and F11 activates
+Console BFF request and render samples. Business observations for the
+remaining API Server, Controller, and auth-library descriptors remain
+deferred. The landed work is recorded in
 [`changelog.md`](changelog.md).
 
 ## Inline placeholders for the populated handbook

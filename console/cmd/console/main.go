@@ -24,6 +24,7 @@ import (
 	"io.astrasync/console/internal/authflow"
 	"io.astrasync/console/internal/oidc"
 	"io.astrasync/console/internal/server"
+	consolemetrics "io.astrasync/console/observability"
 	jobv1 "io.astrasync/control-plane/api-server/gen/go/v1"
 	"io.astrasync/control-plane/auth"
 	authpostgres "io.astrasync/control-plane/auth/postgres"
@@ -301,7 +302,8 @@ func run(ctx context.Context, configuration config) error {
 		return fmt.Errorf("configure trusted-proxy boundary: %w", err)
 	}
 	console, err := server.NewWithConfig(server.Config{Backend: backend, Sessions: sessionManager,
-		Namespace: configuration.namespace, PublicOrigin: configuration.publicOrigin, AuthMode: configuration.authMode, Ready: ready})
+		Namespace: configuration.namespace, PublicOrigin: configuration.publicOrigin, AuthMode: configuration.authMode, Ready: ready,
+		Metrics: consolemetrics.DefaultRecorder()})
 	if err != nil {
 		return fmt.Errorf("create Console server: %w", err)
 	}

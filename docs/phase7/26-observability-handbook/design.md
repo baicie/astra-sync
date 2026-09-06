@@ -101,8 +101,11 @@ Descriptor registration and endpoint wiring are complete. F7 activates
 `apiserver_auth_request_duration_seconds`, and
 `apiserver_audit_query_duration_seconds`. F8 and F9 activate the Java
 data-plane and Scheduler families. F10 activates `connection_test_total` after
-durable Connection Test Executor completion; other business observations
-remain future slices.
+durable Connection Test Executor completion. F11 activates the Console BFF
+request and HTML render families by observing the completed HTTP response at
+the BFF boundary; tenant identity is accepted only from the server-written
+scope response header and handler names come from a fixed allowlist. Other
+business observations remain future slices.
 
 ## SLI categories
 
@@ -144,8 +147,8 @@ The slice is verified by:
 ## Future work
 
 F7 completes the API Server authentication and audit-query subset with bounded
-`request_id` exemplars. F8, F9, and F10 activate the Java data-plane,
-Scheduler, and Connection Test Executor business samples. The next
+`request_id` exemplars. F8, F9, F10, and F11 activate the Java data-plane,
+Scheduler, Connection Test Executor, and Console business samples. The next
 observability implementation step is to activate the remaining Go control-plane
 descriptors.
 
