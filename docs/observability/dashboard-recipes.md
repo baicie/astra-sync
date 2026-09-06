@@ -23,7 +23,8 @@ query latency recipes. F8 activates all Java data-plane batch, checkpoint,
 spill-byte, and record-count families. F9 activates Scheduler assignment,
 lease-takeover, and reconcile-duration samples. F10 activates Connection Test
 Executor outcome samples. F11 activates Console BFF request and render
-samples. The remaining Go recipes are descriptor-only.
+samples. F12 activates trusted-proxy HSTS samples. F13 activates Controller
+reconcile-duration samples. Remaining Go recipes are descriptor-only.
 Operators must check the status here before using a recipe as live SLO
 evidence.
 
@@ -129,7 +130,23 @@ histogram_quantile(
 Suggested visualisation: `timeseries` panel with the P50, P95, and
 P99 lines.
 
-### Connection test outcomes (per tenant and outcome)
+## Controller recipes
+
+### Controller reconcile duration (per tenant and outcome)
+
+```promql
+histogram_quantile(
+  0.95,
+  sum by (tenant_id, outcome, le) (
+    rate(controller_job_controller_reconcile_duration_seconds[5m])
+  )
+)
+```
+
+Suggested visualisation: `timeseries` panel with the P50, P95, and P99 lines.
+F13 records the pre-tenant `_unknown` value and uses `success` or `failure`.
+
+## Connection test outcomes (per tenant and outcome)
 
 ```promql
 sum by (tenant_id, outcome) (
@@ -244,8 +261,9 @@ sum by (tenant_id) (
 )
 ```
 
-F4 registers this descriptor, but the Slice 22 middleware does not yet
-increment it. The recipe remains inactive until that call site is wired.
+F12 increments this metric only when the API Server adds HSTS for a trusted
+proxy request. Direct TLS and plaintext requests do not contribute to this
+trusted-proxy-specific series.
 
 ## Join with the audit table
 
@@ -269,11 +287,13 @@ exemplar call sites land.
 
 ## Follow-up
 
-The remaining implementation must instrument the other API Server, Controller,
-and auth-library call sites. F7 covers API Server authentication decisions and
+The remaining implementation must instrument the other API Server and
+auth-library call sites, plus the Controller lifecycle owners outside the
+reconcile boundary. F7 covers API Server authentication decisions and
 authorized audit queries with bounded exemplars; F10 covers Connection Test
 Executor completion outcomes; F11 covers Console BFF requests and HTML
-rendering.
+rendering; F12 covers trusted-proxy HSTS responses; F13 covers Controller
+reconcile duration.
 
 ## Inline placeholders for the populated handbook
 

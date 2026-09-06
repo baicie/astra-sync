@@ -2,14 +2,17 @@
 
 ## Status
 
-Accepted (F1–F7 complete; API Server SLO instrumentation active).
+Accepted (F1–F13 complete; API Server, Java data-plane, Scheduler, Console,
+trusted-proxy HSTS, and Controller reconcile instrumentation active).
 Implements Phase 7 Slice 26 and closes the documentation and exposition
 portion of the "Observability consolidation" entry criterion recorded by
 ADR-044 §"Phase 7 entry criteria" §4. The landed logging, descriptor,
 endpoint, and Helm work is recorded in
 [`../observability/changelog.md`](../observability/changelog.md). F7 activates
-authentication and audit-query observations with bounded exemplars; other Go
-business call sites and Java metric families remain deferred.
+authentication and audit-query observations with bounded exemplars. F8–F13
+activate the Java data-plane, Scheduler, Connection Test Executor, Console,
+trusted-proxy HSTS, and Controller reconcile families; remaining Go business
+call sites and Controller lifecycle owners remain deferred.
 
 ## Context
 
@@ -157,8 +160,10 @@ The slice is verified by:
   executables; no cross-module helper or local `replace` is introduced.
 - F4/F5 register Go metric descriptors, expose optional `/metrics`
   listeners, and wire Helm discovery. F7 activates the authentication and
-  audit-query SLO families with bounded request exemplars. Remaining Go
-  business observations and Java data-plane metric families stay future work.
+  audit-query SLO families with bounded request exemplars. F8–F13 activate the
+  Java data-plane, Scheduler, Connection Test Executor, Console, trusted-proxy
+  HSTS, and Controller reconcile families. Remaining Go business observations
+  and Controller lifecycle owners stay future work.
 - The audit-correlation document becomes a pre-requisite for any
   log-side or metric-side change. Future slices that add a log
   field or a metric label must update the corresponding document

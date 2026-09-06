@@ -13,10 +13,12 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+	controllermetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	syncv1 "io.astrasync/control-plane/controller/api/v1"
 	synccontroller "io.astrasync/control-plane/controller/internal/controller"
+	controllerobservability "io.astrasync/control-plane/controller/internal/metrics"
 	jobpostgres "io.astrasync/control-plane/job/postgres"
 )
 
@@ -59,6 +61,11 @@ func main() {
 	scheme := runtime.NewScheme()
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(syncv1.AddToScheme(scheme))
+	controllerMetrics, err := controllerobservability.NewRecorder(controllermetrics.Registry)
+	if err != nil {
+		ctrl.Log.Error(err, "unable to register controller metrics")
+		os.Exit(1)
+	}
 
 	manager, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme:                  scheme,
@@ -78,7 +85,7 @@ func main() {
 
 	reconciler := &synccontroller.SyncJobReconciler{
 		Client: manager.GetClient(), Scheme: manager.GetScheme(), Clock: time.Now,
-		Jobs: database, StatusRefreshInterval: statusRefreshInterval,
+		Jobs: database, StatusRefreshInterval: statusRefreshInterval, Metrics: controllerMetrics,
 	}
 	if err := reconciler.SetupWithManager(manager); err != nil {
 		ctrl.Log.Error(err, "unable to register SyncJob controller")

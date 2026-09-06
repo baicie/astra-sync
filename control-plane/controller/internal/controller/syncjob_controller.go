@@ -25,11 +25,29 @@ type SyncJobReconciler struct {
 	Clock                 func() time.Time
 	Jobs                  job.Repository
 	StatusRefreshInterval time.Duration
+	Metrics               ReconcileMetrics
+}
+
+// ReconcileMetrics records the bounded observations produced by a reconcile
+// iteration.
+type ReconcileMetrics interface {
+	ObserveReconcile(tenantID, outcome string, duration time.Duration)
 }
 
 const controlPlaneFinalizer = "sync.astrasync.io/control-plane-finalizer"
 
-func (r *SyncJobReconciler) Reconcile(ctx context.Context, request ctrl.Request) (ctrl.Result, error) {
+func (r *SyncJobReconciler) Reconcile(ctx context.Context, request ctrl.Request) (result ctrl.Result, reconcileErr error) {
+	startedAt := r.now()
+	defer func() {
+		if r.Metrics == nil {
+			return
+		}
+		outcome := "success"
+		if reconcileErr != nil {
+			outcome = "failure"
+		}
+		r.Metrics.ObserveReconcile("_unknown", outcome, r.now().Sub(startedAt))
+	}()
 	resource := &syncv1.SyncJob{}
 	if err := r.Get(ctx, request.NamespacedName, resource); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)

@@ -27,6 +27,8 @@ F11 activates `console_request_total` and
 `apiserver_trusted_proxy_hsts_total` when the API Server emits HSTS for a
 trusted proxy request; sign-in and session-revoke descriptors remain
 registration-only because those flows are owned by the Console/auth boundary.
+F13 activates the Controller reconcile-duration sample with fixed `_unknown`
+tenant scope and a bounded outcome label.
 
 ## Implementation status
 
@@ -43,7 +45,8 @@ The table separates descriptor availability from sampled runtime data.
 | `connection_test_total` | connection-test-executor | F4 descriptor + `/metrics` | emitted by F10 after durable test completion |
 | `console_*` listed below | console | F4 descriptor + `/metrics` | Console BFF request and render samples emitted by F11 |
 | `auth_*` listed below | auth library | descriptor package only | pending |
-| controller-runtime built-ins | controller | upstream endpoint | emitted by controller-runtime |
+| `controller_job_controller_reconcile_duration_seconds` | controller | controller-runtime `/metrics` | emitted by F13 with a fixed `_unknown` tenant scope |
+| remaining custom Controller metrics | controller | controller-runtime `/metrics` | pending; no stable Controller call site owns them |
 | `coordinator_*`, `worker_*` listed below | Java data plane | F8 Micrometer registry + opt-in Worker `/metrics` | seven families emitted by checkpoint Coordinator and in-process Worker; spill bytes are sampled by the Worker-local exchange |
 
 ## Naming convention
@@ -100,8 +103,10 @@ specification overrides them.
 
 The API Server and auth descriptor packages define metrics that align with
 the audit event types. F7 activates the authentication decision counter and
-histogram plus the authorized audit-query histogram. The other rows remain
-descriptor-only.
+histogram plus the authorized audit-query histogram. F12 activates trusted
+proxy HSTS observations. Sign-in and session-revoke rows remain
+descriptor-only because their business paths are owned by the Console/auth
+boundary.
 
 | Metric | Type | Labels | Description |
 |---|---|---|---|
@@ -141,13 +146,14 @@ emit `le` buckets; the dashboard recipes compose P50, P95, and P99 from them.
 
 The table reserves lifecycle metrics for the Controller and Scheduler
 (ADR-029, ADR-031). Scheduler emits assignment and lease-takeover samples;
-the named custom Controller metrics are not implemented by
-controller-runtime's generic collector.
+F13 adds the Controller reconcile-duration sample; the state-transition and
+epoch-fence families remain pending because their durable transition owners
+are outside the Controller reconcile boundary.
 
 | Metric | Type | Labels | Description |
 |---|---|---|---|
 | `controller_job_state_total` | counter | `tenant_id`, `namespace`, `from_state`, `to_state` | Job state transitions. |
-| `controller_job_controller_reconcile_duration_seconds` | histogram | `tenant_id`, `outcome` | Time to reconcile a single Job against the desired state. |
+| `controller_job_controller_reconcile_duration_seconds` | histogram | `tenant_id`, `outcome` | Time to reconcile a single `SyncJob`; F13 uses `_unknown` before a trusted tenant binding exists and records `success` or `failure`. |
 | `controller_epoch_fence_total` | counter | `tenant_id`, `outcome` | Epoch-fence attempts from the Scheduler. |
 | `scheduler_job_assignment_total` | counter | `tenant_id`, `worker_id`, `outcome` | Assignment outcome when the Scheduler first dispatches a claimed execution. The current dispatch contract has no trusted tenant or target worker identity, so both labels are `_unknown`; `outcome` is `success`, `rejected`, or `failure`. |
 | `scheduler_lease_takeover_total` | counter | `tenant_id`, `outcome` | Successful dispatch-lease takeovers returned by the durable claim transaction. `tenant_id` is `_unknown` until the Scheduler receives a trusted tenant binding; `outcome` is `success`. |
@@ -247,10 +253,11 @@ duplicate the shape.
 F4 and F5 provide descriptor packages, HTTP exposition, and Helm discovery;
 F7 activates the three API Server SLO families, F8 activates all Java
 data-plane families, F9 activates Scheduler assignment and lease-takeover
-samples, F10 activates Connection Test Executor outcomes, and F11 activates
-Console BFF request and render samples. Business observations for the
-remaining API Server, Controller, and auth-library descriptors remain
-deferred. The landed work is recorded in
+samples, F10 activates Connection Test Executor outcomes, F11 activates
+Console BFF request and render samples, F12 activates trusted-proxy HSTS
+samples, and F13 activates Controller reconcile duration. Business
+observations for the remaining API Server, Controller lifecycle, and
+auth-library descriptors remain deferred. The landed work is recorded in
 [`changelog.md`](changelog.md).
 
 ## Inline placeholders for the populated handbook

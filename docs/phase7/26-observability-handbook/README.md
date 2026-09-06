@@ -48,13 +48,13 @@ This slice does not:
 
 ## Follow-up records
 
-The Phase 7 Slice 26 follow-up slices (F1–F11) provide the logging,
+The Phase 7 Slice 26 follow-up slices (F1–F13) provide the logging,
 descriptor, exposition, deployment, closeout, and first business
 instrumentation layers. They are recorded in
 [`../../observability/changelog.md`](../../observability/changelog.md)
 together with their source commits and PRs. Descriptor registration alone is
-not treated as emitted SLO data; F7 explicitly identifies the three families
-whose business samples are active.
+not treated as emitted SLO data; the catalog identifies each family whose
+business samples are active.
 
 - F1: SLF4J + Logback + Logstash JSON foundation for the Java data
   plane (coordinator + worker).
@@ -82,11 +82,15 @@ whose business samples are active.
   policy-denied probes use `rejected` and execution failures use `failure`.
 - F11: Console BFF request outcomes and HTML render latency using a fixed
   handler allowlist and trusted response tenant scope.
+- F12: Trusted-proxy HSTS observations at the API Server security boundary.
+- F13: Controller `SyncJob` reconcile-duration observations with fixed
+  `_unknown` tenant scope and bounded outcomes.
 
 The API Server availability, audit-query latency, scheduler, Java data-plane,
-and connection-test recipes can now use live metric samples. Remaining
-observability work covers the deferred API Server, Controller, and auth-library
-call sites.
+and connection-test recipes can now use live metric samples. Trusted-proxy HSTS
+and Controller reconcile recipes are live as well. Remaining observability work
+covers deferred API Server and auth-library call sites, plus the remaining
+Controller lifecycle call sites.
 
 ## Records
 

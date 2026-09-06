@@ -105,7 +105,11 @@ durable Connection Test Executor completion. F11 activates the Console BFF
 request and HTML render families by observing the completed HTTP response at
 the BFF boundary; tenant identity is accepted only from the server-written
 scope response header and handler names come from a fixed allowlist. Other
-business observations remain future slices.
+business observations remain future slices. F12 activates trusted-proxy HSTS
+observations when the API Server adds the header for an HTTPS request accepted
+from a trusted proxy. F13 activates Controller `SyncJob` reconcile-duration
+observations with fixed `_unknown` tenant scope and bounded `success`/`failure`
+outcomes.
 
 ## SLI categories
 
@@ -147,10 +151,11 @@ The slice is verified by:
 ## Future work
 
 F7 completes the API Server authentication and audit-query subset with bounded
-`request_id` exemplars. F8, F9, F10, and F11 activate the Java data-plane,
-Scheduler, Connection Test Executor, and Console business samples. The next
-observability implementation step is to activate the remaining Go control-plane
-descriptors.
+`request_id` exemplars. F8, F9, F10, F11, F12, and F13 activate the Java
+data-plane, Scheduler, Connection Test Executor, Console, trusted-proxy HSTS,
+and Controller business samples. Remaining work covers the other Go
+control-plane descriptors and the Controller lifecycle call sites that do not
+own a stable reconcile boundary.
 
 The Slice 25 (multi-region) follow-up will inherit the SLO
 handbook and add the multi-region SLI categories. The SLO handbook

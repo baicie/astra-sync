@@ -10,8 +10,10 @@ authentication decisions and authorized audit queries with bounded
 `request_id` exemplars. F8 and F9 activate the Java data-plane and Scheduler
 families; F10 activates Connection Test Executor outcomes after durable
 completion; F11 activates Console BFF request outcomes and HTML render
-latency. Freshness and deliverability therefore have live metric sources,
-while the SQL audit-completeness query remains independently usable.
+latency; F12 activates trusted-proxy HSTS samples; F13 activates Controller
+reconcile-duration samples. Freshness and deliverability therefore have live
+metric sources, while the SQL audit-completeness query remains independently
+usable.
 
 ## SLI categories
 
@@ -198,6 +200,8 @@ the acceptance document. The cross-reference is:
 | Slice 22 (transport hardening) | Availability | `apiserver_auth_request_total` |
 | Slice 23 (control-plane mTLS) | Availability | `apiserver_auth_request_total` |
 | Slice 26.F11 (Console BFF observations) | Console request health | `console_request_total`, `console_render_duration_seconds` |
+| Slice 26.F12 (trusted-proxy HSTS observations) | Transport security header coverage | `apiserver_trusted_proxy_hsts_total` |
+| Slice 26.F13 (Controller observations) | Controller reconcile health | `controller_job_controller_reconcile_duration_seconds` |
 
 The cross-reference is the source of truth for the SLI mapping. The
 Phase 7 acceptance document will record the Phase 7 SLIs when the
@@ -217,10 +221,10 @@ follow-up migration slice lands.
 ## Follow-up
 
 F7 completes API Server authentication and audit-query observations with
-bounded `request_id` exemplars. F8, F9, F10, and F11 activate the Java
-data-plane, Scheduler, Connection Test Executor, and Console families.
-Remaining follow-up work must instrument the other Go control-plane
-descriptors. The completed slices
+bounded `request_id` exemplars. F8, F9, F10, F11, F12, and F13 activate the
+Java data-plane, Scheduler, Connection Test Executor, Console, trusted-proxy
+HSTS, and Controller reconcile families. Remaining follow-up work must
+instrument the other Go control-plane descriptors. The completed slices
 are recorded in ADR-047 and the observability changelog.
 
 <!-- placeholders: slo-availability-target, slo-freshness-budget, slo-deliverability-target, audit-retention-days -->

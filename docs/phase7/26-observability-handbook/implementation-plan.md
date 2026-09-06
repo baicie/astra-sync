@@ -108,8 +108,34 @@ The Console BFF instrumentation follow-up is delivered as one focused slice:
 4. Observe HTML response latency only for the fixed static render handler.
 5. Verify that incoming tenant headers cannot create a metric tenant series.
 
+## F12 work breakdown
+
+The trusted-proxy HSTS instrumentation follow-up is delivered as one focused
+slice:
+
+1. Add an isolated recorder for HSTS responses with bounded tenant labels.
+2. Observe only responses for HTTPS requests accepted from a trusted proxy and
+   only when the middleware adds the HSTS header.
+3. Use the fixed pre-auth `_unknown` tenant value at the API Server boundary.
+4. Verify that direct TLS and plaintext requests do not create observations.
+
+## F13 work breakdown
+
+The Controller reconcile instrumentation follow-up is delivered as one focused
+slice:
+
+1. Add an isolated recorder for Controller reconcile duration with bounded
+   `tenant_id` and `outcome` labels.
+2. Observe every completed `SyncJob` reconcile iteration, including failures,
+   using `success` and `failure` outcomes.
+3. Use the fixed `_unknown` tenant value until a trusted Controller tenant
+   binding exists.
+4. Verify descriptor registration, label normalization, and the production
+   reconcile call path with deterministic unit tests.
+
 ## Open questions
 
-F11 completes Console BFF request and render observations. Other Go business
-call sites remain intentionally deferred. The boundary is documented in
-ADR-047 and the observability handbook.
+F13 completes Controller reconcile-duration observations. Other Go business
+call sites and the remaining Controller lifecycle owners remain intentionally
+deferred. The boundary is documented in ADR-047 and the observability
+handbook.

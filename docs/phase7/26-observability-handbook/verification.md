@@ -25,13 +25,17 @@ The closeout verifies two layers of the observability delivery:
 - F11: Console BFF request outcome and HTML render observations, bounded
   handler labels, trusted response tenant scope, and incoming tenant-header
   suppression.
+- F12: Trusted-proxy HSTS observations only when the API Server adds the
+  header for an HTTPS request accepted from a trusted proxy.
+- F13: Controller `SyncJob` reconcile-duration observations with fixed
+  `_unknown` tenant scope, bounded outcomes, and failure-path coverage.
 
 The three F7 metric families, all Java data-plane families, the Scheduler
-families, `connection_test_total`, and the Console request/render families now
-produce business samples. Other control-plane counter/histogram call sites
-remain outside this follow-up. The handbook and dashboard recipes label those
-contracts as pending rather than claiming that registration has produced
-samples.
+families, `connection_test_total`, the Console request/render families,
+trusted-proxy HSTS, and Controller reconcile duration now produce business
+samples. Other control-plane counter/histogram call sites remain outside this
+follow-up. The handbook and dashboard recipes label those contracts as
+pending rather than claiming that registration has produced samples.
 
 ## Test plan
 
@@ -49,6 +53,9 @@ samples.
   `success`/`rejected`/`failure` exactly once, trusted tenant selection,
   authorization-gated audit-query observations, and OpenMetrics exemplar
   encoding/omission.
+- Controller focused tests assert one reconcile observation per call, bounded
+  `success`/`failure` outcomes, and the fixed `_unknown` tenant scope on both
+  success and failure paths.
 - Java tests run through the repository Maven targets, including the
   Coordinator Logback configuration and error-path tests.
 - `make check-security` protects the existing credential and trusted-proxy
@@ -77,6 +84,9 @@ The closeout is accepted when:
    policy rejection distinct from executor failure.
 8. F11 records every completed Console request once, bounds handler and tenant
    labels, and never trusts the incoming tenant header for metric identity.
+9. F12 records only HSTS responses added for trusted proxy HTTPS requests.
+10. F13 records every completed Controller reconcile with bounded outcomes and
+    keeps the tenant label at `_unknown` until a trusted binding exists.
 
 ## Evidence
 

@@ -10,7 +10,7 @@ the verification evidence that each criterion is satisfied.
 | Cross-cluster control-plane mTLS | ADR-045 | Satisfied | Slice 23 merged (#38), ADR-045 accepted 2026-08-15 |
 | Operational runbook templates under `docs/runbooks/` | ADR-046 | Satisfied | Slice 24 merged (#39), ADR-046 accepted 2026-08-16 |
 | Multi-region standby design with epoch fencing | ADR-048/049/050 | Satisfied | Slice 25 ADR review complete, 2026-08-18 |
-| Observability handbook | ADR-047 | Satisfied | Slice 26 merged (#40), F1-F11 completed, ADR-047 accepted 2026-08-16 |
+| Observability handbook | ADR-047 | Satisfied | Slice 26 merged (#40), F1-F13 completed, ADR-047 accepted 2026-08-16 |
 
 ## ADR Review Evidence
 
@@ -56,6 +56,8 @@ the verification evidence that each criterion is satisfied.
 | Slice 26.F9.1 | Scheduler reconcile-duration activation | Implementation Complete | — |
 | Slice 26.F10 | Connection Test Executor outcome activation | Implementation Complete | — |
 | Slice 26.F11 | Console BFF request and render activation | Implementation Complete | — |
+| Slice 26.F12 | Trusted-proxy HSTS activation | Implementation Complete | — |
+| Slice 26.F13 | Controller reconcile-duration activation | Implementation Complete | — |
 
 ## Deferred Work
 

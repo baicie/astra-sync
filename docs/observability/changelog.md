@@ -56,6 +56,7 @@ row that explicitly activates business observations.
 | 26.F10 | (this slice) | feat(observability): activate Connection Test Executor outcome samples | (Phase 7 Slice 26 follow-up F10) |
 | 26.F11 | (this slice) | feat(observability): activate Console BFF request and render samples | (Phase 7 Slice 26 follow-up F11) |
 | 26.F12 | (this slice) | feat(observability): activate trusted-proxy HSTS samples | (Phase 7 Slice 26 follow-up F12) |
+| 26.F13 | (this slice) | feat(observability): activate Controller reconcile metrics | (Phase 7 Slice 26 follow-up F13) |
 
 The PR column is populated when the closeout pull request merges to `main`.
 The PR URLs follow the convention
