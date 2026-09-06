@@ -21,9 +21,10 @@ F4/F5 register the Go descriptors, expose `/metrics`, and wire Prometheus
 discovery. F7 activates the authentication availability/latency and audit
 query latency recipes. F8 activates all Java data-plane batch, checkpoint,
 spill-byte, and record-count families. F9 activates Scheduler assignment,
-lease-takeover, and reconcile-duration samples. The remaining Go recipes are
-descriptor-only. Operators must check the status here before using a recipe as
-live SLO evidence.
+lease-takeover, and reconcile-duration samples. F10 activates Connection Test
+Executor outcome samples. The remaining Go recipes are descriptor-only.
+Operators must check the status here before using a recipe as live SLO
+evidence.
 
 ## Availability recipes
 
@@ -127,6 +128,19 @@ histogram_quantile(
 Suggested visualisation: `timeseries` panel with the P50, P95, and
 P99 lines.
 
+### Connection test outcomes (per tenant and outcome)
+
+```promql
+sum by (tenant_id, outcome) (
+  rate(connection_test_total[5m])
+)
+```
+
+Suggested visualisation: `timeseries` panel with one series per outcome
+(`success`, `rejected`, `failure`). The `rejected` series identifies an
+egress-policy decision; timeout, credential, transport, and handshake errors
+are included in `failure`.
+
 ## Deliverability recipes
 
 ### Record rejection rate (per job)
@@ -227,10 +241,9 @@ exemplar call sites land.
 ## Follow-up
 
 The remaining implementation must instrument the other API Server, Console,
-Scheduler, Connection Test Executor, and auth-library call sites, then
-register the Java data-plane metric families. F7 already covers API Server
-authentication decisions and authorized audit queries with bounded
-exemplars.
+and auth-library call sites. F7 already covers API Server authentication
+decisions and authorized audit queries with bounded exemplars; F10 covers
+Connection Test Executor completion outcomes.
 
 ## Inline placeholders for the populated handbook
 

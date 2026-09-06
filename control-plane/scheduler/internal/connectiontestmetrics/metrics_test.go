@@ -6,8 +6,34 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 )
+
+func TestRecorderObservesOnlyBoundedOutcomes(t *testing.T) {
+	recorder, err := NewRecorder(prometheus.NewRegistry())
+	if err != nil {
+		t.Fatalf("create recorder: %v", err)
+	}
+
+	recorder.Observe("tenant-a", OutcomeSuccess)
+	recorder.Observe("tenant-a", OutcomeRejected)
+	recorder.Observe("tenant-a", "unexpected")
+	recorder.Observe(" ", OutcomeFailure)
+
+	if got := testutil.ToFloat64(recorder.ConnectionTestTotal.WithLabelValues("tenant-a", OutcomeSuccess)); got != 1 {
+		t.Fatalf("successful connection tests = %v, want 1", got)
+	}
+	if got := testutil.ToFloat64(recorder.ConnectionTestTotal.WithLabelValues("tenant-a", OutcomeRejected)); got != 1 {
+		t.Fatalf("rejected connection tests = %v, want 1", got)
+	}
+	if got := testutil.ToFloat64(recorder.ConnectionTestTotal.WithLabelValues("tenant-a", OutcomeFailure)); got != 1 {
+		t.Fatalf("failed connection tests = %v, want 1", got)
+	}
+	if got := testutil.ToFloat64(recorder.ConnectionTestTotal.WithLabelValues("_unknown", OutcomeFailure)); got != 1 {
+		t.Fatalf("unknown-tenant connection tests = %v, want 1", got)
+	}
+}
 
 func TestMetricsRegistered(t *testing.T) {
 	metric := ConnectionTestTotal.WithLabelValues("tenant-a", "success")

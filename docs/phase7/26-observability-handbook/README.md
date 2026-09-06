@@ -48,7 +48,7 @@ This slice does not:
 
 ## Follow-up records
 
-The Phase 7 Slice 26 follow-up slices (F1–F7) provide the logging,
+The Phase 7 Slice 26 follow-up slices (F1–F10) provide the logging,
 descriptor, exposition, deployment, closeout, and first business
 instrumentation layers. They are recorded in
 [`../../observability/changelog.md`](../../observability/changelog.md)
@@ -74,11 +74,17 @@ whose business samples are active.
 - F7: API Server authentication decision counter/histogram and authorized
   audit-query histogram observations, with OpenMetrics negotiation and
   canonical UUID `request_id` exemplars.
+- F8/F8.1: Java data-plane batch, checkpoint, record-count, and Worker-local
+  spill-byte observations.
+- F9/F9.1: Scheduler assignment, lease-takeover, and reconcile-duration
+  observations.
+- F10: Connection Test Executor outcome observations after durable completion;
+  policy-denied probes use `rejected` and execution failures use `failure`.
 
-The API Server availability and audit-query latency recipes can now be used as
-live SLO evidence. The next observability implementation slices must activate
-the remaining Go descriptors and add Java data-plane metrics before freshness
-and deliverability recipes become live.
+The API Server availability, audit-query latency, scheduler, Java data-plane,
+and connection-test recipes can now use live metric samples. Remaining
+observability work covers the deferred API Server, Console, and auth-library
+call sites.
 
 ## Records
 

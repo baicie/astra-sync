@@ -7,9 +7,10 @@ is a template; the populated SLO targets are deployment-owned.
 F4/F5 provide Go metric descriptors and scrape endpoints. F7 makes the API
 Server availability and audit-query latency expressions live by instrumenting
 authentication decisions and authorized audit queries with bounded
-`request_id` exemplars. Freshness and deliverability remain target contracts
-because the Java data-plane metric families are not registered. The SQL
-audit-completeness query remains independently usable.
+`request_id` exemplars. F8 and F9 activate the Java data-plane and Scheduler
+families; F10 activates Connection Test Executor outcomes after durable
+completion. Freshness and deliverability therefore have live metric sources,
+while the SQL audit-completeness query remains independently usable.
 
 ## SLI categories
 
@@ -149,6 +150,22 @@ LIMIT 100;
 The diff query is the operator's entry point for an audit
 completeness regression.
 
+## Connection test diagnostics
+
+Connection Test Executor outcomes provide a tenant-scoped diagnostic signal for
+connection readiness and egress policy decisions:
+
+```promql
+sum by (tenant_id, outcome) (
+  rate(connection_test_total[5m])
+)
+```
+
+`success` identifies a completed probe, `rejected` identifies an egress-policy
+denial, and `failure` covers timeout, cancellation, credential, transport, and
+handshake failures. The executor records the sample only after the durable
+operation completion succeeds, so a lost lease does not create an observation.
+
 ## Per-slice SLIs
 
 The Phase 6 acceptance document records the SLIs that the Phase 6
@@ -181,9 +198,9 @@ follow-up migration slice lands.
 ## Follow-up
 
 F7 completes API Server authentication and audit-query observations with
-bounded `request_id` exemplars. Remaining follow-up work must instrument the
-other Go control-plane descriptors and register the Java data-plane families
-used by freshness and deliverability. The completed slices are recorded in
-ADR-047 and the observability changelog.
+bounded `request_id` exemplars. F8, F9, and F10 activate the Java data-plane,
+Scheduler, and Connection Test Executor families. Remaining follow-up work
+must instrument the other Go control-plane descriptors. The completed slices
+are recorded in ADR-047 and the observability changelog.
 
 <!-- placeholders: slo-availability-target, slo-freshness-budget, slo-deliverability-target, audit-retention-days -->

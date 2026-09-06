@@ -84,9 +84,20 @@ metrics listeners and ServiceMonitor resources only when enabled; the
 default-disabled listener path remains unchanged. The implementation ships
 when the closeout PR merges.
 
+## F10 work breakdown
+
+The Connection Test Executor instrumentation is delivered as one focused
+follow-up:
+
+1. Add an isolated recorder with a bounded `tenant_id` and `outcome` label
+   allowlist.
+2. Record exactly once after a claimed operation's durable completion succeeds.
+3. Classify egress-policy denial as `rejected`; classify timeout, cancellation,
+   credential, transport, and handshake failures as `failure`.
+4. Verify that lease loss does not create a business sample.
+
 ## Open questions
 
-F7 completes API Server authentication and audit-query observations. Other Go
-business call sites and Java data-plane metric families remain intentionally
-deferred. The boundary is documented in ADR-047 and the observability
-handbook.
+F10 completes Connection Test Executor outcome observations. Other Go business
+call sites remain intentionally deferred. The boundary is documented in
+ADR-047 and the observability handbook.

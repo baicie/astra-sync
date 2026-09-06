@@ -20,9 +20,9 @@ F7 adds business instrumentation for API Server authentication decisions and
 authorized audit queries. Those call sites update three families and attach a
 canonical UUID `request_id` through `AddWithExemplar` or
 `ObserveWithExemplar`. The API Server handler enables OpenMetrics content
-negotiation, which is required to transmit those exemplars. The remaining
-descriptors are still registration-only; a scrape exposes their business
-series only after a future call site creates a labelled sample.
+negotiation, which is required to transmit those exemplars. F10 activates
+`connection_test_total` after the executor durably completes a claimed test;
+the remaining descriptors are still registration-only.
 
 ## Implementation status
 
@@ -35,7 +35,7 @@ The table separates descriptor availability from sampled runtime data.
 | remaining `apiserver_*` listed below | api-server | F4 descriptor + `/metrics` | pending |
 | `scheduler_*` listed below | scheduler | F4 descriptor + `/metrics` | assignment, lease-takeover, and reconcile-duration samples emitted by the Scheduler |
 | `astrasync_multi_region_promotion_*` | control-plane replication | recorder registration; service exposition is embedding-owned | promotion attempt and duration samples emitted when a recorder is injected |
-| `connection_test_total` | connection-test-executor | F4 descriptor + `/metrics` | pending |
+| `connection_test_total` | connection-test-executor | F4 descriptor + `/metrics` | emitted by F10 after durable test completion |
 | `console_*` listed below | console | F4 descriptor + `/metrics` | pending |
 | `auth_*` listed below | auth library | descriptor package only | pending |
 | controller-runtime built-ins | controller | upstream endpoint | emitted by controller-runtime |
@@ -166,12 +166,13 @@ families from their own endpoint without creating a second listener or global re
 
 ## Connection test and Console metrics
 
-F4 registers the following descriptors and exposes them from the owning
-long-running executable. Their business call sites remain unwired.
+F4 registers the descriptors and exposes them from the owning long-running
+executables. F10 wires the Connection Test Executor completion path; Console
+business call sites remain unwired.
 
 | Metric | Type | Labels | Description |
 |---|---|---|---|
-| `connection_test_total` | counter | `tenant_id`, `outcome` | Connection-test outcomes. |
+| `connection_test_total` | counter | `tenant_id`, `outcome` | Completed Connection Test Executor operations. `outcome` is `success`, `rejected` for an egress-policy denial, or `failure` for timeout, cancellation, credential, transport, or handshake failure. The sample is recorded only after the durable completion succeeds. |
 | `console_request_total` | counter | `tenant_id`, `outcome`, `handler` | Console request outcomes by stable handler name. |
 | `console_render_duration_seconds` | histogram | `handler` | Console rendering duration. |
 
@@ -240,10 +241,11 @@ duplicate the shape.
 
 F4 and F5 provide descriptor packages, HTTP exposition, and Helm discovery;
 F7 activates the three API Server SLO families, F8 activates all Java
-data-plane families, and F9 activates Scheduler assignment and lease-takeover
-samples. Business observations for the remaining API Server, Controller,
-Console, Connection Test Executor, and auth-library descriptors remain
-deferred. The landed work is recorded in [`changelog.md`](changelog.md).
+data-plane families, F9 activates Scheduler assignment and lease-takeover
+samples, and F10 activates Connection Test Executor outcomes. Business
+observations for the remaining API Server, Controller, Console, and
+auth-library descriptors remain deferred. The landed work is recorded in
+[`changelog.md`](changelog.md).
 
 ## Inline placeholders for the populated handbook
 

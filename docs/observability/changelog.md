@@ -53,6 +53,7 @@ row that explicitly activates business observations.
 | 26.F8.1 | (this slice) | feat(observability): activate Worker-local spill byte samples | (Phase 7 Slice 26 follow-up F8.1) |
 | 26.F9 | (this slice) | feat(observability): activate Scheduler assignment and lease-takeover samples | (Phase 7 Slice 26 follow-up F9) |
 | 26.F9.1 | (this slice) | feat(observability): observe scheduler reconcile duration per claimed execution | (Phase 7 Slice 26 follow-up F9.1) |
+| 26.F10 | (this slice) | feat(observability): activate Connection Test Executor outcome samples | (Phase 7 Slice 26 follow-up F10) |
 
 The PR column is populated when the closeout pull request merges to `main`.
 The PR URLs follow the convention

@@ -10,9 +10,12 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 
 	"io.astrasync/control-plane/connection"
 	connectionmemory "io.astrasync/control-plane/connection/memory"
+	"io.astrasync/control-plane/scheduler/internal/connectiontestmetrics"
 	"io.astrasync/control-plane/scheduler/internal/materialization"
 )
 
@@ -89,11 +92,98 @@ func TestExecutorSanitizesCredentialProviderFailure(t *testing.T) {
 	}
 }
 
+func TestExecutorRecordsAuthoritativeConnectionTestOutcome(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		result  ProbeResult
+		outcome string
+	}{
+		{name: "success", result: SuccessfulProbe(), outcome: connectiontestmetrics.OutcomeSuccess},
+		{
+			name: "policy_rejected",
+			result: FailedProbe(
+				connection.TestPhasePolicy, connection.TestResultPolicyDenied,
+				"connection.test.egress_policy",
+			),
+			outcome: connectiontestmetrics.OutcomeRejected,
+		},
+		{
+			name: "transport_failure",
+			result: FailedProbe(
+				connection.TestPhaseTransport, connection.TestResultTransportFailed,
+				"connection.test.transport",
+			),
+			outcome: connectiontestmetrics.OutcomeFailure,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			repository, tenantID, operationID := seedExecutorTest(t)
+			recorder, err := connectiontestmetrics.NewRecorder(prometheus.NewRegistry())
+			if err != nil {
+				t.Fatalf("create recorder: %v", err)
+			}
+			executor := newTestExecutorWithMetrics(
+				t, repository, fakeCredentialProvider{
+					fields: map[string][]byte{"password": []byte("credential-sentinel")},
+				}, fixedProbe{result: test.result}, recorder,
+			)
+
+			claimed, err := executor.RunOnce(context.Background())
+			if err != nil || claimed != 1 {
+				t.Fatalf("run executor: claimed=%d err=%v", claimed, err)
+			}
+			if got := testutil.ToFloat64(
+				recorder.ConnectionTestTotal.WithLabelValues(tenantID, test.outcome),
+			); got != 1 {
+				t.Fatalf("%s connection test samples = %v, want 1", test.outcome, got)
+			}
+			result, err := repository.GetTest(context.Background(), tenantID, operationID)
+			if err != nil || result.OperationID != operationID {
+				t.Fatalf("authoritative completion was not stored: result=%+v err=%v", result, err)
+			}
+		})
+	}
+}
+
+func TestExecutorDoesNotRecordOutcomeAfterLeaseLoss(t *testing.T) {
+	repository, tenantID, _ := seedExecutorTest(t)
+	recorder, err := connectiontestmetrics.NewRecorder(prometheus.NewRegistry())
+	if err != nil {
+		t.Fatalf("create recorder: %v", err)
+	}
+	executor := newTestExecutorWithMetrics(
+		t, leaseLossRepository{Repository: repository}, fakeCredentialProvider{
+			fields: map[string][]byte{"password": []byte("credential-sentinel")},
+		}, fixedProbe{result: SuccessfulProbe()}, recorder,
+	)
+
+	claimed, err := executor.RunOnce(context.Background())
+	if err != nil || claimed != 1 {
+		t.Fatalf("run executor: claimed=%d err=%v", claimed, err)
+	}
+	if got := testutil.ToFloat64(
+		recorder.ConnectionTestTotal.WithLabelValues(tenantID, connectiontestmetrics.OutcomeSuccess),
+	); got != 0 {
+		t.Fatalf("lease-lost connection test samples = %v, want 0", got)
+	}
+}
+
 func newTestExecutor(
 	t *testing.T,
-	repository *connectionmemory.Repository,
+	repository WorkRepository,
 	provider materialization.CredentialProvider,
 	probe Probe,
+) *Executor {
+	t.Helper()
+	return newTestExecutorWithMetrics(t, repository, provider, probe, nil)
+}
+
+func newTestExecutorWithMetrics(
+	t *testing.T,
+	repository WorkRepository,
+	provider materialization.CredentialProvider,
+	probe Probe,
+	recorder *connectiontestmetrics.Recorder,
 ) *Executor {
 	t.Helper()
 	registry, err := NewRegistry(map[string]Probe{"fake": probe})
@@ -106,18 +196,42 @@ func newTestExecutor(
 	if err != nil {
 		t.Fatalf("construct guard: %v", err)
 	}
+	options := []ExecutorOption(nil)
+	if recorder != nil {
+		options = append(options, WithMetrics(recorder))
+	}
 	executor, err := NewExecutor(
 		repository, provider, registry, guard,
 		ExecutorConfig{
 			ExecutorID: "executor-test", Concurrency: 1, ClaimBatch: 1,
 			ClaimInterval: time.Second, LeaseDuration: 4 * time.Second,
 			ProbeTimeout: 2 * time.Second, CompletionTimeout: time.Second,
-		}, time.Now,
+		}, time.Now, options...,
 	)
 	if err != nil {
 		t.Fatalf("construct executor: %v", err)
 	}
 	return executor
+}
+
+type fixedProbe struct {
+	result ProbeResult
+}
+
+func (p fixedProbe) Execute(
+	context.Context, *Configuration, *EgressGuard, connection.TestEgressPolicy,
+) ProbeResult {
+	return p.result
+}
+
+type leaseLossRepository struct {
+	*connectionmemory.Repository
+}
+
+func (r leaseLossRepository) CompleteTest(
+	context.Context, string, string, connection.TestCompletion, time.Time,
+) (connection.TestOperation, error) {
+	return connection.TestOperation{}, connection.ErrTestLeaseLost
 }
 
 func seedExecutorTest(t *testing.T) (*connectionmemory.Repository, string, string) {

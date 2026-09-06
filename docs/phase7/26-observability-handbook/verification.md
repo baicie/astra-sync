@@ -20,12 +20,14 @@ The closeout verifies two layers of the observability delivery:
 - F7: API Server authentication counter/histogram and authorized audit-query
   histogram observations, trusted tenant labels, canonical UUID exemplars,
   and OpenMetrics negotiation.
+- F10: Connection Test Executor outcome observations after durable completion,
+  bounded outcome labels, and lease-loss suppression.
 
-The three F7 metric families now produce business samples. Other
-control-plane counter/histogram call sites and Java data-plane metric families
-remain outside this follow-up. The handbook and dashboard recipes label those
-contracts as pending rather than claiming that registration has produced
-samples.
+The three F7 metric families, all Java data-plane families, the Scheduler
+families, and `connection_test_total` now produce business samples. Other
+control-plane counter/histogram call sites remain outside this follow-up. The
+handbook and dashboard recipes label those contracts as pending rather than
+claiming that registration has produced samples.
 
 ## Test plan
 
@@ -67,6 +69,8 @@ The closeout is accepted when:
    recorded as follow-up rather than silently treated as complete.
 6. F7 marks only its three API Server families active and leaves every other
    descriptor or reserved family pending.
+7. F10 records only durable Connection Test Executor completions and keeps
+   policy rejection distinct from executor failure.
 
 ## Evidence
 
