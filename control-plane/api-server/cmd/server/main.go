@@ -527,11 +527,6 @@ func run(ctx context.Context, configuration config, multiRegionMetrics *replicat
 			return fmt.Errorf("create recovery backend: %w", err)
 		}
 		replicationService.SetRecoveryBackend(recoveryBackend)
-		if err := replicationRuntime.Start(ctx); err != nil {
-			_ = replicationRuntime.Close()
-			return fmt.Errorf("start replication runtime: %w", err)
-		}
-		defer replicationRuntime.Close()
 	}
 	trustedProxyPrefixes, err := loadTrustedProxyPrefixes(configuration)
 	if err != nil {
@@ -640,6 +635,18 @@ func run(ctx context.Context, configuration config, multiRegionMetrics *replicat
 			errorsChannel <- fmt.Errorf("serve HTTP: %w", serveErr)
 		}
 	}()
+	// Start the replication runtime only after this API server is listening.
+	// Both regional runtimes dial their peer during startup, so starting the
+	// runtime before serving gRPC would deadlock the two-region topology.
+	if replicationRuntime != nil {
+		if err := replicationRuntime.Start(ctx); err != nil {
+			grpcServer.Stop()
+			_ = httpServer.Close()
+			_ = replicationRuntime.Close()
+			return fmt.Errorf("start replication runtime: %w", err)
+		}
+		defer replicationRuntime.Close()
+	}
 
 	select {
 	case <-ctx.Done():

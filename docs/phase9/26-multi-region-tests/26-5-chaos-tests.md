@@ -3,8 +3,8 @@
 ## Status
 
 **Complete.** Implemented chaos tests for multi-region failure scenarios on
-2026-08-19. The deterministic chaos suite passes; Docker Compose acceptance
-remains host-dependent and is recorded in the Phase 9 closeout.
+2026-08-19. The deterministic chaos suite and shared Docker Compose
+deployment acceptance pass.
 
 ## Context
 
