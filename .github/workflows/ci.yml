@@ -93,13 +93,22 @@ jobs:
         run: mvn -B -ntp verify -DskipITs
 
       - name: Check deployment connector inventory
+        env:
+          CATALOG_BUILD_VERSION: ${{ github.sha }}
         run: |
           mkdir -p target/catalog-check
           java -jar cli/target/astrasync-cli-0.1.0-SNAPSHOT-all.jar \
             catalog-export target/catalog-check/connector-inventory.pb \
-            --compiler-build 0.1.0-SNAPSHOT \
+            --compiler-build $CATALOG_BUILD_VERSION \
             --execution-profile standard
-          python scripts/check-files-identical.py deployment/catalog/connector-inventory.pb target/catalog-check/connector-inventory.pb
+          if python scripts/check-files-identical.py deployment/catalog/connector-inventory.pb target/catalog-check/connector-inventory.pb; then
+            echo "catalog-check passed"
+          else
+            echo "::error::Committed catalog differs from freshly-exported catalog"
+            echo "::error::Running diff-catalog for diagnostics..."
+            python scripts/diff-catalog.py deployment/catalog/connector-inventory.pb target/catalog-check/connector-inventory.pb || true
+            exit 1
+          fi
 
       - name: Check Java formatting
         run: mvn -B -ntp spotless:check

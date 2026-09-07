@@ -1,6 +1,6 @@
 # Makefile for AstraSync
 
-.PHONY: all build build-java build-go build-connectors test test-java test-go test-integration-go test-integration-multi-region vet-go check-security check-runbooks check clean install format check verify catalog-check docker-build docker-push proto-generate proto-go-generate proto-lint crd-generate install-hooks
+.PHONY: all build build-java build-go build-connectors test test-java test-go test-integration-go test-integration-multi-region vet-go check-security check-runbooks check clean install format check verify catalog-check catalog-export catalog-info catalog-diff docker-build docker-push proto-generate proto-go-generate proto-lint crd-generate install-hooks
 
 GO_MODULES := control-plane control-plane/api-server control-plane/controller control-plane/scheduler control-plane/catalog control-plane/auth console
 JAVA_PROTO_MODULES := connector-api,protocol/data-protocol,protocol/connector-protocol,protocol/worker-protocol,control-plane/compiler-validation
@@ -116,10 +116,54 @@ check-mtls: vet-go
 	(cd control-plane/api-server && go test -count=1 -run 'MTLS|LoadConfig' ./cmd/server/...); \
 	(cd console && go test -count=1 -run 'MTLS|LoadConfig' ./cmd/console/...)
 
+# Phase 15 Slice 41: catalog-check uses a dynamic build version (git SHA) and
+# falls back to ``scripts/diff-catalog.py`` diagnostics when the committed and
+# freshly-exported inventories diverge, instead of the previous bare
+# "files differ" message.
+CATALOG_BUILD_VERSION ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
+CATALOG_EXECUTION_PROFILE ?= standard
+
 catalog-check:
 	mvn -pl cli -am package -DskipTests -DskipITs
-	java -jar cli/target/astrasync-cli-0.1.0-SNAPSHOT-all.jar catalog-export target/connector-inventory.pb --compiler-build 0.1.0-SNAPSHOT --execution-profile standard
-	python scripts/check-files-identical.py deployment/catalog/connector-inventory.pb target/connector-inventory.pb
+	java -jar cli/target/astrasync-cli-0.1.0-SNAPSHOT-all.jar \
+		catalog-export target/connector-inventory.pb \
+		--compiler-build $(CATALOG_BUILD_VERSION) \
+		--execution-profile $(CATALOG_EXECUTION_PROFILE)
+	@if ! python scripts/check-files-identical.py deployment/catalog/connector-inventory.pb target/connector-inventory.pb; then \
+		echo "::catalog-check::committed catalog differs from freshly-exported catalog; running diff-catalog for diagnostics"; \
+		python scripts/diff-catalog.py deployment/catalog/connector-inventory.pb target/connector-inventory.pb || true; \
+		exit 1; \
+	fi
+
+# Phase 15 Slice 41: regenerate the deployment-authoritative catalog against the
+# current commit. Build version is sourced from git, not a hardcoded literal, so
+# the catalog embedded build id never drifts when the project bumps its
+# version. Override CATALOG_BUILD_VERSION / CATALOG_EXECUTION_PROFILE for
+# ad-hoc exports (e.g. release dry-runs).
+catalog-export:
+	@echo "Exporting deployment connector inventory (build=$(CATALOG_BUILD_VERSION), profile=$(CATALOG_EXECUTION_PROFILE)) ..."
+	mvn -pl cli -am package -DskipTests -DskipITs
+	java -jar cli/target/astrasync-cli-0.1.0-SNAPSHOT-all.jar \
+		catalog-export target/connector-inventory.pb \
+		--compiler-build $(CATALOG_BUILD_VERSION) \
+		--execution-profile $(CATALOG_EXECUTION_PROFILE)
+
+# Phase 15 Slice 41: print a human-readable summary of the committed catalog
+# without rebuilding the CLI jar from scratch (uses the same jar that
+# catalog-export produces).
+catalog-info:
+	@python scripts/catalog-info.py
+
+# Phase 15 Slice 41: explain the drift between two catalogs. Used by CI when
+# catalog-check fails so the developer sees actionable diagnostics instead of
+# a bare "files differ" message. Pass EXPECTED and ACTUAL paths or rely on the
+# defaults (committed vs. freshly-exported).
+catalog-diff:
+	@if [ -z "$(EXPECTED)" ] || [ -z "$(ACTUAL)" ]; then \
+		echo "Usage: make catalog-diff EXPECTED=<file> ACTUAL=<file>" >&2; \
+		exit 2; \
+	fi
+	@python scripts/diff-catalog.py "$(EXPECTED)" "$(ACTUAL)"
 
 # Clean build artifacts
 clean:
