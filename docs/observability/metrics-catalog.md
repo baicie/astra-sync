@@ -40,8 +40,8 @@ The table separates descriptor availability from sampled runtime data.
 |---|---|---|---|
 | `apiserver_auth_request_total`, `apiserver_auth_request_duration_seconds` | api-server | F4 descriptor + `/metrics` | emitted by F7 authentication interceptor |
 | `apiserver_audit_query_duration_seconds` | api-server | F4 descriptor + `/metrics` | emitted by F7 authorized audit-query path |
-| `apiserver_sign_in_total`, `apiserver_session_revoke_total` | api-server | F4 descriptor + `/metrics` | Phase 17 slice 43.1 (ADR-058); no API Server business call site owns these Console/auth flows today |
-| `apiserver_trusted_proxy_hsts_total` | api-server | F4 descriptor + `/metrics` | emitted by F12 trusted-proxy HSTS middleware |
+| `apiserver_sign_in_total`, `apiserver_session_revoke_total` | api-server | F4 descriptor + Recorder method (slice 43.1) | Recorder wired; production call site pending slice 43.1.5 (auth flow surface decision). The Recorder routes every label value through `io.astrasync/control-plane/observability/normalize` so the slice-43.1 contract is enforced even before the production call site lands. |
+| `apiserver_trusted_proxy_hsts_total` | api-server | F4 descriptor + Recorder method (slice 43.1) | emitted by F12 trusted-proxy HSTS middleware; the observer now funnels the pre-auth tenant through `normalize` (slice 43.1) |
 | `scheduler_*` listed below | scheduler | F4 descriptor + `/metrics` | assignment, lease-takeover, and reconcile-duration samples emitted by the Scheduler |
 | `astrasync_multi_region_promotion_*`, `astrasync_multi_region_event_*`, `astrasync_multi_region_recovery_*` | control-plane replication | recorder registration; API Server exposition is embedding-owned | promotion, event-delivery, and recovery samples emitted when a recorder is injected; Phase 10 verifies the API Server scrape path |
 | `connection_test_total` | connection-test-executor | F4 descriptor + `/metrics` | emitted by F10 after durable test completion |
@@ -115,8 +115,8 @@ admin CLI success boundaries to be instrumented.
 |---|---|---|---|
 | `apiserver_auth_request_total` | counter | `tenant_id`, `outcome` | Completed API Server authentication and authorization decisions. |
 | `apiserver_auth_request_duration_seconds` | histogram | `tenant_id`, `outcome` | Decision time through authorization, excluding business-handler execution. |
-| `apiserver_sign_in_total` | counter | `tenant_id`, `outcome` | Sign-in events, including denied sign-ins. Phase 17 slice 43.1 (ADR-058) introduces the call site. |
-| `apiserver_session_revoke_total` | counter | `tenant_id`, `actor_id` | Sessions revoked by the admin CLI or by the audit-driven revocation path. Phase 17 slice 43.1 (ADR-058) introduces the call site. |
+| `apiserver_sign_in_total` | counter | `tenant_id`, `outcome` | Sign-in events, including denied sign-ins. Recorder wired in Phase 17 slice 43.1; production call site pending. |
+| `apiserver_session_revoke_total` | counter | `tenant_id`, `actor_id` | Sessions revoked by the admin CLI or by the audit-driven revocation path. Recorder wired in Phase 17 slice 43.1; production call site pending. |
 | `apiserver_audit_query_duration_seconds` | histogram | `tenant_id` | Time to fulfil one authorized audit query, including failures after authorization. |
 | `apiserver_trusted_proxy_hsts_total` | counter | `tenant_id` | HSTS responses emitted for HTTPS requests accepted from a trusted proxy; F12 records the pre-auth `_unknown` tenant value. |
 | `auth_sign_in_total` | counter | `tenant_id`, `outcome` | Auth-library sign-in descriptor. Phase 17 slice 43.2 (ADR-058) wires the admin CLI bootstrap flows and any new auth helper. |

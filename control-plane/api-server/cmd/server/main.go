@@ -42,6 +42,7 @@ import (
 	"io.astrasync/control-plane/connection"
 	connectionpostgres "io.astrasync/control-plane/connection/postgres"
 	jobpostgres "io.astrasync/control-plane/job/postgres"
+	"io.astrasync/control-plane/observability/normalize"
 	replicationadapters "io.astrasync/control-plane/replication/adapters"
 	replicationmetrics "io.astrasync/control-plane/replication/metrics"
 	replicationobjectstore "io.astrasync/control-plane/replication/objectstore"
@@ -695,7 +696,14 @@ func observeTrustedProxyHSTS(request *http.Request) {
 	if !ok || !address.Trusted || !strings.EqualFold(address.Scheme, "https") {
 		return
 	}
-	metrics.TrustedProxyHSTS.WithLabelValues("_unknown").Inc()
+	// The trusted-proxy layer runs before any tenant claim is parsed, so
+	// the label value is the fixed pre-auth sentinel. Routing through
+	// normalize.NormalizeTenant keeps the label contract owned by the
+	// observability package (ADR-058 §3) so this site cannot drift from
+	// every other tenant-deriving call site in the control plane.
+	metrics.TrustedProxyHSTS.WithLabelValues(
+		normalize.NormalizeTenant("_unknown"),
+	).Inc()
 }
 
 func valueOrDefault(value, defaultValue string) string {

@@ -5,6 +5,7 @@ go 1.26.0
 require (
 	github.com/google/uuid v1.6.0
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.20.0
+	github.com/jackc/pgx/v5 v5.7.2
 	github.com/prometheus/client_golang v1.20.5
 	go.uber.org/zap v1.28.0
 	google.golang.org/grpc v1.83.0
@@ -12,6 +13,7 @@ require (
 	io.astrasync/control-plane v0.0.0
 	io.astrasync/control-plane/auth v0.0.0-00010101000000-000000000000
 	io.astrasync/control-plane/catalog v0.0.0
+	io.astrasync/control-plane/observability v0.0.0-00010101000000-000000000000
 )
 
 require (
@@ -19,7 +21,6 @@ require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
-	github.com/jackc/pgx/v5 v5.7.2 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
 	github.com/klauspost/compress v1.17.9 // indirect
 	github.com/kylelemons/godebug v1.1.0 // indirect
@@ -42,3 +43,5 @@ replace io.astrasync/control-plane => ..
 replace io.astrasync/control-plane/auth => ../auth
 
 replace io.astrasync/control-plane/catalog => ../catalog
+
+replace io.astrasync/control-plane/observability => ../observability

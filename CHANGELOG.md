@@ -8,16 +8,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `control-plane/observability/normalize`: shared label-allowlist helpers
-  for control-plane Prometheus business metrics. The new
-  `io.astrasync/control-plane/observability` Go module exposes three pure
-  functions — `NormalizeTenant`, `NormalizeOutcome`, `NormalizeWorkerID`
-  — that enforce the canonical-lowercase-UUID tenant rule (ADR-047),
-  bounded outcome allowlists (ADR-058 §3), and length-bounded worker-id
-  allowlists. Phase 17 slices 43.1 / 43.2 / 43.3 will consume this package
-  instead of duplicating helpers per metric owner. The package has no
-  Prometheus dependency and no state. 12 unit tests cover canonical /
-  non-canonical / empty / boundary cases.
+- `control-plane/api-server/internal/metrics`: Phase 17 slice 43.1
+  (ADR-058) wires `apiserver_sign_in_total`,
+  `apiserver_session_revoke_total`, and
+  `apiserver_trusted_proxy_hsts_total` through the new Recorder. Three
+  new methods — `ObserveSignIn`, `ObserveSessionRevoke`,
+  `ObserveTrustedProxyHSTS` — funnel every label value through
+  `io.astrasync/control-plane/observability/normalize` (slice 43.0).
+  The Recorder now owns the *Vec references for all six business
+  metric families exposed by the API Server; package-level CounterVec
+  access is reserved for tests and the registration boundary. Four new
+  boundary-driven tests cover the catalog authentication outcome
+  allowlist (`success|rejected|failure`), worker-id-style actor_id
+  normalisation, pre-auth tenant funneling, and a cross-call
+  cardinality bound that asserts six distinct caller inputs produce
+  only four series.
+
+- `control-plane/api-server/cmd/server/main.go`: the trusted-proxy HSTS
+  observer now routes the pre-auth tenant value through
+  `normalize.NormalizeTenant` so the label contract is owned by the
+  observability package end-to-end (ADR-058 §3). Existing scrape-level
+  tests in `main_test.go` continue to pass with no behaviour change.
+
+- `control-plane/api-server/go.mod`: require + replace
+  `io.astrasync/control-plane/observability` so the api-server module
+  imports the slice-43.0 normalize helper.
+
+- `control-plane/observability/normalize` (slice 43.0):
+  shared label-allowlist helpers for control-plane Prometheus business
+  metrics. Three pure functions — `NormalizeTenant`,
+  `NormalizeOutcome`, `NormalizeWorkerID` — enforce the
+  canonical-lowercase-UUID tenant rule (ADR-047), bounded outcome
+  allowlists (ADR-058 §3), and length-bounded worker-id allowlists.
+  Slices 43.1 (this PR) + 43.2 + 43.3 import this package; future
+  metric owners can do the same.
 
 - `scripts/run-go-modules.py` and root `Makefile`: `GO_MODULES` now
   includes `control-plane/observability`, so `make vet-go` and
