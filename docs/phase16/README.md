@@ -61,6 +61,7 @@ the CHANGELOG was out of sync, and there was no release dry-run tooling.
 
 - [Design](42-ci-hygiene/README.md)
 - [ADR-056](../adr/adr-056-ci-hygiene-and-release-tooling.md)
+- [ADR-057](../adr/adr-057-v0.3.0-release-cut.md) — v0.3.0 release cut
 - [ADR-055](../adr/adr-055-connector-catalog-lifecycle-automation.md) (Phase 15)
 - [ADR-054](../adr/adr-054-argocd-gitops-integration.md) (Phase 14)
 
@@ -80,3 +81,27 @@ After Phase 16:
   and placeholder tokens.
 - `make check-docs` catches CHANGELOG drift on every commit.
 - `make release-dry-run` prints a complete release checklist before any tag.
+
+## Release: v0.3.0
+
+Phase 16 also produced the **v0.3.0 release cut** (ADR-057). The Phase
+13-16 content is now versioned as `v0.3.0` (2026-09-07), with:
+
+- Maven `pom.xml` bumped to `0.3.0`
+- Helm chart `Chart.yaml` bumped to `0.3.0` (`version` + `appVersion`)
+- `CHANGELOG.md` `## [Unreleased]` rotated into `## [v0.3.0] - 2026-09-07`
+- `scripts/check-changelog.py` exemption boundary extended from
+  `phase_number <= 12` to `phase_number <= 16` so Phases 13-16 ship
+  under their versioned section rather than `[Unreleased]`
+- `scripts/release-dry-run.py` exemption boundary extended in lockstep
+
+The maintainer's release checklist for `v0.3.0`:
+
+1. `make release-dry-run` exits 0 (Maven version, git SHA, phase coverage,
+   proto inventory all consistent).
+2. `make check` exits 0 (`vet-go + check-runbooks + check-docs +
+   spotless:check`).
+3. Tag `v0.3.0` against the current commit.
+4. The next development commit flips `pom.xml` back to `0.3.0-SNAPSHOT`
+   (post-release housekeeping, separate from this slice).
+

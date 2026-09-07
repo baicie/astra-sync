@@ -168,9 +168,11 @@ def phases_missing_from_changelog(strict: bool = False) -> list[int]:
             rf"\bphase\s+{number}\b", body
         ):
             continue
-        # Same exemption rule as scripts/check-changelog.py: phase 1-12
-        # shipped under [v0.2.0]; they are exempt unless --strict.
-        if not strict and number <= 12:
+        # Same exemption rule as scripts/check-changelog.py: phases
+        # that have shipped under a versioned section are exempt
+        # unless --strict. Phases 1-12 ship under [v0.2.0]; Phases
+        # 13-16 ship under [v0.3.0] (ADR-057).
+        if not strict and number <= 16:
             continue
         missing.append(number)
     return missing

@@ -62,6 +62,7 @@ This directory contains the Architecture Decision Records (ADRs) for AstraSync.
 | [ADR-054](adr-054-argocd-gitops-integration.md) | ArgoCD GitOps Integration | Accepted | 2026-09-07 |
 | [ADR-055](adr-055-connector-catalog-lifecycle-automation.md) | Connector Catalog Lifecycle Automation | Accepted | 2026-09-07 |
 | [ADR-056](adr-056-ci-hygiene-and-release-tooling.md) | CI / Test Hygiene & Release Tooling | Accepted | 2026-09-07 |
+| [ADR-057](adr-057-v0.3.0-release-cut.md) | v0.3.0 Release Cut (Phases 13-16) | Accepted | 2026-09-07 |
 
 ## Template
 

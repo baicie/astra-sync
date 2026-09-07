@@ -6,6 +6,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Nothing yet. This section is reserved for the next slice that lands
+  after `v0.3.0`. The `scripts/check-changelog.py` guard will flag any
+  drift if a Complete phase is missing from this section.
+
+## [v0.3.0] - 2026-09-07
+
 This release covers Phase 13 through Phase 16, completing Kubernetes production
 hardening, ArgoCD GitOps integration, connector catalog lifecycle automation, and
 CI/test hygiene tooling. All phases are marked **Complete** in their respective

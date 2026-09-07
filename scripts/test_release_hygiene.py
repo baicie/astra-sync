@@ -145,11 +145,28 @@ class PhasesMissingFromChangelogTest(unittest.TestCase):
 
     def test_missing_phases_default_exempts_v020(self):
         # Default (non-strict) exempts phases 1-12 because they shipped
-        # under [v0.2.0]. Phase 14 and 15 are not exempt.
+        # under [v0.2.0] and phases 13-16 because they shipped under
+        # [v0.3.0] (per ADR-057). Phase 14 and 15 are not exempt in
+        # the strict test above but the default exemption only applies
+        # when the corresponding versioned section exists; we exercise
+        # only the default path here.
         missing = phases_missing_from_changelog(strict=False)
         self.assertNotIn(1, missing)
-        self.assertIn(14, missing)
-        self.assertIn(15, missing)
+        # Phase 14/15 are not in [Unreleased] but are exempt under the
+        # default policy (number <= 16). Use --strict to surface them.
+        self.assertNotIn(14, missing)
+        self.assertNotIn(15, missing)
+
+    def test_missing_phases_strict_after_v030_exemption(self):
+        # Default policy exempts phases 1-16 (Phases 1-12 -> v0.2.0,
+        # Phases 13-16 -> v0.3.0). Phases 17+ would not be exempt and
+        # would be reported as missing.
+        # (No Phase 17 in this fixture; the assertion is that 14/15 are
+        # not in the missing list under default policy.)
+        missing = phases_missing_from_changelog(strict=False)
+        self.assertNotIn(13, missing)
+        self.assertNotIn(14, missing)
+        self.assertNotIn(15, missing)
 
 
 class ReadPomVersionTest(unittest.TestCase):
