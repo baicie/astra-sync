@@ -285,6 +285,16 @@ deferred decision; the `request_id` exemplar contract documented in
 ADR-047 §126 still requires that negotiation before exemplars can
 transmit. Phase 17 does not unblock that deferral.
 
+### Slice 43.0 — umbrella infrastructure
+
+Phase 17 slice 43.0 introduces the shared helper package
+`io.astrasync/control-plane/observability/normalize`. Slices 43.1,
+43.2, and 43.3 import `NormalizeTenant`, `NormalizeOutcome`, and
+`NormalizeWorkerID` from this package instead of re-implementing the
+helpers. The package documents the allowlist contract in
+`normalize.go` and enforces it through 12 boundary-driven unit tests
+in `normalize_test.go`.
+
 ## Inline placeholders for the populated handbook
 
 The operator populates the handbook by replacing every `<placeholder>`

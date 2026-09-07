@@ -8,9 +8,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Nothing yet. This section is reserved for the next slice that lands
-  after `v0.3.0`. The `scripts/check-changelog.py` guard will flag any
-  drift if a Complete phase is missing from this section.
+- `control-plane/observability/normalize`: shared label-allowlist helpers
+  for control-plane Prometheus business metrics. The new
+  `io.astrasync/control-plane/observability` Go module exposes three pure
+  functions — `NormalizeTenant`, `NormalizeOutcome`, `NormalizeWorkerID`
+  — that enforce the canonical-lowercase-UUID tenant rule (ADR-047),
+  bounded outcome allowlists (ADR-058 §3), and length-bounded worker-id
+  allowlists. Phase 17 slices 43.1 / 43.2 / 43.3 will consume this package
+  instead of duplicating helpers per metric owner. The package has no
+  Prometheus dependency and no state. 12 unit tests cover canonical /
+  non-canonical / empty / boundary cases.
+
+- `scripts/run-go-modules.py` and root `Makefile`: `GO_MODULES` now
+  includes `control-plane/observability`, so `make vet-go` and
+  `make test-go` cover the new module alongside the existing eight
+  control-plane modules.
+
+- ADR-058 (`docs/adr/adr-058-observability-catalog-backlog.md`):
+  Observability Catalog Backlog Phase 17 umbrella decision — records
+  the recorder owner, call site, and label normalization contract for
+  every descriptor-only / unregistered business metric in
+  `docs/observability/metrics-catalog.md`.
+
+- `docs/phase17/README.md`: phase README with roadmap (slices
+  43.0 / 43.1 / 43.2 / 43.3), acceptance criteria, backlog snapshot,
+  and ADR cross-references.
+
+- `docs/observability/metrics-catalog.md`: every "pending" row in the
+  Implementation status table, the auth-detail table, the
+  Controller-detail paragraph, and the Follow-up section now points
+  at the Phase 17 slice / ADR-058 section that owns the row instead
+  of deferring without an owner.
 
 ## [v0.3.0] - 2026-09-07
 
