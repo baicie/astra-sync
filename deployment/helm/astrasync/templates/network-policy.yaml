@@ -1,0 +1,163 @@
+{{- if and .Values.networkPolicy.enabled .Values.networkPolicy.internal }}
+# Internal East-West NetworkPolicy restricting cross-component traffic to required ports.
+# Requires a CNI that supports NetworkPolicy (Calico, Cilium, kube-router, etc.).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "astrasync.fullname" . }}-internal
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "astrasync.labels" . | nindent 4 }}
+spec:
+  # Apply to all pods in the release namespace.
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    # Allow traffic from the ingress controller to the console.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 8090
+    # API Server (ports 8080 http, 50051 grpc, monitoring)
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "astrasync.selectorLabels" . | nindent 14 }}
+              app.kubernetes.io/component: controller
+        - podSelector:
+            matchLabels:
+              {{- include "astrasync.selectorLabels" . | nindent 14 }}
+              app.kubernetes.io/component: scheduler
+        - podSelector:
+            matchLabels:
+              {{- include "astrasync.selectorLabels" . | nindent 14 }}
+              app.kubernetes.io/component: console
+        - podSelector:
+            matchLabels:
+              {{- include "astrasync.selectorLabels" . | nindent 14 }}
+              app.kubernetes.io/component: connection-test-executor
+      ports:
+        - protocol: TCP
+          port: 8080
+        - protocol: TCP
+          port: 50051
+        - protocol: TCP
+          port: {{ .Values.monitoring.prometheus.port }}
+    # Controller (port 8081, monitoring)
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "astrasync.selectorLabels" . | nindent 14 }}
+              app.kubernetes.io/component: api-server
+        - podSelector:
+            matchLabels:
+              {{- include "astrasync.selectorLabels" . | nindent 14 }}
+              app.kubernetes.io/component: scheduler
+      ports:
+        - protocol: TCP
+          port: 8081
+        - protocol: TCP
+          port: {{ .Values.monitoring.prometheus.port }}
+    # Scheduler (port 8082, monitoring)
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "astrasync.selectorLabels" . | nindent 14 }}
+              app.kubernetes.io/component: api-server
+        - podSelector:
+            matchLabels:
+              {{- include "astrasync.selectorLabels" . | nindent 14 }}
+              app.kubernetes.io/component: controller
+      ports:
+        - protocol: TCP
+          port: 8082
+        - protocol: TCP
+          port: {{ .Values.monitoring.prometheus.port }}
+    # Compiler Validation (port 50052)
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "astrasync.selectorLabels" . | nindent 14 }}
+              app.kubernetes.io/component: api-server
+      ports:
+        - protocol: TCP
+          port: 50052
+    # Console (port 8090)
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "astrasync.selectorLabels" . | nindent 14 }}
+              app.kubernetes.io/component: api-server
+      ports:
+        - protocol: TCP
+          port: 8090
+    # Worker StatefulSet (protocol port 50051)
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "astrasync.selectorLabels" . | nindent 14 }}
+              app.kubernetes.io/component: scheduler
+      ports:
+        - protocol: TCP
+          port: {{ .Values.worker.protocolPort }}
+  egress:
+    # DNS (kube-dns)
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # PostgreSQL (control-plane components only)
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Release.Namespace | quote }}
+      ports:
+        - protocol: TCP
+          port: 5432
+    # etcd (control-plane components only)
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Release.Namespace | quote }}
+      ports:
+        - protocol: TCP
+          port: 2379
+    # Object storage (worker only — egress for S3/MinIO)
+    {{- if .Values.worker.enabled }}
+    {{- if .Values.objectStorage.enabled }}
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 0.0.0.0/8
+              - 10.0.0.0/8
+              - 100.64.0.0/10
+              - 127.0.0.0/8
+              - 169.254.0.0/16
+              - 172.16.0.0/12
+              - 192.0.0.0/24
+              - 192.168.0.0/16
+              - 198.18.0.0/15
+              - 224.0.0.0/4
+              - 240.0.0.0/4
+      ports:
+        - protocol: TCP
+          port: 443
+    {{- end }}
+    {{- end }}
+    # Connection test executor egress (managed by its own NetworkPolicy)
+    {{- if and .Values.connectionTestExecutor.enabled .Values.connectionTestExecutor.networkPolicy.enabled }}
+    # This policy is managed by templates/connection-test-executor/network-policy.yaml
+    {{- end }}
+{{- end }}

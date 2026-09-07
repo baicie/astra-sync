@@ -1,0 +1,16 @@
+{{- if and .Values.podDisruptionBudget.enabled (hasKey .Values.podDisruptionBudget "apiServer") .Values.podDisruptionBudget.apiServer }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "astrasync.componentFullname" (dict "context" . "component" "api-server") }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "astrasync.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api-server
+spec:
+  minAvailable: {{ .Values.podDisruptionBudget.apiServer.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "astrasync.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: api-server
+{{- end }}

@@ -1,0 +1,16 @@
+{{- if and .Values.podDisruptionBudget.enabled (hasKey .Values.podDisruptionBudget "scheduler") .Values.podDisruptionBudget.scheduler }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "astrasync.componentFullname" (dict "context" . "component" "scheduler") }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "astrasync.labels" . | nindent 4 }}
+    app.kubernetes.io/component: scheduler
+spec:
+  minAvailable: {{ .Values.podDisruptionBudget.scheduler.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "astrasync.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: scheduler
+{{- end }}

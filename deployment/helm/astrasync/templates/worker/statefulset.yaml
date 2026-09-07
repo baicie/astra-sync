@@ -22,6 +22,12 @@ spec:
       labels:
         {{- include "astrasync.labels" . | nindent 8 }}
         app.kubernetes.io/component: worker
+      {{- if .Values.monitoring.prometheus.enabled }}
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: {{ .Values.monitoring.prometheus.port | quote }}
+        prometheus.io/path: "/metrics"
+      {{- end }}
     spec:
       serviceAccountName: {{ include "astrasync.serviceAccountName" . }}
       securityContext:
@@ -48,6 +54,12 @@ spec:
             initialDelaySeconds: 5
             periodSeconds: 5
             timeoutSeconds: 3
+          startupProbe:
+            tcpSocket:
+              port: worker
+            failureThreshold: 12
+            periodSeconds: 10
+            initialDelaySeconds: 5
           resources:
             {{- toYaml .Values.worker.resources | nindent 12 }}
           env:

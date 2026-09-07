@@ -156,6 +156,30 @@ apiServer:
     databaseUrl: ""
     etcdEndpoints: ""
 
+# Global autoscaling switch and per-component autoscaling configuration.
+# Master switch: autoscaling.enabled=false means all HPAs are disabled regardless
+# of per-component .enabled flags. Set autoscaling.enabled=true in production.
+autoscaling:
+  enabled: false
+  apiServer:
+    enabled: false
+    minReplicas: 3
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+  controller:
+    enabled: false
+    minReplicas: 3
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+  scheduler:
+    enabled: false
+    minReplicas: 3
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+
 # Operator Console and OIDC backend-for-frontend. Production requires OIDC,
 # an HTTPS public URL, a session-key Secret, and TLS to the API gRPC endpoint.
 console:
@@ -407,6 +431,9 @@ objectStorage:
 # Network policy
 networkPolicy:
   enabled: false
+  # When internal=true, renders a NetworkPolicy restricting East-West traffic to
+  # required ports. Requires a CNI that supports NetworkPolicy (Calico, Cilium, etc.).
+  internal: false
   apiServer:
     enabled: true
     allowedSources: []
@@ -426,6 +453,8 @@ podDisruptionBudget:
     minAvailable: 2
   scheduler:
     minAvailable: 2
+  compilerValidation:
+    minAvailable: 1
 
 # Pod anti-affinity
 podAntiAffinity:
