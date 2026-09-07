@@ -453,6 +453,60 @@ jobs:
             exit 1
           fi
 
+      - name: Lint and render production profile
+        if: needs.changes.outputs.helm == 'true'
+        # Phase 13 Slice 30 follow-up: ensure values-production.yaml (and any
+        # chart change touching it) keeps linting and rendering clean. Also
+        # asserts the production profile's load-bearing defaults actually flow
+        # into the manifest, so a future chart refactor cannot silently drop
+        # HPA / PDB / NetworkPolicy / mtls wiring for production tenants.
+        run: |
+          set -euo pipefail
+          chart=deployment/helm/astrasync
+          prod_values="${chart}/values-production.yaml"
+
+          # 1. Static lint with production values applied (schema + template refs).
+          helm lint "${chart}" -f "${prod_values}"
+
+          # 2. Full render with production values must succeed end-to-end.
+          #    Strip CR first: helm template emits CRLF on Windows checkouts,
+          #    which breaks downstream line-anchored grep / awk assertions.
+          prod_render="$(helm template astrasync "${chart}" -f "${prod_values}" | tr -d '\r')"
+          echo "${prod_render}" > /dev/null
+
+          # 3. The production environment marker must reach at least one component;
+          #    otherwise values-production.yaml is being silently ignored.
+          #    Templates render this as the value of an ENVIRONMENT env var,
+          #    e.g. `name: ENVIRONMENT` followed by `value: production`.
+          prod_marker_count="$(echo "${prod_render}" | grep -cE '^[[:space:]]+value:[[:space:]]+"?production"?$' || true)"
+          if [[ "${prod_marker_count}" -lt 1 ]]; then
+            echo "::error::values-production.yaml did not propagate 'environment: production' to any component"
+            exit 1
+          fi
+
+          # 4. Production-only safety nets from values-production.yaml must render.
+          #    HPA + PDB are toggled by replicaCount>1 / podDisruptionBudget blocks;
+          #    NetworkPolicy is the prod-only cluster hardening; mtls surfaces
+          #    the cert secret volume on api-server. Missing any of these means
+          #    the production profile regressed.
+          for needle in 'kind: HorizontalPodAutoscaler' 'kind: PodDisruptionBudget' 'kind: NetworkPolicy' 'astrasync-api-server-mtls'; do
+            if ! echo "${prod_render}" | grep -q "${needle}"; then
+              echo "::error::expected '${needle}' in production render; values-production.yaml invariants regressed"
+              exit 1
+            fi
+          done
+
+          # 5. Sanity: replicaCount=3 must reach api-server (no silent override
+          #    from values.yaml's default 1).
+          api_replicas="$(echo "${prod_render}" \
+            | awk '/^# Source: astrasync\/templates\/api-server\/deployment.yaml/{flag=1; next} /^---/{flag=0} flag' \
+            | grep -E '^[[:space:]]+replicas:' \
+            | head -n1 | awk '{print $2}')"
+          if [[ "${api_replicas}" != "3" ]]; then
+            echo "::error::expected apiServer.replicas=3 under production profile, got '${api_replicas:-<missing>}'"
+            exit 1
+          fi
+
   security:
     name: Repository security checks
     needs: changes
