@@ -1,0 +1,50 @@
+# Dev environment override for ArgoCD ApplicationSet.
+# Loaded as second value file: values-staging.yaml + values-override.yaml
+# Values here override the staging defaults.
+
+# Dev image tag
+image:
+  tag: "latest"
+
+# Dev replica counts (minimal)
+apiServer:
+  replicaCount: 1
+
+controller:
+  replicaCount: 1
+
+scheduler:
+  replicaCount: 1
+
+console:
+  replicaCount: 1
+
+compilerValidation:
+  replicaCount: 1
+
+# Dev logging (verbose)
+logging:
+  level: DEBUG
+
+# Disable all production safety nets in dev
+podDisruptionBudget:
+  enabled: false
+
+networkPolicy:
+  enabled: false
+
+# Dev persistence: no PVC required
+postgresql:
+  primary:
+    persistence:
+      enabled: false
+
+etcd:
+  persistence:
+    enabled: false
+
+# Dev monitoring: reduced scrape interval
+monitoring:
+  prometheus:
+    serviceMonitor:
+      interval: 2m

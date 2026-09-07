@@ -1,0 +1,59 @@
+# Production environment override for ArgoCD ApplicationSet.
+# Loaded as second value file: values-staging.yaml + values-override.yaml
+# This file should be kept in sync with values-production.yaml overrides.
+# For production clusters, prefer using values-production.yaml directly via
+# the single-cluster Application manifest.
+
+# Production tag
+image:
+  tag: "v0.2.0"
+
+apiServer:
+  replicaCount: 3
+  mtls:
+    enabled: true
+  connectionRollout:
+    mutationsEnabled: false
+    testsEnabled: false
+    runtimeEnabled: false
+
+autoscaling:
+  enabled: true
+
+controller:
+  replicaCount: 3
+
+scheduler:
+  replicaCount: 3
+
+console:
+  replicaCount: 2
+
+compilerValidation:
+  replicaCount: 2
+
+logging:
+  level: INFO
+
+podDisruptionBudget:
+  enabled: true
+
+networkPolicy:
+  enabled: true
+
+postgresql:
+  primary:
+    persistence:
+      enabled: true
+      size: 50Gi
+
+etcd:
+  replicaCount: 3
+  persistence:
+    enabled: true
+    size: 10Gi
+
+monitoring:
+  prometheus:
+    serviceMonitor:
+      interval: 30s

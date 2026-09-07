@@ -1,0 +1,73 @@
+# ArgoCD namespace and account for AstraSync GitOps.
+# Apply with: kubectl apply -f deployment/argocd/namespace.yaml
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: astrasync-system
+  labels:
+    app.kubernetes.io/name: astrasync
+    app.kubernetes.io/managed-by: Helm
+    argocd.argoproj.io/managed-by: astrasync-argocd
+
+---
+# Service account used by ArgoCD to manage AstraSync applications.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: astrasync-argocd
+  namespace: astrasync-system
+  labels:
+    app.kubernetes.io/name: astrasync
+    app.kubernetes.io/component: gitops
+
+---
+# ArgoCD RBAC policy: least-privilege service account that can only manage
+# astrasync-* resources. Does NOT grant secret or cluster-wide access.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: astrasync-apps
+  namespace: astrasync-system
+  labels:
+    app.kubernetes.io/name: astrasync
+    app.kubernetes.io/component: gitops
+rules:
+  - apiGroups: ["argoproj.io"]
+    resources: ["applications", "applicationsets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["argoproj.io"]
+    resources: ["applications/finalizers", "applicationsets/finalizers"]
+    verbs: ["update"]
+  - apiGroups: ["argoproj.io"]
+    resources: ["applications/status", "applicationsets/status"]
+    verbs: ["get", "patch", "update"]
+  # Restrict to astrasync-* resources only
+  - apiGroups: [""]
+    resources: ["configmaps", "secrets"]
+    resourceNames: ["astrasync-*"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch"]
+    resourceNames:
+      - "astrasync-helm-values"   # Helm release values ConfigMap
+      - "astrasync-chart-source"  # Source tracking ConfigMap
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: astrasync-apps-binding
+  namespace: astrasync-system
+  labels:
+    app.kubernetes.io/name: astrasync
+    app.kubernetes.io/component: gitops
+subjects:
+  - kind: ServiceAccount
+    name: astrasync-argocd
+    namespace: astrasync-system
+roleRef:
+  kind: Role
+  name: astrasync-apps
+  apiGroup: rbac.authorization.k8s.io
