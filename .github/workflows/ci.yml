@@ -673,6 +673,27 @@ jobs:
       - name: Run script unit tests
         run: make test-scripts
 
+  check-docs:
+    name: Documentation hygiene gate
+    needs: changes
+    if: needs.changes.outputs.docs == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+
+      - name: Run documentation hygiene gate
+        # Phase 16 Slice 42: verifies CHANGELOG coverage (every Complete phase
+        # appears in ## [Unreleased]) and extends the runbook template guard
+        # to Phase 14 ArgoCD and Phase 15 catalog authoring docs.
+        run: make check-docs
+
   container-images:
     name: Build ${{ matrix.name }} image
     runs-on: ubuntu-latest

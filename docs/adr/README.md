@@ -61,6 +61,7 @@ This directory contains the Architecture Decision Records (ADRs) for AstraSync.
 | [ADR-053](adr-053-checkpoint-wal-and-promotion-recovery-orchestration.md) | Checkpoint WAL and Promotion Recovery Orchestration | Accepted | 2026-08-25 |
 | [ADR-054](adr-054-argocd-gitops-integration.md) | ArgoCD GitOps Integration | Accepted | 2026-09-07 |
 | [ADR-055](adr-055-connector-catalog-lifecycle-automation.md) | Connector Catalog Lifecycle Automation | Accepted | 2026-09-07 |
+| [ADR-056](adr-056-ci-hygiene-and-release-tooling.md) | CI / Test Hygiene & Release Tooling | Accepted | 2026-09-07 |
 
 ## Template
 

@@ -24,9 +24,11 @@ _spec.loader.exec_module(_module)
 
 check = _module.check
 DEFAULT_ROOT = _module.DEFAULT_ROOT
+SCAN_ROOTS = _module.SCAN_ROOTS
 file_contains_placeholder = _module.file_contains_placeholder
 file_contains_prod_hostname = _module.file_contains_prod_hostname
 iter_markdown_files = _module.iter_markdown_files
+check_all = _module.check_all
 PLACEHOLDER_RE = _module.PLACEHOLDER_RE
 PROD_HOSTNAME_PATTERNS = _module.PROD_HOSTNAME_PATTERNS
 
@@ -175,6 +177,101 @@ class IterMarkdownFilesTest(unittest.TestCase):
 
     def test_missing_directory(self):
         self.assertEqual(iter_markdown_files(self.root / "absent"), [])
+
+    def test_handles_single_file(self):
+        path = self.root / "single.md"
+        path.write_text("# single\n", encoding="utf-8")
+        self.assertEqual(iter_markdown_files(path), [path])
+
+
+class CheckModeTest(unittest.TestCase):
+    """Test that template mode requires a placeholder and doc mode does not."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _write(self, name: str, body: str) -> Path:
+        path = self.root / name
+        path.write_text(body, encoding="utf-8")
+        return path
+
+    def test_template_mode_requires_placeholder(self):
+        path = self._write("guide.md", "# Operator guide\n\nNo placeholders here.\n")
+        failures = check(self.root, mode="template")
+        self.assertTrue(any("missing <placeholder>" in f for f in failures))
+
+    def test_doc_mode_skips_placeholder_check(self):
+        path = self._write("guide.md", "# Operator guide\n\nNo placeholders here.\n")
+        failures = check(self.root, mode="doc")
+        # No prod hostname, no placeholder requirement → no failures.
+        self.assertEqual(failures, [])
+
+    def test_doc_mode_still_catches_prod_hostname(self):
+        path = self._write(
+            "guide.md",
+            "# Operator guide\n\nConnect to <astra-prod> for the secret.\n",
+        )
+        failures = check(self.root, mode="doc")
+        # Prod hostname must be flagged regardless of mode.
+        self.assertTrue(any("production hostname" in f for f in failures))
+        # But the placeholder inside the angle-bracket is preserved —
+        # a single file must not lose its placeholders just because the
+        # mode is doc.
+        self.assertFalse(any("missing <placeholder>" in f for f in failures))
+
+
+class ScanRootsRegistrationTest(unittest.TestCase):
+    """The default CI scan must include the Phase 14 and Phase 15 surfaces."""
+
+    def test_phase14_argocd_root_registered(self):
+        # The ArgoCD operator-onboarding README is treated as a template;
+        # the rest of the directory is treated as doc mode.
+        argocd_root = next(
+            (root for root, _mode in SCAN_ROOTS if root.name == "README.md" and "argocd" in str(root)),
+            None,
+        )
+        self.assertIsNotNone(argocd_root, "ArgoCD onboarding README not registered for scan")
+        self.assertTrue(str(argocd_root).replace("\\", "/").endswith("deployment/argocd/README.md"))
+        # And the directory itself must also be registered (doc mode).
+        argocd_dir = next(
+            (root for root, _mode in SCAN_ROOTS if root.name == "argocd"),
+            None,
+        )
+        self.assertIsNotNone(argocd_dir, "ArgoCD directory not registered for doc-mode scan")
+
+    def test_phase15_catalog_authoring_registered(self):
+        catalog_doc = next(
+            (root for root, _mode in SCAN_ROOTS if root.name == "catalog-authoring.md"),
+            None,
+        )
+        self.assertIsNotNone(catalog_doc, "catalog-authoring.md not registered for scan")
+        self.assertTrue(str(catalog_doc).replace("\\", "/").endswith("docs/catalog-authoring.md"))
+
+    def test_catalog_authoring_uses_doc_mode(self):
+        # The authoring guide is operator documentation, not a template;
+        # it must use doc mode so a placeholder check is skipped.
+        catalog_doc = next(
+            root for root, _mode in SCAN_ROOTS if root.name == "catalog-authoring.md"
+        )
+        mode = next(mode for root, mode in SCAN_ROOTS if root == catalog_doc)
+        self.assertEqual(mode, "doc")
+
+
+class CheckAllEndToEndTest(unittest.TestCase):
+    """Smoke-test that check_all runs without crashing on the real repo layout."""
+
+    def test_check_all_runs_against_real_repo(self):
+        # We don't assert pass/fail — we just verify the function can
+        # walk every registered root and return a list of strings (possibly
+        # empty). This guards against typos in SCAN_ROOTS at import time.
+        result = check_all()
+        self.assertIsInstance(result, list)
+        for entry in result:
+            self.assertIsInstance(entry, str)
 
 
 if __name__ == "__main__":

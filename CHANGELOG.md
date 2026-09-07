@@ -6,6 +6,93 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+This release covers Phase 13 through Phase 16, completing Kubernetes production
+hardening, ArgoCD GitOps integration, connector catalog lifecycle automation, and
+CI/test hygiene tooling. All phases are marked **Complete** in their respective
+README files.
+
+### Added
+
+#### Phase 16: CI / Test Hygiene & Release Tooling
+
+- `scripts/test_ci_workflow.py`: regression tests for every CI step added in
+  Phase 13 (production profile), Phase 14 (staging profile, ArgoCD schema),
+  and Phase 15 (catalog-check with diff fallback); 11 tests now guard CI
+  invariants
+- `scripts/check-runbook-templates.py`: new `--all` mode with per-root
+  `template` vs `doc` enforcement; Phase 14 ArgoCD README and Phase 15
+  catalog authoring guide added to scan roots
+- `scripts/check-changelog.py`: guard that every `**Complete.**` phase
+  is referenced in `## [Unreleased]`; exits 1 with actionable errors on drift
+- `scripts/release-dry-run.py`: dry-run release checklist verifying Maven
+  version, git SHA, proto inventory, and CHANGELOG coverage without mutating
+  any file
+- `make check-docs`: new Makefile target running the full documentation
+  hygiene gate (`check-runbooks --all` + `check-changelog`)
+- `make release-dry-run`: new Makefile target running the release dry-run
+  script; `make check` now includes `check-docs`
+- CI `check-docs` job: runs `make check-docs` on `docs` scope changes
+- Phase 15 completion record and Phase 16 README with roadmap and acceptance
+  criteria
+
+#### Phase 15: Connector Catalog Lifecycle Automation
+
+- CLI `catalog-export`: replaced hardcoded `--compiler-build 0.1.0-SNAPSHOT`
+  with `$(git rev-parse --short HEAD)` / `${{ github.sha }}` in Makefile
+  and CI so the embedded build id always matches the current commit
+- CLI `catalog-print` subcommand: decodes a `ConnectorInventory` `.pb` into
+  deterministic line-oriented `key=value` output for diff-friendliness
+- `scripts/diff-catalog.py`: categorises catalog drift into
+  build-version-only (exit 0) vs semantic drift (exit 1), prints bullet
+  list and unified diff; invoked by CI on failure so developers see
+  diagnostics inline
+- `scripts/catalog-info.py`: human-readable summary of any catalog without
+  rebuilding the CLI jar
+- `scripts/test_catalog_scripts.py`: 10 unit tests covering parse_lines,
+  categorise_diff, and format_summary
+- `docs/catalog-authoring.md`: end-to-end authoring guide covering when to
+  regenerate, how to add a connector, how to interpret catalog-check
+  failures, and environment variable overrides
+- Makefile `catalog-export`, `catalog-info`, `catalog-diff` targets
+
+#### Phase 14: GitOps & Progressive Delivery with ArgoCD
+
+- `deployment/argocd/application.yaml`: ArgoCD Application CR for
+  single-cluster Helm deployments with automated sync, prune, and self-heal
+- `deployment/argocd/applicationset.yaml`: ArgoCD ApplicationSet with
+  matrix generator (clusters + git directories) for multi-cluster,
+  multi-environment deployments
+- `deployment/argocd/namespace.yaml`: least-privilege RBAC (ServiceAccount,
+  Role, RoleBinding) scoped to `astrasync-*` resources and
+  `argoproj.io/applications{,ets}` verbs; no secrets access, no
+  cluster-wide permissions
+- `deployment/helm/astrasync/values-staging.yaml`: staging values profile
+  (replicas=2, autoscaling off, NetworkPolicy off, DEBUG logging) with
+  CI lint and render validation
+- `deployment/argocd/environments/{dev,staging,production}/values-override.yaml`:
+  environment-specific Helm value overrides for ArgoCD layered rendering
+- `deployment/argocd/README.md`: operator onboarding guide covering install,
+  sync, rollback, and CI integration
+- CI: staging profile step (3 PDBs, 0 HPAs, 0 NetworkPolicies,
+  environment=staging, DEBUG log level) + ArgoCD CR schema step
+- ADR-054: ArgoCD GitOps integration design decision
+
+#### Phase 13: Kubernetes Production Hardening
+
+- `deployment/helm/astrasync/values-production.yaml`: production values
+  profile (replicas=3, autoscaling on, NetworkPolicy on, mTLS on, 50Gi PVC)
+- Helm template wiring: all production-only resources (HPA, PDB,
+  NetworkPolicy, mTLS secret volume) conditionally rendered only when
+  `values-production.yaml` is applied
+- Helm assertions: API server `production` environment marker, scheduler
+  `production` environment marker, Console `production` environment marker,
+  Connection Test Executor `production` environment marker
+- `deployment/helm/astrasync/values.yaml` safety defaults: HPA and PDB
+  enabled by default; NetworkPolicy off by default (opt-in per environment)
+- CI production profile step: lint + render + 5 assertions (environment
+  marker, HPA, PDB, NetworkPolicy, mTLS, replicas=3)
+- ADR-053: production hardening design decision
+
 ## [v0.2.0] - 2026-09-07
 
 This release covers Phase 1 through Phase 12, completing the multi-region disaster

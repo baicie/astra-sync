@@ -1,6 +1,6 @@
 # Makefile for AstraSync
 
-.PHONY: all build build-java build-go build-connectors test test-java test-go test-integration-go test-integration-multi-region vet-go check-security check-runbooks check clean install format check verify catalog-check catalog-export catalog-info catalog-diff docker-build docker-push proto-generate proto-go-generate proto-lint crd-generate install-hooks
+.PHONY: all build build-java build-go build-connectors test test-java test-go test-integration-go test-integration-multi-region vet-go check-security check-runbooks check-docs check clean install format check verify catalog-check catalog-export catalog-info catalog-diff release-dry-run docker-build docker-push proto-generate proto-go-generate proto-lint crd-generate install-hooks
 
 GO_MODULES := control-plane control-plane/api-server control-plane/controller control-plane/scheduler control-plane/catalog control-plane/auth console
 JAVA_PROTO_MODULES := connector-api,protocol/data-protocol,protocol/connector-protocol,protocol/worker-protocol,control-plane/compiler-validation
@@ -75,7 +75,7 @@ format:
 	@python scripts/run-go-modules.py fmt
 
 # Code style check
-check: vet-go check-runbooks
+check: vet-go check-runbooks check-docs
 	@echo "Checking code style..."
 	mvn spotless:check
 
@@ -87,6 +87,25 @@ check-runbooks:
 	@python scripts/check-runbook-templates.py
 	@python scripts/check-runbook-templates.py --root docs/observability
 	@python scripts/check-runbook-templates.py --root deployment/helm/astrasync/templates/multi-region
+
+# Phase 16 Slice 42: cross-cutting documentation gate. Verifies that:
+#   1. Every registered template / onboarding doc carries a <placeholder>
+#      and contains no production hostname patterns (extends check-runbooks
+#      with the Phase 14 ArgoCD README and the Phase 15 catalog authoring
+#      guide).
+#   2. Every ``docs/phase<N>`` README marked ``**Complete.**`` is
+#      referenced in the ``## [Unreleased]`` section of CHANGELOG.md.
+check-docs:
+	@echo "Checking documentation hygiene..."
+	@python scripts/check-runbook-templates.py --all
+	@python scripts/check-changelog.py
+
+# Phase 16 Slice 42: dry-run the release process. Verifies the Maven
+# project version, the catalog build version, the protobuf file inventory,
+# and the CHANGELOG coverage without mutating any file. Used by CI and by
+# release prep before tagging a release.
+release-dry-run:
+	@python scripts/release-dry-run.py $(if $(VERSION),--version $(VERSION),)
 
 # Run the Python script unit tests. The tests live alongside the scripts
 # they exercise; the make target is intentionally narrow so the Java and Go
