@@ -507,6 +507,113 @@ jobs:
             exit 1
           fi
 
+      - name: Lint and render staging profile
+        if: needs.changes.outputs.helm == 'true'
+        # Phase 14 Slice 40 follow-up: ensure values-staging.yaml stays in
+        # parity with the chart. Asserts that staging toggle defaults actually
+        # flow into the manifest (PDB on, autoscaling off, NetworkPolicy off,
+        # environment=staging, DEBUG logging). Mirrors the production profile
+        # step so the two profiles cannot silently drift apart.
+        run: |
+          set -euo pipefail
+          chart=deployment/helm/astrasync
+          staging_values="${chart}/values-staging.yaml"
+
+          helm lint "${chart}" -f "${staging_values}"
+
+          staging_render="$(helm template astrasync "${chart}" -f "${staging_values}" | tr -d '\r')"
+          echo "${staging_render}" > /dev/null
+
+          # 3 PDBs (api-server, controller, scheduler; compiler-validation not
+          # expected because PDB.enabled stays on but compiler-validation.minAvailable=1
+          # is exposed via values-staging.yaml; we count the 3 control-plane PDBs).
+          pdb_count="$(echo "${staging_render}" | grep -c '^kind: PodDisruptionBudget' || true)"
+          if [[ "${pdb_count}" -ne 3 ]]; then
+            echo "::error::expected 3 PDBs from staging values, got ${pdb_count}"
+            exit 1
+          fi
+
+          # Autoscaling off → 0 HPAs.
+          hpa_count="$(echo "${staging_render}" | grep -c '^kind: HorizontalPodAutoscaler' || true)"
+          if [[ "${hpa_count}" -ne 0 ]]; then
+            echo "::error::expected 0 HPAs from staging values, got ${hpa_count}"
+            exit 1
+          fi
+
+          # NetworkPolicy off in staging.
+          np_count="$(echo "${staging_render}" | grep -c '^kind: NetworkPolicy' || true)"
+          if [[ "${np_count}" -ne 0 ]]; then
+            echo "::error::expected 0 NetworkPolicies from staging values, got ${np_count}"
+            exit 1
+          fi
+
+          # environment=staging must reach at least one container env.
+          env_count="$(echo "${staging_render}" | grep -cE '^[[:space:]]+value:[[:space:]]+"?staging"?$' || true)"
+          if [[ "${env_count}" -lt 1 ]]; then
+            echo "::error::values-staging.yaml did not propagate 'environment: staging' to any component"
+            exit 1
+          fi
+
+          # DEBUG log level must reach at least one container env.
+          debug_count="$(echo "${staging_render}" | grep -cE '^[[:space:]]+value:[[:space:]]+"?DEBUG"?$' || true)"
+          if [[ "${debug_count}" -lt 1 ]]; then
+            echo "::error::DEBUG log level did not propagate from values-staging.yaml"
+            exit 1
+          fi
+
+      - name: Validate ArgoCD CR schema
+        if: needs.changes.outputs.helm == 'true'
+        # Phase 14 Slice 40 follow-up: confirm the ArgoCD Application,
+        # ApplicationSet, and namespace manifests are syntactically valid YAML
+        # and parse with the kubectl client-side schema. A kubectl cluster is
+        # not available in CI, so the step parses locally and checks for the
+        # expected top-level keys.
+        run: |
+          set -euo pipefail
+
+          argocd_dir=deployment/argocd
+
+          for f in ${argocd_dir}/application.yaml ${argocd_dir}/applicationset.yaml ${argocd_dir}/namespace.yaml; do
+            if ! python -c "import yaml,sys; docs=list(yaml.safe_load_all(open(sys.argv[1]))); assert docs, 'no docs'" "${f}"; then
+              echo "::error::ArgoCD manifest ${f} failed to parse as YAML"
+              exit 1
+            fi
+          done
+
+          # Verify the Application declares the expected top-level spec keys.
+          python - <<'PY'
+          import yaml, sys
+          with open('deployment/argocd/application.yaml') as f:
+              app = yaml.safe_load(f)
+          assert app['kind'] == 'Application', f"kind={app.get('kind')}"
+          assert app['spec']['source']['path'] == 'deployment/helm/astrasync'
+          assert 'values-production.yaml' in app['spec']['source']['helm']['valueFiles']
+          assert app['spec']['syncPolicy']['automated']['prune'] is True
+          assert app['spec']['syncPolicy']['automated']['selfHeal'] is True
+
+          with open('deployment/argocd/applicationset.yaml') as f:
+              appset = yaml.safe_load(f)
+          assert appset['kind'] == 'ApplicationSet'
+          assert appset['spec']['generators'][0]['matrix'] is not None
+          gen = appset['spec']['generators'][0]['matrix']['generators']
+          assert any('clusters' in g for g in gen), 'expected cluster generator'
+          assert any('git' in g for g in gen), 'expected git generator'
+
+          with open('deployment/argocd/namespace.yaml') as f:
+              for doc in yaml.safe_load_all(f):
+                  if doc and doc.get('kind') == 'Role':
+                      rules = doc['rules']
+                      api_groups = {g for r in rules for g in r.get('apiGroups', [])}
+                      assert 'argoproj.io' in api_groups
+                      verbs = {v for r in rules for v in r.get('verbs', [])}
+                      assert 'create' in verbs and 'delete' in verbs
+                      # No secrets access granted.
+                      for r in rules:
+                          assert 'secrets' not in r.get('resources', []), \
+                              "Role must not grant secrets access"
+          print('ArgoCD manifests validated')
+          PY
+
   security:
     name: Repository security checks
     needs: changes
