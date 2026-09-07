@@ -40,15 +40,15 @@ The table separates descriptor availability from sampled runtime data.
 |---|---|---|---|
 | `apiserver_auth_request_total`, `apiserver_auth_request_duration_seconds` | api-server | F4 descriptor + `/metrics` | emitted by F7 authentication interceptor |
 | `apiserver_audit_query_duration_seconds` | api-server | F4 descriptor + `/metrics` | emitted by F7 authorized audit-query path |
-| `apiserver_sign_in_total`, `apiserver_session_revoke_total` | api-server | F4 descriptor + `/metrics` | pending; no API Server business call site owns these Console/auth flows |
+| `apiserver_sign_in_total`, `apiserver_session_revoke_total` | api-server | F4 descriptor + `/metrics` | Phase 17 slice 43.1 (ADR-058); no API Server business call site owns these Console/auth flows today |
 | `apiserver_trusted_proxy_hsts_total` | api-server | F4 descriptor + `/metrics` | emitted by F12 trusted-proxy HSTS middleware |
 | `scheduler_*` listed below | scheduler | F4 descriptor + `/metrics` | assignment, lease-takeover, and reconcile-duration samples emitted by the Scheduler |
 | `astrasync_multi_region_promotion_*`, `astrasync_multi_region_event_*`, `astrasync_multi_region_recovery_*` | control-plane replication | recorder registration; API Server exposition is embedding-owned | promotion, event-delivery, and recovery samples emitted when a recorder is injected; Phase 10 verifies the API Server scrape path |
 | `connection_test_total` | connection-test-executor | F4 descriptor + `/metrics` | emitted by F10 after durable test completion |
 | `console_*` listed below | console | F4 descriptor + `/metrics` | Console BFF request and render samples emitted by F11 |
-| `auth_*` listed below | auth library | descriptor package only | pending |
+| `auth_*` listed below | auth library | descriptor package only | Phase 17 slice 43.2 (ADR-058) |
 | `controller_job_controller_reconcile_duration_seconds` | controller | controller-runtime `/metrics` | emitted by F13 with a fixed `_unknown` tenant scope |
-| remaining custom Controller metrics | controller | controller-runtime `/metrics` | pending; no stable Controller call site owns them |
+| remaining custom Controller metrics | controller | controller-runtime `/metrics` | Phase 17 slice 43.3 (ADR-058); `controller_job_state_total` and `controller_epoch_fence_total` register and emit from the Controller reconcile boundary |
 | `coordinator_*`, `worker_*` listed below | Java data plane | F8 Micrometer registry + opt-in Worker `/metrics` | seven families emitted by checkpoint Coordinator and in-process Worker; spill bytes are sampled by the Worker-local exchange |
 
 ## Naming convention
@@ -106,20 +106,21 @@ specification overrides them.
 The API Server and auth descriptor packages define metrics that align with
 the audit event types. F7 activates the authentication decision counter and
 histogram plus the authorized audit-query histogram. F12 activates trusted
-proxy HSTS observations. Sign-in and session-revoke rows remain
-descriptor-only because their business paths are owned by the Console/auth
-boundary.
+proxy HSTS observations. Sign-in and session-revoke rows are tracked by
+Phase 17 / ADR-058 (slices 43.1 and 43.2): the API Server rows wait for a
+new RPC or a Console forwarder, and the auth-library rows wait for the
+admin CLI success boundaries to be instrumented.
 
 | Metric | Type | Labels | Description |
 |---|---|---|---|
 | `apiserver_auth_request_total` | counter | `tenant_id`, `outcome` | Completed API Server authentication and authorization decisions. |
 | `apiserver_auth_request_duration_seconds` | histogram | `tenant_id`, `outcome` | Decision time through authorization, excluding business-handler execution. |
-| `apiserver_sign_in_total` | counter | `tenant_id`, `outcome` | Sign-in events, including denied sign-ins. |
-| `apiserver_session_revoke_total` | counter | `tenant_id`, `actor_id` | Sessions revoked by the admin CLI or by the audit-driven revocation path. |
+| `apiserver_sign_in_total` | counter | `tenant_id`, `outcome` | Sign-in events, including denied sign-ins. Phase 17 slice 43.1 (ADR-058) introduces the call site. |
+| `apiserver_session_revoke_total` | counter | `tenant_id`, `actor_id` | Sessions revoked by the admin CLI or by the audit-driven revocation path. Phase 17 slice 43.1 (ADR-058) introduces the call site. |
 | `apiserver_audit_query_duration_seconds` | histogram | `tenant_id` | Time to fulfil one authorized audit query, including failures after authorization. |
 | `apiserver_trusted_proxy_hsts_total` | counter | `tenant_id` | HSTS responses emitted for HTTPS requests accepted from a trusted proxy; F12 records the pre-auth `_unknown` tenant value. |
-| `auth_sign_in_total` | counter | `tenant_id`, `outcome` | Auth-library sign-in descriptor; the admin CLI does not expose it. |
-| `auth_session_revoke_total` | counter | `tenant_id` | Auth-library revoke descriptor; the admin CLI does not expose it. |
+| `auth_sign_in_total` | counter | `tenant_id`, `outcome` | Auth-library sign-in descriptor. Phase 17 slice 43.2 (ADR-058) wires the admin CLI bootstrap flows and any new auth helper. |
+| `auth_session_revoke_total` | counter | `tenant_id` | Auth-library revoke descriptor. Phase 17 slice 43.2 (ADR-058) wires the admin CLI `revoke-session` success boundary. |
 
 The authentication `outcome` allowlist is:
 
@@ -148,9 +149,10 @@ emit `le` buckets; the dashboard recipes compose P50, P95, and P99 from them.
 
 The table reserves lifecycle metrics for the Controller and Scheduler
 (ADR-029, ADR-031). Scheduler emits assignment and lease-takeover samples;
-F13 adds the Controller reconcile-duration sample; the state-transition and
-epoch-fence families remain pending because their durable transition owners
-are outside the Controller reconcile boundary.
+F13 adds the Controller reconcile-duration sample. The state-transition
+and epoch-fence families are tracked by Phase 17 slice 43.3 (ADR-058);
+their durable transition owners wire the call sites from the Controller
+reconcile boundary at the post-commit snapshot.
 
 | Metric | Type | Labels | Description |
 |---|---|---|---|
@@ -260,11 +262,28 @@ F7 activates the three API Server SLO families, F8 activates all Java
 data-plane families, F9 activates Scheduler assignment and lease-takeover
 samples, F10 activates Connection Test Executor outcomes, F11 activates
 Console BFF request and render samples, F12 activates trusted-proxy HSTS
-samples, F13 activates Controller reconcile duration, and Phase 10 verifies
-the API Server multi-region scrape path. Business observations for the
-remaining API Server, Controller lifecycle, and auth-library descriptors
-remain deferred. The landed work is recorded in
-[`changelog.md`](changelog.md).
+samples, and F13 activates Controller reconcile duration. Phase 10
+verifies the API Server multi-region scrape path.
+
+Business observations for the remaining API Server, Controller
+lifecycle, and auth-library descriptors are tracked by Phase 17 and
+ADR-058, which records the recorder owner, call site, label
+normalization contract, and test contract for each pending row. The
+catalog status table below is updated as each Phase 17 slice lands.
+
+| Backlog metric | Recorder owner | Phase 17 slice | ADR-058 section |
+|---|---|---|---|
+| `apiserver_sign_in_total` | api-server | 43.1 | §2 |
+| `apiserver_session_revoke_total` | api-server | 43.1 | §2 |
+| `auth_sign_in_total` | auth library | 43.2 | §2 |
+| `auth_session_revoke_total` | auth library | 43.2 | §2 |
+| `controller_job_state_total` | controller | 43.3 | §2 |
+| `controller_epoch_fence_total` | controller | 43.3 | §2 |
+
+OpenMetrics content negotiation (ADR-051 §130) remains a separate
+deferred decision; the `request_id` exemplar contract documented in
+ADR-047 §126 still requires that negotiation before exemplars can
+transmit. Phase 17 does not unblock that deferral.
 
 ## Inline placeholders for the populated handbook
 
