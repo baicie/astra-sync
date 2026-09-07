@@ -7,6 +7,7 @@ require (
 	github.com/jackc/pgx/v5 v5.7.2
 	github.com/prometheus/client_golang v1.23.2
 	io.astrasync/control-plane v0.0.0
+	io.astrasync/control-plane/observability v0.0.0-00010101000000-000000000000
 	k8s.io/apimachinery v0.36.3
 	k8s.io/client-go v0.36.3
 	sigs.k8s.io/controller-runtime v0.24.1
@@ -73,3 +74,5 @@ require (
 replace io.astrasync/control-plane => ..
 
 replace io.astrasync/control-plane/auth => ../auth
+
+replace io.astrasync/control-plane/observability => ../observability

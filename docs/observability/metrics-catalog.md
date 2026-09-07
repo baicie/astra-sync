@@ -47,8 +47,8 @@ The table separates descriptor availability from sampled runtime data.
 | `connection_test_total` | connection-test-executor | F4 descriptor + `/metrics` | emitted by F10 after durable test completion |
 | `console_*` listed below | console | F4 descriptor + `/metrics` | Console BFF request and render samples emitted by F11 |
 | `auth_*` listed below | auth library | descriptor package only | Phase 17 slice 43.2 (ADR-058) |
-| `controller_job_controller_reconcile_duration_seconds` | controller | controller-runtime `/metrics` | emitted by F13 with a fixed `_unknown` tenant scope |
-| remaining custom Controller metrics | controller | controller-runtime `/metrics` | Phase 17 slice 43.3 (ADR-058); `controller_job_state_total` and `controller_epoch_fence_total` register and emit from the Controller reconcile boundary |
+| `controller_job_controller_reconcile_duration_seconds` | controller | controller-runtime `/metrics` | emitted by F13 with a fixed `_unknown` tenant scope; slice 43.3 deletes the package-local normalize helpers in favour of `observability/normalize` |
+| `controller_job_state_total`, `controller_epoch_fence_total` | controller | controller-runtime `/metrics` | Recorder wired in Phase 17 slice 43.3 (ADR-058); production wiring at the reconcile boundary is deferred to slice 43.3.5 |
 | `coordinator_*`, `worker_*` listed below | Java data plane | F8 Micrometer registry + opt-in Worker `/metrics` | seven families emitted by checkpoint Coordinator and in-process Worker; spill bytes are sampled by the Worker-local exchange |
 
 ## Naming convention
@@ -156,9 +156,9 @@ reconcile boundary at the post-commit snapshot.
 
 | Metric | Type | Labels | Description |
 |---|---|---|---|
-| `controller_job_state_total` | counter | `tenant_id`, `namespace`, `from_state`, `to_state` | Job state transitions. |
-| `controller_job_controller_reconcile_duration_seconds` | histogram | `tenant_id`, `outcome` | Time to reconcile a single `SyncJob`; F13 uses `_unknown` before a trusted tenant binding exists and records `success` or `failure`. |
-| `controller_epoch_fence_total` | counter | `tenant_id`, `outcome` | Epoch-fence attempts from the Scheduler. |
+| `controller_job_state_total` | counter | `tenant_id`, `namespace`, `from_state`, `to_state` | Job state transitions. Recorder wired in Phase 17 slice 43.3; reconcile-path wiring pending (post-`repository.UpdateJobStatus`). |
+| `controller_job_controller_reconcile_duration_seconds` | histogram | `tenant_id`, `outcome` | Time to reconcile a single `SyncJob`; F13 uses `_unknown` before a trusted tenant binding exists and records `success` or `failure`. Slice 43.3 deletes the package-local `normalizeTenant` / `normalizeOutcome` helpers in favour of the shared `observability/normalize` package (ADR-058 §3). |
+| `controller_epoch_fence_total` | counter | `tenant_id`, `outcome` | Epoch-fence attempts from the Scheduler. Recorder wired in Phase 17 slice 43.3; reconcile-path wiring pending. The Recorder enforces the `success|fenced|failure` allowlist (ADR-058 §3). |
 | `scheduler_job_assignment_total` | counter | `tenant_id`, `worker_id`, `outcome` | Assignment outcome when the Scheduler first dispatches a claimed execution. The current dispatch contract has no trusted tenant or target worker identity, so both labels are `_unknown`; `outcome` is `success`, `rejected`, or `failure`. |
 | `scheduler_lease_takeover_total` | counter | `tenant_id`, `outcome` | Successful dispatch-lease takeovers returned by the durable claim transaction. `tenant_id` is `_unknown` until the Scheduler receives a trusted tenant binding; `outcome` is `success`. |
 | `scheduler_job_reconcile_duration_seconds` | histogram | `tenant_id` | Time to reconcile one scheduled Job. |

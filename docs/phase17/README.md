@@ -37,7 +37,7 @@ landed as a separate PR.
 | 43.0 | Umbrella: `control-plane/observability/normalize` package + Phase 17 README | Done | — |
 | 43.1 | API Server sign-in / session-revoke recorder wiring through `normalize` | Done (recorder + scrape contract; production call site deferred to slice 43.1.5 once the auth flow surface is decided) | `apiserver_sign_in_total`, `apiserver_session_revoke_total`, `apiserver_trusted_proxy_hsts_total` |
 | 43.2 | Auth library observability (admin CLI + helpers) | Pending | `auth_sign_in_total`, `auth_session_revoke_total` |
-| 43.3 | Controller state transition + epoch fence recorder | Pending | `controller_job_state_total`, `controller_epoch_fence_total` |
+| 43.3 | Controller state transition + epoch fence recorder | Done (recorder + scrape contract; reconcile-path wiring deferred to slice 43.3.5 once the durable state-transition commit and Scheduler fence-response ownership decision is made) | `controller_job_state_total`, `controller_epoch_fence_total` |
 
 The slice numbering follows the Phase 17 directory layout
 (`docs/phase17/43-observability-backlog/`).
@@ -53,10 +53,11 @@ The slice numbering follows the Phase 17 directory layout
 | `apiserver_trusted_proxy_hsts_total` routes the pre-auth tenant through `normalize` | Done (slice 43.1) |
 | `auth_sign_in_total` records admin CLI bootstrap flows (and any new auth helper) | Pending (slice 43.2) |
 | `auth_session_revoke_total` records admin CLI revoke-session success boundary | Pending (slice 43.2) |
-| `controller_job_state_total` descriptor + call site at Controller reconcile boundary | Pending (slice 43.3) |
-| `controller_epoch_fence_total` descriptor + call site at Controller reconcile boundary | Pending (slice 43.3) |
-| Every slice's test contract covers happy / rejected / failure paths and non-canonical UUID labels | Done (slice 43.1); slices 43.2 / 43.3 follow the same template |
-| `metrics-catalog.md` row status updates from "pending" to "emitted" as each slice lands | Pending (slice 43.1 leaves the row at "Recorder wired, production call site pending"; rows move to "emitted" only after a non-zero sample is observed in production) |
+| `controller_job_state_total` Recorder routing every label value through `normalize` | Done (slice 43.3); reconcile-path wiring deferred to slice 43.3.5 |
+| `controller_epoch_fence_total` Recorder routing every label value through `normalize` | Done (slice 43.3); reconcile-path wiring deferred to slice 43.3.5 |
+| Every slice's test contract covers happy / rejected / failure paths and non-canonical UUID labels | Done (slices 43.1 + 43.3); slice 43.2 follows the same template |
+| `metrics-catalog.md` row status updates from "pending" to "emitted" as each slice lands | Pending (slices 43.1 / 43.3 leave rows at "Recorder wired; production call site pending"; rows move to "emitted" only after a non-zero sample is observed in production) |
+| `control-plane/controller` no longer carries duplicated `normalizeTenant` / `normalizeOutcome` helpers — all metric packages route through the shared `observability/normalize` package | Done (slice 43.3) |
 
 ## Backlog Snapshot (as of 2026-09-07)
 
@@ -67,8 +68,8 @@ The slice numbering follows the Phase 17 directory layout
 | `apiserver_trusted_proxy_hsts_total` | api-server | F4 | Recorder wired (slice 43.1); the existing trusted-proxy observer now funnels through `normalize` | slice 43.1 |
 | `auth_sign_in_total` | auth library | F4 | none | slice 43.2 |
 | `auth_session_revoke_total` | auth library | F4 | none | slice 43.2 |
-| `controller_job_state_total` | controller | not registered | not registered | slice 43.3 |
-| `controller_epoch_fence_total` | controller | not registered | not registered | slice 43.3 |
+| `controller_job_state_total` | controller | F4 | Recorder wired (slice 43.3); reconcile-path wiring pending | slice 43.3 |
+| `controller_epoch_fence_total` | controller | F4 | Recorder wired (slice 43.3); reconcile-path wiring pending | slice 43.3 |
 
 ## Records
 

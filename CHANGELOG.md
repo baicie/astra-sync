@@ -64,6 +64,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   at the Phase 17 slice / ADR-058 section that owns the row instead
   of deferring without an owner.
 
+- `control-plane/controller/internal/metrics`: Phase 17 slice 43.3
+  (ADR-058) wires `controller_job_state_total` and
+  `controller_epoch_fence_total` through the Recorder. Two new methods
+  — `ObserveStateTransition(tenantID, namespace, fromState, toState)`
+  and `ObserveEpochFence(tenantID, outcome)` — funnel every label
+  value through `io.astrasync/control-plane/observability/normalize`
+  (slice 43.0). The Recorder replaces its locally-implemented
+  `normalizeTenant` / `normalizeOutcome` helpers with the shared
+  package, satisfying the ADR-058 §3 "duplicated helpers are deleted
+  as each slice lands" invariant. The Recorder now owns *Vec
+  references for three families: the existing
+  `controller_job_controller_reconcile_duration_seconds`, the new
+  state-transition counter (4 labels: tenant_id / namespace /
+  from_state / to_state), and the new epoch-fence counter with the
+  `success|fenced|failure` allowlist exclusive to this metric
+  (ADR-058 §3). Three new boundary-driven tests cover the Job state
+  machine (ADR-029), the epoch-fence outcome allowlist, and a
+  cross-call cardinality bound that asserts eight distinct caller
+  inputs across both families produce only eleven bounded series.
+
+- `control-plane/controller/go.mod`: require + replace
+  `io.astrasync/control-plane/observability` so the controller module
+  imports the slice-43.0 normalize helper alongside the existing
+  Prometheus dependency.
+
 ## [v0.3.0] - 2026-09-07
 
 This release covers Phase 13 through Phase 16, completing Kubernetes production
