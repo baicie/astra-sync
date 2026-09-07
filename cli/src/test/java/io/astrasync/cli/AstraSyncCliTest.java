@@ -58,6 +58,51 @@ class AstraSyncCliTest {
     }
 
     @Test
+    void printsInventoryAsLineOrientedDeterministicText() throws Exception {
+        Path exported = tempDirectory.resolve("inventory.pb");
+
+        Invocation export = invoke(
+                "catalog-export",
+                exported.toString(),
+                "--compiler-build",
+                "test-build",
+                "--execution-profile",
+                "test-profile");
+        assertThat(export.exitCode()).isZero();
+
+        Invocation firstPrint = invoke("catalog-print", exported.toString());
+        Invocation secondPrint = invoke("catalog-print", exported.toString());
+
+        assertThat(firstPrint.exitCode()).isZero();
+        assertThat(secondPrint.exitCode()).isZero();
+        // Print is deterministic: two runs over the same inventory produce
+        // byte-identical stdout.
+        assertThat(firstPrint.stdout()).isEqualTo(secondPrint.stdout());
+        // Header fields reach stdout.
+        assertThat(firstPrint.stdout())
+                .contains("header.compiler_build=test-build")
+                .contains("header.execution_profile=test-profile")
+                .contains("header.inventory_revision=sha256:")
+                .contains("header.descriptor_count=");
+        // Descriptor fields reach stdout.
+        assertThat(firstPrint.stdout())
+                .contains("descriptor.csv")
+                .contains("descriptor.jdbc")
+                .contains("descriptor.mysql-cdc")
+                .contains("descriptor.postgres-cdc");
+    }
+
+    @Test
+    void catalogPrintReportsInvalidInputAsExitTwo() {
+        Invocation invocation = invoke("catalog-print", tempDirectory.resolve("missing.pb").toString());
+
+        assertThat(invocation.exitCode()).isEqualTo(AstraSyncCli.EXIT_INPUT);
+        assertThat(invocation.stderr())
+                .contains("FAILED category=input", "cannot read inventory")
+                .doesNotContain("Exception", "\tat ");
+    }
+
+    @Test
     void exportsTheDiscoveredDeploymentCatalogAsDeterministicProtobuf() throws Exception {
         Path first = tempDirectory.resolve("inventory-first.pb");
         Path second = tempDirectory.resolve("inventory-second.pb");

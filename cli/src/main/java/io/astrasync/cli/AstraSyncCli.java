@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.astrasync.connector.api.ConnectorInventories;
 import io.astrasync.connector.file.CsvConnectorFactory;
 import io.astrasync.connector.jdbc.JdbcConnectorFactory;
+import io.astrasync.control.v1.ConnectorDescriptor;
 import io.astrasync.control.v1.ConnectorInventory;
 import io.astrasync.engine.checkpoint.FileCheckpointStore;
 import io.astrasync.engine.coordinator.CdcJobRunResult;
@@ -77,6 +78,7 @@ public final class AstraSyncCli implements Callable<Integer> {
         commandLine.addSubcommand("run", new RunCommand(runner));
         commandLine.addSubcommand("cdc", new CdcCommand());
         commandLine.addSubcommand("catalog-export", new CatalogExportCommand(ConnectorRegistry::discover));
+        commandLine.addSubcommand("catalog-print", new CatalogPrintCommand());
         commandLine.setOut(Objects.requireNonNull(out, "out must not be null"));
         commandLine.setErr(Objects.requireNonNull(err, "err must not be null"));
         commandLine.setParameterExceptionHandler(
@@ -193,6 +195,101 @@ public final class AstraSyncCli implements Callable<Integer> {
             } catch (AtomicMoveNotSupportedException exception) {
                 Files.move(source, target, StandardCopyOption.REPLACE_EXISTING);
             }
+        }
+    }
+
+    @Command(
+            name = "catalog-print",
+            description = "Print a deployment connector inventory (.pb) as a deterministic, line-oriented summary.",
+            mixinStandardHelpOptions = true,
+            version = AstraSyncCli.VERSION)
+    static final class CatalogPrintCommand implements Callable<Integer> {
+        @Spec
+        private CommandSpec commandSpec;
+
+        @Parameters(index = "0", paramLabel = "<input>", description = "Path to a ConnectorInventory protobuf.")
+        private Path input;
+
+        @Override
+        public Integer call() {
+            byte[] payload;
+            try {
+                payload = Files.readAllBytes(input.toAbsolutePath().normalize());
+            } catch (IOException exception) {
+                commandSpec.commandLine().getErr().println("FAILED category=input message=cannot read inventory");
+                return EXIT_INPUT;
+            }
+            ConnectorInventory inventory;
+            try {
+                inventory = ConnectorInventory.parseFrom(payload);
+            } catch (com.google.protobuf.InvalidProtocolBufferException exception) {
+                commandSpec.commandLine().getErr().println("FAILED category=input message=invalid inventory protobuf");
+                return EXIT_INPUT;
+            }
+            // Header lines: stable, sorted alphabetically for diff-friendliness.
+            commandSpec.commandLine().getOut().printf(
+                    "header.compiler_build=%s%n",
+                    inventory.getCompilerBuild());
+            commandSpec.commandLine().getOut().printf(
+                    "header.compiler_revision=%s%n",
+                    inventory.getCompilerRevision());
+            commandSpec.commandLine().getOut().printf(
+                    "header.execution_profile=%s%n",
+                    inventory.getExecutionProfile());
+            commandSpec.commandLine().getOut().printf(
+                    "header.inventory_revision=%s%n",
+                    inventory.getInventoryRevision());
+            commandSpec.commandLine().getOut().printf(
+                    "header.inventory_schema_version=%d%n",
+                    inventory.getInventorySchemaVersion());
+            commandSpec.commandLine().getOut().printf(
+                    "header.job_spec_schema_revision=%s%n",
+                    inventory.getJobSpecSchemaRevision());
+            commandSpec.commandLine().getOut().printf(
+                    "header.descriptor_count=%d%n",
+                    inventory.getDescriptorsCount());
+            // Descriptor lines: sorted alphabetically by name; stable across
+            // re-exports with the same descriptor set even if descriptor field
+            // ordering changes inside ConnectorDescriptor (ConnectorRevisions
+            // already orders descriptors by name).
+            for (ConnectorDescriptor descriptor : inventory.getDescriptorsList()) {
+                commandSpec.commandLine().getOut().printf(
+                        "descriptor.name=%s%n",
+                        descriptor.getName());
+                commandSpec.commandLine().getOut().printf(
+                        "descriptor.%s.artifact_version=%s%n",
+                        descriptor.getName(),
+                        descriptor.getArtifactVersion());
+                commandSpec.commandLine().getOut().printf(
+                        "descriptor.%s.descriptor_revision=%s%n",
+                        descriptor.getName(),
+                        descriptor.getDescriptorRevision());
+                commandSpec.commandLine().getOut().printf(
+                        "descriptor.%s.descriptor_schema_version=%d%n",
+                        descriptor.getName(),
+                        descriptor.getDescriptorSchemaVersion());
+                commandSpec.commandLine().getOut().printf(
+                        "descriptor.%s.capabilities=%s%n",
+                        descriptor.getName(),
+                        String.join(",", descriptor.getCapabilitiesList()));
+                commandSpec.commandLine().getOut().printf(
+                        "descriptor.%s.delivery_constraints=%s%n",
+                        descriptor.getName(),
+                        String.join(",", descriptor.getDeliveryConstraintsList()));
+                commandSpec.commandLine().getOut().printf(
+                        "descriptor.%s.execution_modes=%s%n",
+                        descriptor.getName(),
+                        String.join(",", descriptor.getExecutionModesList()));
+                commandSpec.commandLine().getOut().printf(
+                        "descriptor.%s.option_count=%d%n",
+                        descriptor.getName(),
+                        descriptor.getOptionsCount());
+                commandSpec.commandLine().getOut().printf(
+                        "descriptor.%s.role_count=%d%n",
+                        descriptor.getName(),
+                        descriptor.getRolesCount());
+            }
+            return EXIT_SUCCESS;
         }
     }
 
