@@ -36,7 +36,7 @@ landed as a separate PR.
 |-------|-------------|--------|-----------------|
 | 43.0 | Umbrella: `control-plane/observability/normalize` package + Phase 17 README | Done | — |
 | 43.1 | API Server sign-in / session-revoke recorder wiring through `normalize` | Done (recorder + scrape contract; production call site deferred to slice 43.1.5 once the auth flow surface is decided) | `apiserver_sign_in_total`, `apiserver_session_revoke_total`, `apiserver_trusted_proxy_hsts_total` |
-| 43.2 | Auth library observability (admin CLI + helpers) | Pending | `auth_sign_in_total`, `auth_session_revoke_total` |
+| 43.2 | Auth library observability (admin CLI + helpers) | Done (Recorder + `HandlerFor`; admin CLI integration deferred to slice 43.2.5 because the admin CLI is one-shot and the Recorder only lands a sample if a long-running consumer exposes the Recorder-owned registry) | `auth_sign_in_total`, `auth_session_revoke_total` |
 | 43.3 | Controller state transition + epoch fence recorder | Done (recorder + scrape contract; reconcile-path wiring deferred to slice 43.3.5 once the durable state-transition commit and Scheduler fence-response ownership decision is made) | `controller_job_state_total`, `controller_epoch_fence_total` |
 
 The slice numbering follows the Phase 17 directory layout
@@ -51,12 +51,12 @@ The slice numbering follows the Phase 17 directory layout
 | `apiserver_sign_in_total` has a Recorder method routing every label value through `normalize` | Done (slice 43.1); production call site deferred to slice 43.1.5 |
 | `apiserver_session_revoke_total` has a Recorder method routing every label value through `normalize` | Done (slice 43.1); production call site deferred to slice 43.1.5 |
 | `apiserver_trusted_proxy_hsts_total` routes the pre-auth tenant through `normalize` | Done (slice 43.1) |
-| `auth_sign_in_total` records admin CLI bootstrap flows (and any new auth helper) | Pending (slice 43.2) |
-| `auth_session_revoke_total` records admin CLI revoke-session success boundary | Pending (slice 43.2) |
+| `auth_sign_in_total` records admin CLI bootstrap flows (and any new auth helper) | Done (slice 43.2); the admin CLI is one-shot and does not bind a /metrics port — the Recorder + `HandlerFor(gatherer)` pair is wired through the slice-43.2 contract, but the admin CLI integration is deferred to slice 43.2.5 once a long-running consumer exposes the Recorder-owned registry |
+| `auth_session_revoke_total` records admin CLI revoke-session success boundary | Done (slice 43.2); admin CLI integration deferred to slice 43.2.5 for the same reason |
 | `controller_job_state_total` Recorder routing every label value through `normalize` | Done (slice 43.3); reconcile-path wiring deferred to slice 43.3.5 |
 | `controller_epoch_fence_total` Recorder routing every label value through `normalize` | Done (slice 43.3); reconcile-path wiring deferred to slice 43.3.5 |
-| Every slice's test contract covers happy / rejected / failure paths and non-canonical UUID labels | Done (slices 43.1 + 43.3); slice 43.2 follows the same template |
-| `metrics-catalog.md` row status updates from "pending" to "emitted" as each slice lands | Pending (slices 43.1 / 43.3 leave rows at "Recorder wired; production call site pending"; rows move to "emitted" only after a non-zero sample is observed in production) |
+| Every slice's test contract covers happy / rejected / failure paths and non-canonical UUID labels | Done (slices 43.1 + 43.2 + 43.3) |
+| `metrics-catalog.md` row status updates from "pending" to "emitted" as each slice lands | Pending (slices 43.1 / 43.2 / 43.3 leave rows at "Recorder wired; production call site pending"; rows move to "emitted" only after a non-zero sample is observed in production) |
 | `control-plane/controller` no longer carries duplicated `normalizeTenant` / `normalizeOutcome` helpers — all metric packages route through the shared `observability/normalize` package | Done (slice 43.3) |
 
 ## Backlog Snapshot (as of 2026-09-07)
@@ -66,8 +66,8 @@ The slice numbering follows the Phase 17 directory layout
 | `apiserver_sign_in_total` | api-server | F4 | Recorder wired (slice 43.1); production call site pending | slice 43.1 |
 | `apiserver_session_revoke_total` | api-server | F4 | Recorder wired (slice 43.1); production call site pending | slice 43.1 |
 | `apiserver_trusted_proxy_hsts_total` | api-server | F4 | Recorder wired (slice 43.1); the existing trusted-proxy observer now funnels through `normalize` | slice 43.1 |
-| `auth_sign_in_total` | auth library | F4 | none | slice 43.2 |
-| `auth_session_revoke_total` | auth library | F4 | none | slice 43.2 |
+| `auth_sign_in_total` | auth library | F4 | Recorder wired (slice 43.2); admin CLI integration pending — the Recorder + `HandlerFor(gatherer)` are exposed but the admin CLI is one-shot so the Recorder-owned registry needs a long-running consumer before samples are emitted | slice 43.2 |
+| `auth_session_revoke_total` | auth library | F4 | Recorder wired (slice 43.2); admin CLI integration pending for the same reason | slice 43.2 |
 | `controller_job_state_total` | controller | F4 | Recorder wired (slice 43.3); reconcile-path wiring pending | slice 43.3 |
 | `controller_epoch_fence_total` | controller | F4 | Recorder wired (slice 43.3); reconcile-path wiring pending | slice 43.3 |
 

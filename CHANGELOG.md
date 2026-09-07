@@ -89,6 +89,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   imports the slice-43.0 normalize helper alongside the existing
   Prometheus dependency.
 
+- `control-plane/auth/internal/authmetrics`: Phase 17 slice 43.2
+  (ADR-058) wires a new Recorder that owns dedicated
+  `auth_sign_in_total` and `auth_session_revoke_total` CounterVecs
+  registered against an injected prometheus.Registerer. Two new
+  methods — `ObserveSignIn(tenantID, outcome, requestID)` and
+  `ObserveSessionRevoke(tenantID, requestID)` — funnel every label
+  value through `io.astrasync/control-plane/observability/normalize`
+  (slice 43.0). The Recorder uses `success | rejected | failure` as
+  the outcome allowlist for `auth_sign_in_total` (matching
+  `docs/observability/metrics-catalog.md`). The Recorder and a new
+  `HandlerFor(gatherer)` entry point give a long-running consumer
+  (API Server, Console forwarder) an isolated surface to expose the
+  families from its own /metrics endpoint without competing for the
+  global default registry. The package-level `AuthSignInTotal` /
+  `AuthSessionRevokeTotal` CounterVecs (registered against the
+  default registry) remain untouched so any pre-43.2 import path
+  (legacy `Handler()`) continues to work; the slice-43.2 design is
+  additive, not destructive. Seven new boundary-driven tests cover
+  the success / rejected / failure canonical paths, the
+  `_platform` self-scope, non-canonical UUID collapse
+  (uppercase, braced, raw e-mail), outcome allowlist collapse
+  (non-allowlisted + empty), nil-receiver safety, nil-registerer
+  rejection, duplicate-registration rejection, and a cross-call
+  cardinality bound that asserts nine distinct caller inputs
+  across both families produce only eight bounded series.
+
+- `control-plane/auth/go.mod`: require + replace
+  `io.astrasync/control-plane/observability` so the auth module
+  joins api-server + controller as a consumer of the slice-43.0
+  normalize helper.
+
 ## [v0.3.0] - 2026-09-07
 
 This release covers Phase 13 through Phase 16, completing Kubernetes production

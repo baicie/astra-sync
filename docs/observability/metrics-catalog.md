@@ -119,8 +119,8 @@ admin CLI success boundaries to be instrumented.
 | `apiserver_session_revoke_total` | counter | `tenant_id`, `actor_id` | Sessions revoked by the admin CLI or by the audit-driven revocation path. Recorder wired in Phase 17 slice 43.1; production call site pending. |
 | `apiserver_audit_query_duration_seconds` | histogram | `tenant_id` | Time to fulfil one authorized audit query, including failures after authorization. |
 | `apiserver_trusted_proxy_hsts_total` | counter | `tenant_id` | HSTS responses emitted for HTTPS requests accepted from a trusted proxy; F12 records the pre-auth `_unknown` tenant value. |
-| `auth_sign_in_total` | counter | `tenant_id`, `outcome` | Auth-library sign-in descriptor. Phase 17 slice 43.2 (ADR-058) wires the admin CLI bootstrap flows and any new auth helper. |
-| `auth_session_revoke_total` | counter | `tenant_id` | Auth-library revoke descriptor. Phase 17 slice 43.2 (ADR-058) wires the admin CLI `revoke-session` success boundary. |
+| `auth_sign_in_total` | counter | `tenant_id`, `outcome` | Auth-library sign-in descriptor. Phase 17 slice 43.2 (ADR-058) wires a Recorder that routes every label value through `observability/normalize`. The Recorder uses `success | rejected | failure` as the outcome allowlist. The Recorder + `HandlerFor(gatherer)` pair is exposed, but the admin CLI is one-shot; the Recorder-owned registry needs a long-running consumer before samples are emitted. |
+| `auth_session_revoke_total` | counter | `tenant_id` | Auth-library revoke descriptor. Phase 17 slice 43.2 (ADR-058) wires a Recorder that routes every label value through `observability/normalize`. The admin CLI `revoke-session` success boundary is the documented slice-43.2.5 call site (Recorder wired; integration pending because the admin CLI is one-shot). |
 
 The authentication `outcome` allowlist is:
 
