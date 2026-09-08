@@ -48,7 +48,7 @@ The table separates descriptor availability from sampled runtime data.
 | `console_*` listed below | console | F4 descriptor + `/metrics` | Console BFF request and render samples emitted by F11 |
 | `auth_*` listed below | auth library | descriptor package only | Phase 17 slice 43.2 (ADR-058) |
 | `controller_job_controller_reconcile_duration_seconds` | controller | controller-runtime `/metrics` | emitted by F13 with a fixed `_unknown` tenant scope; slice 43.3 deletes the package-local normalize helpers in favour of `observability/normalize` |
-| `controller_job_state_total`, `controller_epoch_fence_total` | controller | controller-runtime `/metrics` | Recorder wired in Phase 17 slice 43.3 (ADR-058); production wiring at the reconcile boundary is deferred to slice 43.3.5 |
+| `controller_job_state_total`, `controller_epoch_fence_total` | controller | controller-runtime `/metrics` | Phase 17 slice 43.3 (ADR-058) wired the Recorder; Phase 23 slice 49 (ADR-066) wires the reconcile-boundary production call site. `controller_job_state_total` is emitted at the durable commit point (`r.Jobs.Update(...)` returns nil) via the new `observeTransition` helper; `controller_epoch_fence_total` remains Recorder-wired only (Phase 23+ candidate for slice 49.3.5) |
 | `coordinator_*`, `worker_*` listed below | Java data plane | F8 Micrometer registry + opt-in Worker `/metrics` | seven families emitted by checkpoint Coordinator and in-process Worker; spill bytes are sampled by the Worker-local exchange |
 
 ## Naming convention
@@ -156,9 +156,9 @@ reconcile boundary at the post-commit snapshot.
 
 | Metric | Type | Labels | Description |
 |---|---|---|---|
-| `controller_job_state_total` | counter | `tenant_id`, `namespace`, `from_state`, `to_state` | Job state transitions. Recorder wired in Phase 17 slice 43.3; reconcile-path wiring pending (post-`repository.UpdateJobStatus`). |
+| `controller_job_state_total` | counter | `tenant_id`, `namespace`, `from_state`, `to_state` | Job state transitions. Phase 17 slice 43.3 (ADR-058) wires a Recorder that routes every label value through `observability/normalize`. Phase 23 slice 49 (ADR-066) observes at the controller reconcile boundary. The call site is the durable commit point: after `r.Jobs.Update(ctx, next, stored.Version)` returns nil — the moment the job repository has accepted the new state (PostgreSQL / etcd-backed). `tenant_id` is read from the SyncJob resource label `astrasync.io/tenant-id`; if absent, `_unknown` is emitted (enforced by `normalize.NormalizeTenant`). `namespace` is the Kubernetes namespace of the SyncJob resource. `from_state` / `to_state` are the job state before and after the transition, bounded by `normalizeStateValue` (length cap 32 + non-empty check; values not in the Job state machine collapse to `_unknown`). The recorder is nil-safe: if a Reconciler is constructed without a Recorder, the call site is silently dropped (the metric just does not fire). |
 | `controller_job_controller_reconcile_duration_seconds` | histogram | `tenant_id`, `outcome` | Time to reconcile a single `SyncJob`; F13 uses `_unknown` before a trusted tenant binding exists and records `success` or `failure`. Slice 43.3 deletes the package-local `normalizeTenant` / `normalizeOutcome` helpers in favour of the shared `observability/normalize` package (ADR-058 §3). |
-| `controller_epoch_fence_total` | counter | `tenant_id`, `outcome` | Epoch-fence attempts from the Scheduler. Recorder wired in Phase 17 slice 43.3; reconcile-path wiring pending. The Recorder enforces the `success|fenced|failure` allowlist (ADR-058 §3). |
+| `controller_epoch_fence_total` | counter | `tenant_id`, `outcome` | Epoch-fence attempts from the Scheduler. Recorder wired in Phase 17 slice 43.3; reconcile-path wiring pending. The Recorder enforces the `success|fenced|failure` allowlist (ADR-058 §3). Phase 23+ candidate for slice 49.3.5 — the durable-commit signal for fence responses from the Scheduler needs ADR-053 §3 to settle before the production call site can be added. |
 | `scheduler_job_assignment_total` | counter | `tenant_id`, `worker_id`, `outcome` | Assignment outcome when the Scheduler first dispatches a claimed execution. The current dispatch contract has no trusted tenant or target worker identity, so both labels are `_unknown`; `outcome` is `success`, `rejected`, or `failure`. Phase 18 slice 44.1 (ADR-060) wires a Recorder that routes every label value through `io.astrasync/control-plane/observability/normalize`; the `worker_id` label uses `NormalizeWorkerID` and the `outcome` label uses the documented `success\|rejected\|failure` allowlist. |
 | `scheduler_lease_takeover_total` | counter | `tenant_id`, `outcome` | Successful dispatch-lease takeovers returned by the durable claim transaction. `tenant_id` is `_unknown` until the Scheduler receives a trusted tenant binding; `outcome` is `success`. Phase 18 slice 44.1 (ADR-060) wires a Recorder that routes the label through `normalize`; the `outcome` allowlist is the documented `success` only — non-allowlisted values collapse to `_unknown`. |
 | `scheduler_job_reconcile_duration_seconds` | histogram | `tenant_id` | Time to reconcile one scheduled Job. Phase 18 slice 44.1 (ADR-060) wires a Recorder that funnels `tenant_id` through `normalize`. |
@@ -277,8 +277,8 @@ catalog status table below is updated as each Phase 17 slice lands.
 | `apiserver_session_revoke_total` | api-server | 43.1 | §2 |
 | `auth_sign_in_total` | auth library | 43.2 | §2 |
 | `auth_session_revoke_total` | auth library | 43.2 | §2 |
-| `controller_job_state_total` | controller | 43.3 | §2 |
-| `controller_epoch_fence_total` | controller | 43.3 | §2 |
+| `controller_job_state_total` | controller | 43.3 + 49 (ADR-066) | §2 |
+| `controller_epoch_fence_total` | controller | 43.3 (Recorder wired) / 49.3.5 (production call site pending ADR-053 §3) | §2 |
 
 OpenMetrics content negotiation (ADR-051 §130) remains a separate
 deferred decision; the `request_id` exemplar contract documented in

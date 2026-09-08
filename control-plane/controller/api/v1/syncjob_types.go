@@ -49,6 +49,24 @@ type FailureInfo struct {
 // +kubebuilder:printcolumn:name="Epoch",type="integer",JSONPath=".status.epoch"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 
+// SyncJob represents a data synchronization job managed by the AstraSync
+// controller. The following labels are required for observability:
+//
+//   - astrasync.io/tenant-id: canonical lowercase UUID of the tenant that
+//     owns this job. Used by controller_job_state_total to label job state
+//     transitions per tenant (ADR-058 §2, ADR-066). If absent, the
+//     controller emits _unknown for the tenant_id label.
+//
+// Labels are set by the API server at creation time; they are not enforced
+// by the Kubernetes apiserver. A future slice will add kubebuilder
+// validation markers to enforce the tenant-id label presence.
+//
+// The Kubernetes Namespace field is used as the Prometheus "namespace"
+// label in controller_job_state_total. This is distinct from the
+// astrasync.io/tenant-id label.
+//
+// See ADR-029 (durable state machine), ADR-053 (production hardening),
+// and ADR-066 (controller emission slice 43.3.5).
 type SyncJob struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`

@@ -87,7 +87,7 @@ func main() {
 		Client: manager.GetClient(), Scheme: manager.GetScheme(), Clock: time.Now,
 		Jobs: database, StatusRefreshInterval: statusRefreshInterval, Metrics: controllerMetrics,
 	}
-	if err := reconciler.SetupWithManager(manager); err != nil {
+	if err := reconciler.SetupWithManager(manager, controllerMetrics); err != nil {
 		ctrl.Log.Error(err, "unable to register SyncJob controller")
 		os.Exit(1)
 	}

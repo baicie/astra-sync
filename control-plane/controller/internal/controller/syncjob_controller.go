@@ -16,6 +16,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	syncv1 "io.astrasync/control-plane/controller/api/v1"
+	"io.astrasync/control-plane/controller/internal/metrics"
 	"io.astrasync/control-plane/job"
 )
 
@@ -26,6 +27,16 @@ type SyncJobReconciler struct {
 	Jobs                  job.Repository
 	StatusRefreshInterval time.Duration
 	Metrics               ReconcileMetrics
+	// Recorder observes job state transitions. It is set by SetupWithManager
+	// from the controller-runtime manager's registerer (the same registerer
+	// that hosts controller-runtime's own metrics). The field is nil-safe:
+	// metrics.Recorder.ObserveStateTransition is a nil-check method, so
+	// callers can pass a nil Recorder without a nil guard. The field is
+	// separate from Metrics so that the ReconcileMetrics interface remains
+	// minimal (only the reconcile-level ObserveReconcile) and the job
+	// state transition observer is opt-in for tests that do not exercise
+	// state transitions.
+	Recorder *metrics.Recorder
 }
 
 // ReconcileMetrics records the bounded observations produced by a reconcile
@@ -129,6 +140,7 @@ func (r *SyncJobReconciler) converge(
 				if errors.Is(updateErr, job.ErrConflict) {
 					continue
 				}
+				r.observeTransition(resource, stored, updated)
 				return updated, updateErr
 			}
 			var replaceErr error
@@ -161,6 +173,7 @@ func (r *SyncJobReconciler) converge(
 		if updateErr != nil {
 			return job.Job{}, updateErr
 		}
+		r.observeTransition(resource, stored, updated)
 		return updated, nil
 	}
 	return job.Job{}, job.ErrConflict
@@ -187,6 +200,7 @@ func (r *SyncJobReconciler) reconcileDeletion(
 			} else if err != nil {
 				return ctrl.Result{}, err
 			}
+			r.observeTransition(resource, stored, next)
 		}
 		if err := r.projectStatus(ctx, resource, next.Status); err != nil {
 			return ctrl.Result{}, err
@@ -312,6 +326,30 @@ func (r *SyncJobReconciler) now() time.Time {
 	return r.Clock()
 }
 
-func (r *SyncJobReconciler) SetupWithManager(manager ctrl.Manager) error {
+// SetupWithManager registers the SyncJob controller with the given manager
+// and wires the metrics Recorder for job state transition observation.
+// The recorder is nil-safe: if nil, ObserveStateTransition calls are dropped.
+func (r *SyncJobReconciler) observeTransition(resource *syncv1.SyncJob, stored, next job.Job) {
+	tenantID := ""
+	if resource != nil && resource.Labels != nil {
+		tenantID = resource.Labels["astrasync.io/tenant-id"]
+	}
+	if tenantID == "" {
+		tenantID = "_unknown"
+	}
+	namespace := ""
+	if resource != nil {
+		namespace = resource.Namespace
+	}
+	if stored.Status.State != next.Status.State {
+		r.Recorder.ObserveStateTransition(tenantID, namespace, string(stored.Status.State), string(next.Status.State))
+	}
+}
+
+// SetupWithManager registers the SyncJob controller with the given manager
+// and wires the metrics Recorder for job state transition observation.
+// The recorder is nil-safe: if nil, ObserveStateTransition calls are dropped.
+func (r *SyncJobReconciler) SetupWithManager(manager ctrl.Manager, recorder *metrics.Recorder) error {
+	r.Recorder = recorder
 	return ctrl.NewControllerManagedBy(manager).For(&syncv1.SyncJob{}).Complete(r)
 }

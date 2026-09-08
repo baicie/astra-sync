@@ -206,6 +206,58 @@ non-zero production sample and is owned by Phase 18+.
 
 ### Added
 
+- `control-plane/controller/internal/controller/syncjob_controller.go`:
+  Phase 23 slice 49 (ADR-066) wires `controller_job_state_total` at the
+  reconcile-loop durable commit boundary. The `SyncJobReconciler` struct
+  gains a `Recorder *metrics.Recorder` field; `SetupWithManager(manager,
+  recorder)` accepts the recorder. A new `observeTransition(resource,
+  stored, next)` helper derives `tenant_id` from the SyncJob resource
+  label `astrasync.io/tenant-id` (collapsing to `_unknown` if absent)
+  and calls `Recorder.ObserveStateTransition` when
+  `stored.Status.State != next.Status.State`. The helper is wired at four
+  durable-commit points: two in `converge` (spec-change stop path +
+  desired-state transition path) and one in `reconcileDeletion` (active
+  state stop path). The call site is post-`r.Jobs.Update(...)` returning
+  nil — the moment the job repository has accepted the new state. The
+  Recorder method is nil-safe, so callers that construct a Reconciler
+  without a Recorder are unaffected.
+
+- `control-plane/controller/cmd/controller/main.go`: `SetupWithManager`
+  is called with the existing `controllerMetrics` recorder, closing the
+  injection path between the controller-runtime registerer and the
+  reconcile loop.
+
+- `control-plane/controller/api/v1/syncjob_types.go`: godoc on the
+  `SyncJob` type documents the `astrasync.io/tenant-id` label
+  requirement for observability. The label is not enforced by Kubernetes
+  itself; a future slice (49.1.5) adds kubebuilder validation and the
+  API server wiring.
+
+- `control-plane/controller/internal/controller/syncjob_emission_test.go`:
+  Phase 23 slice 49 tests cover `observeTransition` happy path
+  (`INITIALIZING → RUNNING`), missing-label collapse to `_unknown`,
+  non-canonical tenant collapse, and `_platform` self-scope. Two
+  negative tests verify nil-safety and the no-op when state is unchanged
+  (the durable-commit contract documented in ADR-058 §2).
+
+- `docs/observability/metrics-catalog.md`: Phase 23 slice 49 updates
+  the `controller_job_state_total` row from "Recorder wired in Phase 17
+  slice 43.3; reconcile-path wiring pending" to the full emission
+  description with the durable-commit boundary, K8s label derivation,
+  and nil-safety contract documented. The `controller_epoch_fence_total`
+  row remains Recorder-wired only (slice 49.3.5 is the Phase 23+
+  candidate once ADR-053 §3 settles the durable commit decision for
+  fence responses).
+
+- `docs/adr/adr-066-phase23-controller-reconcile-emission.md`:
+  Phase 23 umbrella decision. Records scope (slice 49.1 / 49.2 / 49.3 /
+  49.4: `controller_job_state_total` emission via reconcile boundary),
+  the durable-commit emission pattern, the K8s-label tenant derivation,
+  non-goals (slices 49.1.5 / 49.3.5 / 43.1.5 / 26.F9), and the
+  ADR-053 / ADR-029 dependency chain.
+
+### Added
+
 - `control-plane/auth/postgres/repository.go`: Phase 22 slice 48.1
   (ADR-065) adds `LoadTenantIDsForPrincipal(ctx, principalID)` which
   returns the unique active tenant IDs for a principal via a
