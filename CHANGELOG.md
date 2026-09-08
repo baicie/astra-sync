@@ -100,6 +100,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   restoring branch tip integrity without squashing the existing
   Phase 30 / 31 history.
 
+- Phase 27 / 29 audit clarification (ADR-078, Proposed):
+  ADR-077 §Context incorrectly classified six files
+  (`interceptor_test.go`, `job_mutation_service_test.go`,
+  `job_validation_service.go`, `mutation_repository.go`,
+  `repository.go`, `sync.astrasync.io_syncjobs.yaml`) as
+  "phantom modified". The audit methodology used a single
+  `git ls-tree` comparison, which only confirms HEAD-vs-origin-
+  main blob equality and does not detect uncommitted working-
+  tree deltas. Inspection of `git diff` shows the six files
+  have substantive +287 / +21 / -10 additions tied to
+  ADR-071 / ADR-074. Three follow-up commits re-categorize
+  these as Phase 27 / 29 work and append them to the
+  per-slice backfill history; ADR-078 documents the corrected
+  audit methodology (`git diff` step required) for future
+  audits.
+
 <!-- Add new Phase content above this line. -->
 
 ## [v0.8.0] - 2026-09-08
