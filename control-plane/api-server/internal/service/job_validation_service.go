@@ -14,6 +14,7 @@ import (
 
 	compilerv1 "io.astrasync/control-plane/api-server/gen/go/compiler/v1"
 	controlv1 "io.astrasync/control-plane/api-server/gen/go/v1"
+	"io.astrasync/control-plane/api-server/internal/authn"
 	"io.astrasync/control-plane/api-server/internal/catalogproto"
 	"io.astrasync/control-plane/auth"
 	"io.astrasync/control-plane/catalog"
@@ -377,6 +378,22 @@ func tenantIDForConnectionUse(ctx context.Context, scope string) (string, error)
 		return "", auth.ErrTenantUnavailable
 	}
 	return scope, nil
+}
+
+// resolvedTenantIDForMutation is the Phase 29 (ADR-074 §4) tenant-id
+// resolution for JobService mutations. The interceptor already attaches
+// a verified tenant-id to the request context via authn.WithJobTenantID.
+// This helper reads the attached value first, and falls back to the
+// membership-derived value when the interceptor did not run (e.g. unit
+// tests that exercise JobService directly without a registered
+// interceptor). The mutation repository validates the result is a
+// canonical UUID via Mutation.Validate, so no extra validation is needed
+// here.
+func resolvedTenantIDForMutation(ctx context.Context, scope string) (string, error) {
+	if attached := authn.JobTenantIDFromContext(ctx); attached != "" {
+		return attached, nil
+	}
+	return tenantIDForConnectionUse(ctx, scope)
 }
 
 func deterministicSpecDigest(spec *controlv1.JobSpec) string {

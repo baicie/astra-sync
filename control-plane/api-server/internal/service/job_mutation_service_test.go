@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 
 	controlv1 "io.astrasync/control-plane/api-server/gen/go/v1"
+	"io.astrasync/control-plane/api-server/internal/authn"
 	"io.astrasync/control-plane/api-server/internal/service"
 	"io.astrasync/control-plane/auth"
 	"io.astrasync/control-plane/job"
@@ -142,17 +143,129 @@ func validMutationValidation(tenantID string) service.MutationValidation {
 
 func jobMutationContext(t *testing.T, tenantID string, permissions ...auth.Permission) context.Context {
 	t.Helper()
-	membership, err := auth.NewMembership(tenantID, true, permissions...)
-	if err != nil {
-		t.Fatalf("create Job mutation membership: %v", err)
-	}
-	membership.TenantNamespace = "tenant-a"
 	ctx, err := auth.WithPrincipal(context.Background(), auth.Principal{
 		ID: "job-operator", Subject: "job-operator", Active: true, PolicyRevision: "policy-1",
-		Memberships: map[string]auth.Membership{tenantID: membership},
+		Memberships: map[string]auth.Membership{tenantID: mustMembershipWithPerms(t, tenantID, true, permissions...)},
 	})
 	if err != nil {
 		t.Fatalf("create Job mutation principal: %v", err)
 	}
 	return ctx
+}
+
+func mustMembership(t *testing.T, tenantID string, active bool) auth.Membership {
+	t.Helper()
+	membership, err := auth.NewMembership(tenantID, active)
+	if err != nil {
+		t.Fatalf("create membership without permissions: %v", err)
+	}
+	return membership
+}
+
+func mustMembershipWithPerms(
+	t *testing.T, tenantID string, active bool, permissions ...auth.Permission,
+) auth.Membership {
+	t.Helper()
+	membership, err := auth.NewMembership(tenantID, active, permissions...)
+	if err != nil {
+		t.Fatalf("create membership with permissions: %v", err)
+	}
+	membership.TenantNamespace = "tenant-a"
+	return membership
+}
+
+// TestTransactionalJobCreatePrefersAttachedTenantID covers Phase 29
+// (ADR-074 §4): when the interceptor has attached a verified tenant-id via
+// `authn.WithJobTenantID`, the JobService mutation MUST use that value as
+// `Mutation.TenantID`, even if the principal's membership for the
+// namespace resolves to a different tenant-id. The trust boundary sits
+// in the interceptor; JobService is just a consumer.
+//
+// The principal in this test has memberships for BOTH the membership-derived
+// tenant and the attached tenant. The attached tenant carries the
+// permission; the membership-derived tenant does not. This mirrors the
+// real flow where the BFF has already verified the principal owns the
+// attached tenant's permissions, and the membership-for-scope lookup is a
+// convenience fallback for the lifecycle controller's direct calls.
+func TestTransactionalJobCreatePrefersAttachedTenantID(t *testing.T) {
+	now := time.Date(2026, 9, 8, 16, 0, 0, 0, time.UTC)
+	membershipTenantID := uuid.NewString()
+	attachedTenantID := uuid.NewString()
+	if membershipTenantID == attachedTenantID {
+		t.Fatalf("attached and membership tenant IDs must differ: %q", membershipTenantID)
+	}
+	repository := &recordingJobMutationRepository{Repository: jobmemory.New()}
+	validator := &recordingJobMutationValidator{result: validMutationValidation(attachedTenantID)}
+	jobService, err := service.NewTransactionalJobService(
+		repository, validator, auth.ContextAuthorizer{},
+		[]byte("0123456789abcdef0123456789abcdef"), func() time.Time { return now },
+		func() string { return "12345678-1234-4234-8234-123456789abc" },
+	)
+	if err != nil {
+		t.Fatalf("create transactional Job service: %v", err)
+	}
+	attachedMembership, err := auth.NewMembership(attachedTenantID, true, auth.PermissionJobsCreate)
+	if err != nil {
+		t.Fatalf("attached membership: %v", err)
+	}
+	attachedMembership.TenantNamespace = "tenant-a"
+	// Build a principal whose active memberships span both tenants. The
+	// membership for the *attached* tenant carries the permission; the
+	// membership for the membership-derived tenant does not.
+	ctx, err := auth.WithPrincipal(context.Background(), auth.Principal{
+		ID: "job-operator", Subject: "job-operator", Active: true, PolicyRevision: "policy-1",
+		Memberships: map[string]auth.Membership{
+			attachedTenantID:      attachedMembership,
+			membershipTenantID: mustMembership(t, membershipTenantID, true),
+		},
+	})
+	if err != nil {
+		t.Fatalf("create principal: %v", err)
+	}
+	ctx = authn.WithJobTenantID(ctx, attachedTenantID)
+	_, err = jobService.CreateJob(ctx, &controlv1.CreateJobRequest{
+		Namespace: "tenant-a", Name: "orders", Spec: csvSpec("input.csv", "output.csv"),
+		IdempotencyKey: fixtureIdempotencyKey("phase29-attached-000001"),
+	})
+	if err != nil {
+		t.Fatalf("create Job: %v", err)
+	}
+	if repository.mutation.TenantID != attachedTenantID {
+		t.Fatalf("mutation TenantID = %q, want attached %q (membership was %q)",
+			repository.mutation.TenantID, attachedTenantID, membershipTenantID)
+	}
+}
+
+// TestTransactionalJobCreateFallsBackToMembershipWhenNoAttachedTenantID
+// covers the Phase 29 fallback path (ADR-074 §4): when the interceptor
+// has not run (or no metadata was provided), JobService MUST derive
+// Mutation.TenantID from the principal's active membership. The legacy
+// behaviour is preserved.
+func TestTransactionalJobCreateFallsBackToMembershipWhenNoAttachedTenantID(t *testing.T) {
+	now := time.Date(2026, 9, 8, 16, 0, 0, 0, time.UTC)
+	tenantID := uuid.NewString()
+	repository := &recordingJobMutationRepository{Repository: jobmemory.New()}
+	validator := &recordingJobMutationValidator{result: validMutationValidation(tenantID)}
+	jobService, err := service.NewTransactionalJobService(
+		repository, validator, auth.ContextAuthorizer{},
+		[]byte("0123456789abcdef0123456789abcdef"), func() time.Time { return now },
+		func() string { return "12345678-1234-4234-8234-123456789abc" },
+	)
+	if err != nil {
+		t.Fatalf("create transactional Job service: %v", err)
+	}
+	_, err = jobService.CreateJob(
+		jobMutationContext(t, tenantID, auth.PermissionJobsCreate),
+		&controlv1.CreateJobRequest{
+			Namespace: "tenant-a", Name: "orders", Spec: csvSpec("input.csv", "output.csv"),
+			IdempotencyKey: fixtureIdempotencyKey("phase29-fallback-000001"),
+		},
+	)
+	if err != nil {
+		t.Fatalf("create Job: %v", err)
+	}
+	if repository.mutation.TenantID != tenantID {
+		t.Fatalf("fallback TenantID = %q, want membership-derived %q",
+			repository.mutation.TenantID, tenantID)
+	}
 }
