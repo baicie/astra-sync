@@ -6,6 +6,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Phase 29 (ADR-074): the API Server now consumes
+  `x-astra-tenant-id` incoming gRPC metadata on every mutating
+  RPC. The authn interceptor (Phase 29 §3) extracts the
+  metadata, validates it is a canonical UUID, and reconciles
+  it against the principal's active membership. A mismatch is
+  rejected with `PermissionDenied` and audited as
+  `TENANT_DENIED` / `TENANT_ENVELOPE_INVALID`. The verified
+  tenant-id is attached to the request context via
+  `authn.WithJobTenantID` and consumed by `JobService` so the
+  `Mutation.TenantID` is the value the API Server authorised
+  the request for. Migration
+  `control-plane/job/postgres/migrations/003_jobs_tenant_id.sql`
+  adds the nullable `tenant_id UUID` column to
+  `astrasync_control_jobs`; the atomic mutation path writes
+  the verified tenant-id on every INSERT. Tests in
+  `authn/tenant_metadata_test.go` (5) and the new
+  `interceptor_test.go` (3) and `job_mutation_service_test.go`
+  (2) cases cover the contract.
+
+- `console/internal/server/job_handlers.go`: Phase 28 slice 28-A
+  (ADR-072) adds `x-astra-tenant-id` outgoing gRPC metadata on every
+  job mutation (`POST/PUT/DELETE /api/jobs`, `/api/jobs/{name}/start`,
+  `/api/jobs/{name}/stop`, `/api/jobs/{name}/validate`). The
+  BFF now fails-closed when the resolved scope has an empty tenant-id
+  before forwarding. Read-only endpoints are unchanged.
+  `console/internal/server/bff_slice28_test.go` covers the egress
+  contract; `console/internal/server/protojson_test.go` documents the
+  exact protojson enum value names for job specs.
+
+- ADR-073 (Accepted): Phase 28 slice 28-B — Console learns the
+  controller-runtime client and creates the `SyncJob` CR after the
+  durable PostgreSQL `job.Job` write succeeds. Closes the last gap
+  before `controller_job_state_total{tenant_id}` becomes real for
+  Console-issued jobs. Implementation lands in Phase 29 once the ADR
+  is reviewed.
+
+- Phase 30 (ADR-075): Console tenant-id envelope chain regression
+  test (`console/internal/server/chain_e2e_test.go`, 3 cases) pins
+  the join between the BFF egress (Phase 28-A) and the Console
+  `SyncJob` CR dual-write (Phase 28-B). The chain test asserts
+  that the same verified `tenantID` reaches both (a) the api-server
+  outgoing gRPC metadata captured by the fake backend and (b) the
+  `syncjobcr.WriteInput.Scope.TenantID` captured by the in-memory
+  CR writer recorder, in the same HTTP request. A regression that
+  swaps `scope.tenantID` for `session.Principal.ID` (or any other
+  identity source) is caught by `chain[cr-write]` mismatch at
+  unit-test speed. The controller-side half of the chain
+  (`controller_job_state_total{tenant_id}` emission from the
+  label) continues to be pinned by
+  `control-plane/controller/internal/controller/syncjob_emission_test.go`
+  (ADR-066 §3, ADR-069 §Slice 51.1). Phase 30 ships only test code;
+  no production code, no new metric, no new dependency, no helm
+  resource change.
+
 <!-- Add new Phase content above this line. -->
 
 ## [v0.8.0] - 2026-09-08
