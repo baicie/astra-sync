@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"regexp"
 	"sync"
 	"time"
 )
@@ -33,6 +34,36 @@ import (
 // TenantLabelKey is the Kubernetes label key for the tenant identifier.
 // The value MUST be a canonical lowercase UUID. ADR-071 §2.
 const TenantLabelKey = "astrasync.io/tenant-id"
+
+// canonicalTenantIDPattern mirrors the project's authoritative regex
+// in control-plane/auth.tenantIDPattern (version digit ∈ [1-5],
+// variant digit ∈ [8-b]). The pattern is duplicated here because
+// the CR writer package cannot import control-plane/auth (the
+// dependency direction would invert and re-introduce the
+// controller-runtime chain into console — see manager.go's
+// package doc). The constraint is part of the Kubernetes CEL
+// validation rule on the SyncJob CRD (ADR-071 §2):
+//
+//	self.labels['astrasync.io/tenant-id'].match(
+//	    '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')
+//
+// plus the version + variant range enforced by the auth-library
+// regex. ADR-081 §Decision says the writer must reject
+// non-canonical values locally (defence in depth) before sending
+// the JSON body to the API server.
+var canonicalTenantIDPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
+
+// IsCanonicalTenantID reports whether value is a canonical
+// lowercase UUID suitable for use as the astrasync.io/tenant-id
+// label. The check rejects uppercase, brace form, URN-prefixed,
+// whitespace-padded, and empty values. The function is the local
+// source of truth at the SyncJob CR writer boundary; the
+// authoritative source of truth across the whole project is
+// control-plane/auth.tenantIDPattern (the same regex, kept in sync
+// via this comment and the ADR-081 acceptance criteria).
+func IsCanonicalTenantID(value string) bool {
+	return canonicalTenantIDPattern.MatchString(value)
+}
 
 // SyncJob is the minimal subset of the controller module's SyncJob CRD type
 // needed for CR construction. Keeping this in-package avoids importing
@@ -332,6 +363,14 @@ func (w *realDualWriter) attempt(ctx context.Context, client *http.Client, baseU
 }
 
 func (w *realDualWriter) create(ctx context.Context, client *http.Client, baseURL string, input WriteInput) Outcome {
+	// Defence in depth (ADR-081): refuse non-canonical tenant-ids
+	// locally before sending a JSON body the K8s API server's CEL
+	// validator would reject at admission time. Returning
+	// OutcomeInvalid also drives the controller_job_state_total
+	// dual-write metric so operators can spot the regression.
+	if !IsCanonicalTenantID(input.Scope.TenantID) {
+		return OutcomeInvalid
+	}
 	sj := SyncJob{
 		APIVersion: "sync.astrasync.io/v1",
 		Kind:       "SyncJob",
@@ -365,6 +404,20 @@ func (w *realDualWriter) create(ctx context.Context, client *http.Client, baseUR
 }
 
 func (w *realDualWriter) update(ctx context.Context, client *http.Client, baseURL string, input WriteInput) Outcome {
+	// Defence in depth (ADR-082 / Phase 33): refuse non-canonical
+	// tenant-ids locally before issuing the discovery GET or PUT.
+	// The update path applies the same label-translation logic
+	// (`existing.Metadata.Labels = map[string]string{TenantLabelKey:
+	// input.Scope.TenantID}`) as the create path (ADR-081
+	// §Consequences Negative — "production code uses the same
+	// translation logic for `update`"), so it MUST also short-
+	// circuit on non-canonical input. Firing before the GET (not
+	// after) prevents the writer from observing a 200 OK on a CR
+	// it never had business touching, and matches the metric
+	// semantics of the create path.
+	if !IsCanonicalTenantID(input.Scope.TenantID) {
+		return OutcomeInvalid
+	}
 	getURL := fmt.Sprintf("%s/namespaces/%s/syncjobs/%s", baseURL, input.Scope.Namespace, input.Name)
 	getReq, err := http.NewRequestWithContext(ctx, http.MethodGet, getURL, nil)
 	if err != nil {

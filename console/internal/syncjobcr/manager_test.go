@@ -129,10 +129,18 @@ func TestRealDualWriterCreateSuccess(t *testing.T) {
 	}
 }
 
+// TestRealDualWriterCreateAdmissionRejected pins the case where the
+// Kubernetes API server itself rejects a CR with 422/403 because
+// of an admission rule the writer's local canonical-UUID check
+// does NOT cover (e.g. a CEL rule on a different label or a CRD
+// schema mismatch). The writer must distinguish
+// "we refused locally" (OutcomeInvalid) from "the apiserver
+// refused at admission" (OutcomeAdmissionRejected) so the dual-
+// write metric preserves the diagnostic split. ADR-081.
 func TestRealDualWriterCreateAdmissionRejected(t *testing.T) {
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
-			http.Error(w, "field label: [astrasync.io/tenant-id: required]", http.StatusUnprocessableEntity)
+			http.Error(w, "spec.delivery: required value", http.StatusUnprocessableEntity)
 			return
 		}
 		http.Error(w, "unexpected", http.StatusBadRequest)
@@ -142,7 +150,7 @@ func TestRealDualWriterCreateAdmissionRejected(t *testing.T) {
 	rec := &Recording{}
 	dw := NewDualWriter(mgr, rec, nil)
 	outcome := dw.Write(context.Background(), WriteInput{
-		Scope:    Scope{TenantID: "", Namespace: "default"}, // empty tenant → invalid label
+		Scope:    Scope{TenantID: "11111111-1111-4111-8111-111111111111", Namespace: "default"}, // canonical, so request is sent
 		Name:     "job",
 		Spec:     &SyncJobSpec{},
 		Mutation: MutationCreate,
