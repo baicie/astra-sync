@@ -55,6 +55,13 @@ jobs:
           go-version: '1.26.x'
           cache: false
 
+      - name: Debug: list migration files
+        run: |
+          set -euo pipefail
+          pwd
+          ls -la control-plane/job/postgres/ 2>&1 || echo "control-plane/job/postgres/ does not exist"
+          find . -name "001_jobs.sql" 2>&1 | head -5
+
       - name: Run PostgreSQL integration tests
         env:
           # goproxy.cn is used because proxy.golang.org is unreachable from
@@ -63,20 +70,21 @@ jobs:
           GOPROXY: https://goproxy.cn,direct
         run: |
           set -euo pipefail
-          # The root Go module that owns control-plane/job/ lives at
-          # control-plane/go.mod (control-plane/ is itself a Go module root,
-          # not just a subdirectory). `go test` must run from that root so
-          # the ./... pattern resolves inside the module graph.
+          # control-plane/ is the Go module root; go test runs from there.
+          # The migration files are at control-plane/job/postgres/migrations/.
+          # Resolve the repo root via git rev-parse --show-toplevel so the
+          # helper finds the migrations regardless of the runner's checkout
+          # directory name (actions/checkout uses the repo name by default,
+          # but the absolute path is stable).
+          repo_root=$(git rev-parse --show-toplevel)
+          export MIGRATIONS_DIR="${repo_root}/control-plane/job/postgres/migrations"
           cd control-plane
-          # Run the two integration tests that cover:
-          #   1. repository_integration_test.go  — Job lifecycle Create/Update/Delete
-          #   2. mutation_integration_test.go   — Atomic job mutation + connection generation fence
-          # Both use testcontainers-go (postgres:16-alpine) which requires Docker.
           go test \
             -tags=integration \
             -v \
             -count=1 \
             -timeout 300s \
+            -args -migrations-dir="${MIGRATIONS_DIR}" \
             ./job/postgres/...
 
       - name: Verify helper file is present
