@@ -1,0 +1,46 @@
+# Console SyncJob CR dual-write role (ADR-073 Slice 28-B).
+#
+# The Console requires narrow verbs on sync.astrasync.io/syncjobs so it can
+# dual-write the CR after the durable PostgreSQL job.Job row is committed.
+# The existing chart-wide ClusterRole includes `list`, `watch`, and `patch`
+# which the Console does not need; this Role keeps the blast radius tight.
+#
+# verbs intentionally omitted:
+#   - patch   : the slice uses full Update; CRD validation re-applies on every
+#               write, so patch buys nothing.
+#   - list    : the Console's read-mostly paths hit the api-server, not K8s.
+#   - watch   : the Console does not run a controller-runtime Manager / cache.
+{{- if .Values.console.syncjobCRWrite.enabled }}
+{{- if .Values.serviceAccount.create }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "astrasync.fullname" . }}-console-syncjob-cr
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "astrasync.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["sync.astrasync.io"]
+    resources: ["syncjobs"]
+    verbs: ["get", "create", "update", "delete"]
+  - apiGroups: ["sync.astrasync.io"]
+    resources: ["syncjobs/status"]
+    verbs: ["get", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "astrasync.fullname" . }}-console-syncjob-cr
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "astrasync.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "astrasync.fullname" . }}-console-syncjob-cr
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "astrasync.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}
+{{- end }}

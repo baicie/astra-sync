@@ -239,6 +239,12 @@ console:
     requests:
       cpu: 50m
       memory: 64Mi
+  # SyncJob CR dual-write (ADR-073 Slice 28-B). When enabled, the Console
+  # ServiceAccount is granted narrow verbs on sync.astrasync.io/syncjobs so
+  # it can create / update / delete the CR after the durable PostgreSQL
+  # job.Job row is committed. The api-server's ServiceAccount is unaffected.
+  syncjobCRWrite:
+    enabled: true
 
 # Internal Java semantic compiler. Production requires mTLS on this workload-only service.
 compilerValidation:
