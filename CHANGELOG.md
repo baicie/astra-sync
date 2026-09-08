@@ -221,6 +221,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   documentation test. ADR-080 supersedes ADR-076 §2 and
   ADR-079 §1 / §4 by reference.
 
+- Phase 34: tenant-id binding for the controller
+  reconcile-level metric. The
+  `controller_job_controller_reconcile_duration_seconds{tenant_id}`
+  series was historically a single degenerate bucket bound
+  to the hard-coded `"_unknown"` label, because the
+  `Reconcile` defer in
+  `control-plane/controller/internal/controller/syncjob_controller.go`
+  ignored the SyncJob CR's `astrasync.io/tenant-id` label.
+  Phase 34 derives the label from
+  `resource.Labels["astrasync.io/tenant-id"]` after the K8s
+  `Get` succeeds, routing it through
+  `observability/normalize.NormalizeTenant` (the same
+  allowlist every other tenant-deriving Recorder in the
+  control plane uses, ADR-058 §3). The pre-`Get` placeholder
+  stays at `_unknown` so a `Get` failure is still
+  attributed to the unknown bucket rather than leaking a
+  stale value. Five new Layer-1 cases in
+  `reconcile_tenant_id_metric_test.go` cover canonical UUID,
+  missing label, non-canonical UUID, `_platform` self-scope,
+  and empty string. The historical
+  `TestReconcileObservesSuccessAndFailureOutcomes` is
+  refreshed to assert against the canonical tenant
+  (the resource is fetched before the Jobs-nil guard fires,
+  so the failure outcome is also bound to the canonical
+  tenant). All tests pass on
+  `go test ./control-plane/controller/... -count=1`
+  (10.0s). The change unblocks the envtest-backed
+  controller reconcile regression (ADR-082 §Follow-ups) —
+  the unit-tested contract is now the metric binding the
+  dashboard recipes expect, so envtest only needs to verify
+  the Get → finalizer-add → ProjectStatus flow without
+  re-pinning label semantics. Phase 34 is test-only plus
+  the minimum production-code change required to make the
+  metric bind the right tenant.
+
 <!-- Add new Phase content above this line. -->
 
 ## [v0.8.0] - 2026-09-08

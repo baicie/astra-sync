@@ -20,6 +20,10 @@ func TestReconcileObservesSuccessAndFailureOutcomes(t *testing.T) {
 	if err := syncv1.AddToScheme(scheme); err != nil {
 		t.Fatalf("add scheme: %v", err)
 	}
+	// The canonical tenant-id that testSyncJob stamps on the resource
+	// (Phase 34 derives the reconcile metric's tenant-id label from
+	// this value, replacing the historical "_unknown" placeholder).
+	const canonicalTenant = "0190f7c4-6c8d-7a01-9d2b-1ecabdff0011"
 	resource := testSyncJob("11111111-1111-4111-8111-111111111111", job.DesiredStopped)
 	client := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&syncv1.SyncJob{}).
 		WithObjects(resource).Build()
@@ -34,16 +38,20 @@ func TestReconcileObservesSuccessAndFailureOutcomes(t *testing.T) {
 	if _, err := reconciler.Reconcile(context.Background(), request); err != nil {
 		t.Fatalf("add finalizer: %v", err)
 	}
-	if len(recorder.observations) != 1 || recorder.observations[0].tenantID != "_unknown" ||
+	if len(recorder.observations) != 1 || recorder.observations[0].tenantID != canonicalTenant ||
 		recorder.observations[0].outcome != "success" || recorder.observations[0].duration < 0 {
 		t.Fatalf("unexpected success observation: %+v", recorder.observations)
 	}
 
+	// Failure path: a reconciler without a Jobs repository must emit
+	// the failure outcome. The label is the canonical tenant because
+	// the resource IS still fetchable (the failure happens after Get,
+	// in the Jobs-nil guard), so the defer sees the bound tenant.
 	broken := &SyncJobReconciler{Client: client, Scheme: scheme, Clock: reconciler.Clock, Metrics: recorder}
 	if _, err := broken.Reconcile(context.Background(), request); err == nil {
 		t.Fatal("expected missing repository error")
 	}
-	if len(recorder.observations) != 2 || recorder.observations[1].tenantID != "_unknown" ||
+	if len(recorder.observations) != 2 || recorder.observations[1].tenantID != canonicalTenant ||
 		recorder.observations[1].outcome != "failure" || recorder.observations[1].duration < 0 {
 		t.Fatalf("unexpected failure observation: %+v", recorder.observations)
 	}

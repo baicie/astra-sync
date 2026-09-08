@@ -18,6 +18,7 @@ import (
 	syncv1 "io.astrasync/control-plane/controller/api/v1"
 	"io.astrasync/control-plane/controller/internal/metrics"
 	"io.astrasync/control-plane/job"
+	"io.astrasync/control-plane/observability/normalize"
 )
 
 type SyncJobReconciler struct {
@@ -49,6 +50,21 @@ const controlPlaneFinalizer = "sync.astrasync.io/control-plane-finalizer"
 
 func (r *SyncJobReconciler) Reconcile(ctx context.Context, request ctrl.Request) (result ctrl.Result, reconcileErr error) {
 	startedAt := r.now()
+	// tenantID is the bound label value for the reconcile-level
+	// `controller_job_controller_reconcile_duration_seconds` metric. It
+	// MUST be resolved from the SyncJob resource's tenant-id label so
+	// the metric series reflects the actual tenant the reconcile was
+	// dispatched against; emitting a constant `"_unknown"` would
+	// collapse every tenant's reconcile latency into a single
+	// degenerate series and erase the BFF label translation
+	// (ADR-072 / ADR-074) at the Controller boundary (Phase 34).
+	//
+	// The variable stays bound to "_unknown" when the resource is not
+	// yet fetched (Get failure, missing object). The label is
+	// overwritten after the Get succeeds so the defer always reports
+	// the tenant that owned the observed CR, never the hard-coded
+	// pre-fetch placeholder.
+	tenantID := normalize.UnknownTenant
 	defer func() {
 		if r.Metrics == nil {
 			return
@@ -57,11 +73,14 @@ func (r *SyncJobReconciler) Reconcile(ctx context.Context, request ctrl.Request)
 		if reconcileErr != nil {
 			outcome = "failure"
 		}
-		r.Metrics.ObserveReconcile("_unknown", outcome, r.now().Sub(startedAt))
+		r.Metrics.ObserveReconcile(tenantID, outcome, r.now().Sub(startedAt))
 	}()
 	resource := &syncv1.SyncJob{}
 	if err := r.Get(ctx, request.NamespacedName, resource); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
+	if resource.Labels != nil {
+		tenantID = normalize.NormalizeTenant(resource.Labels["astrasync.io/tenant-id"])
 	}
 	if r.Jobs == nil {
 		return ctrl.Result{}, fmt.Errorf("controller Job repository must not be nil")
