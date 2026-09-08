@@ -137,7 +137,7 @@ non-zero production sample and is owned by Phase 18+.
   at the Phase 17 slice / ADR-058 section that owns the row instead
   of deferring without an owner.
 
-## [Unreleased]
+## [v0.5.0] - 2026-09-08
 
 ### Added
 
@@ -230,6 +230,8 @@ non-zero production sample and is owned by Phase 18+.
 - `docs/phase19/README.md`: phase README with roadmap (slices
   45.0 / 45.1 / 45.2), acceptance criteria, and ADR
   cross-references.
+
+## [Unreleased]
 
 ## [v0.3.0] - 2026-09-07
 
