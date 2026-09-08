@@ -137,7 +137,7 @@ non-zero production sample and is owned by Phase 18+.
   at the Phase 17 slice / ADR-058 section that owns the row instead
   of deferring without an owner.
 
-## [Unreleased]
+## [v0.6.0] - 2026-09-08
 
 ### Added
 
@@ -201,6 +201,10 @@ non-zero production sample and is owned by Phase 18+.
   indirect to direct as a result of `replication/metrics`
   importing `observability/normalize`. No transitive dependency
   changes.
+
+## [Unreleased]
+
+<!-- Add new Phase content above this line. -->
 
 ## [v0.5.0] - 2026-09-08
 

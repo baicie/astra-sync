@@ -69,6 +69,7 @@ This directory contains the Architecture Decision Records (ADRs) for AstraSync.
 | [ADR-061](adr-061-phase19-connection-test-recorder-migrate.md) | Phase 19 Connection-Test Recorder Migrate (Slice 45) | Accepted | 2026-09-08 |
 | [ADR-062](adr-062-v0.5.0-release-cut.md) | v0.5.0 Release Cut (Phase 18 Scheduler + Phase 19 Connection-Test Observability) | Accepted | 2026-09-08 |
 | [ADR-063](adr-063-phase21-freetext-replication-recorder-migrate.md) | Phase 21 FreeText Helper + Replication Recorder Migrate (Slice 46) | Accepted | 2026-09-08 |
+| [ADR-064](adr-064-v0.6.0-release-cut.md) | v0.6.0 Release Cut (Phase 21 FreeText + Replication Recorder Migrate) | Accepted | 2026-09-08 |
 
 ## Template
 
