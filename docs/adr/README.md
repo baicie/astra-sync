@@ -89,6 +89,7 @@ This directory contains the Architecture Decision Records (ADRs) for AstraSync.
 | [ADR-077](adr-077-phase27-28-29-audit-backfill.md) | Phase 27 / 28 / 29 Audit — Backfill of Untracked Implementation Files | Proposed | 2026-09-08 |
 | [ADR-078](adr-078-phase27-29-audit-clarification.md) | Phase 27 / 29 Audit Clarification — Real Diffs in Working-Tree Files (ADR-077 §Context correction) | Proposed | 2026-09-08 |
 | [ADR-079](adr-079-phase31-implementation-corrections.md) | Phase 31 Implementation Corrections — MutationRepository, Metadata Key, Migration Fallback | Proposed | 2026-09-08 |
+| [ADR-080](adr-080-phase31-cross-module-public-surface.md) | Phase 31 Cross-Module Fixture — Public-Surface Constraint (Go internal/ rule) | Proposed | 2026-09-08 |
 
 ## Template
 

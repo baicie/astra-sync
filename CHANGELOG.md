@@ -133,6 +133,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   migration verification does not exist, so dry-run parse is
   the only viable option in this slice.
 
+- Phase 31 cross-module public-surface constraint (ADR-080,
+  Proposed): The Phase 31 fixture's first draft assumed it
+  could import `control-plane/api-server/internal/authn` and
+  `control-plane/api-server/internal/service` directly. Go's
+  `internal/` package rule forbids importing those packages
+  from a sibling module. ADR-076 §2 and ADR-079 §1 inherit this
+  assumption. The corrected fixture uses only the public
+  surface: `console` package + `control-plane/api-server/gen/
+  go/v1.JobServiceServer` (with `UnimplementedJobServiceServer`
+  embedded). The api-server interceptor's ordering rule
+  continues to be pinned by `interceptor_test.go` (Layer 1).
+  The five test cases are recast accordingly: mismatch /
+  malformed / fallback cases become BFF ingress contract
+  tests, and the migration case becomes a SQL parse +
+  documentation test. ADR-080 supersedes ADR-076 §2 and
+  ADR-079 §1 / §4 by reference.
+
 <!-- Add new Phase content above this line. -->
 
 ## [v0.8.0] - 2026-09-08
