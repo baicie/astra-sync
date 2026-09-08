@@ -76,6 +76,11 @@ This directory contains the Architecture Decision Records (ADRs) for AstraSync.
 | [ADR-068](adr-068-phase24-apiserver-session-revoke-emission.md) | Phase 24 Emission Sub-Slice 43.1.5 — apiserver_session_revoke_total via API Server revoke RPC | Accepted | 2026-09-08 |
 | [ADR-069](adr-069-phase25-controller-epoch-fence-emission.md) | Phase 25 Emission Sub-Slice 51.1 — controller_epoch_fence_total via reconcile boundary | Accepted | 2026-09-08 |
 | [ADR-070](adr-070-v0.8.0-release-cut.md) | v0.8.0 Release Cut (Phase 24 API Server Session Revoke + Phase 25 Controller Epoch Fence + Phase 26 Closeout) | Accepted | 2026-09-08 |
+| [ADR-071](adr-071-phase27-tenant-id-label-on-syncjob-cr.md) | Phase 27 slice 49.1.5 — `astrasync.io/tenant-id` Label on SyncJob CR | Accepted | 2026-09-08 |
+| [ADR-072](adr-072-phase28-console-tenant-id-egress.md) | Phase 28 Slice 28-A — Console BFF Forwards `x-astra-tenant-id` on Job Mutations | Accepted | 2026-09-08 |
+| [ADR-073](adr-073-phase28-slice28b-console-syncjob-cr-dual-write.md) | Phase 28 Slice 28-B — Console Owns `SyncJob` CR Dual-Write via controller-runtime | Accepted | 2026-09-08 |
+| [ADR-074](adr-074-phase29-api-server-consumes-tenant-id.md) | Phase 29 — API Server Consumes `x-astra-tenant-id` (Server-side Interceptor + `job.Job.tenant_id` Column) | Accepted | 2026-09-08 |
+| [ADR-075](adr-075-phase30-chain-tenant-id-regression.md) | Phase 30 — Tenant-Id Envelope End-to-End Regression Chain | Accepted | 2026-09-08 |
 
 ## Template
 
