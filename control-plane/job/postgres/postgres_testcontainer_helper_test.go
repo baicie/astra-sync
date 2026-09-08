@@ -2,7 +2,7 @@
 
 // Package postgres_test hosts the integration tests that drive a real
 // PostgreSQL instance via testcontainers-go. The helpers in this file
-// are shared by every `*_integration_test.go` file in the same
+// are shared by every *_integration_test.go file in the same
 // package; the inline-helper decision lives in ADR-084.
 package postgres_test
 
@@ -22,29 +22,39 @@ import (
 )
 
 // postgresImage is the PostgreSQL image tag the integration tests boot.
-// The image tag is pinned (testing.mdc §7) so a future PostgreSQL
+// The image tag is pinned (testing.mdc section 7) so a future PostgreSQL
 // major-version bump is the explicit ADR-required step.
 const postgresImage = "postgres:16-alpine"
 
-// migrationsDir is the directory whose `*.sql` files are applied to
-// the container after boot. The helper resolves the path relative to
-// the module root (control-plane/); CI workflows run from
-// control-plane/ so the path is "job/postgres/migrations".
+// migrationsDir is the directory whose *.sql files are applied to
+// the container after boot. The path is relative to the Go module root
+// (control-plane/), where go test executes the test binary.
 const migrationsDir = "job/postgres/migrations"
 
 // startPostgresContainer spins up a PostgreSQL container via
-// testcontainers-go, applies every `*.sql` file under migrationsDir
+// testcontainers-go, applies every *.sql file under migrationsDir
 // in lexical order, and returns the connection string. The container
 // is terminated via t.Cleanup when the test ends.
 //
 // The function is the single entry point for PostgreSQL in the
 // control-plane integration tests; callers MUST NOT construct a
-// container directly. A failure to start the container is fatal —
+// container directly. A failure to start the container is fatal -
 // the integration test cannot run without a live PostgreSQL
-// (testing.mdc §8 forbids t.Skip on invariant tests).
+// (testing.mdc section 8 forbids t.Skip on invariant tests).
 func startPostgresContainer(t *testing.T) string {
 	t.Helper()
 	ctx := context.Background()
+
+	// Log the actual working directory so we can diagnose
+	// path resolution failures in CI.
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get working directory: %v", err)
+	}
+	t.Logf("DEBUG working directory: %s", cwd)
+	migrationsPath := filepath.Join(cwd, migrationsDir)
+	t.Logf("DEBUG migrations path: %s", migrationsPath)
+
 	pgC, err := postgres.RunContainer(ctx,
 		testcontainers.WithImage(postgresImage),
 		testcontainers.WithWaitStrategy(
@@ -67,14 +77,14 @@ func startPostgresContainer(t *testing.T) string {
 	if err != nil {
 		t.Fatalf("postgres connection string: %v", err)
 	}
-	if err := applyMigrations(ctx, dsn, migrationsDir); err != nil {
-		t.Fatalf("apply migrations under %q: %v", migrationsDir, err)
+	if err := applyMigrations(ctx, dsn, migrationsPath); err != nil {
+		t.Fatalf("apply migrations under %q: %v", migrationsPath, err)
 	}
 	return dsn
 }
 
 // applyMigrations opens a connection pool against dsn and applies
-// every `*.sql` file under dir in lexical order. The helper is
+// every *.sql file under dir in lexical order. The helper is
 // order-sensitive because the migration filenames encode their apply
 // order (e.g. 001_jobs.sql precedes 002_job_mutations.sql). The
 // migration contents are loaded from disk so this helper stays
