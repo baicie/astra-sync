@@ -341,14 +341,59 @@ func (i Interceptor) Unary() grpc.UnaryServerInterceptor {
 			i.auditDenied(ctx, principal, "", info.FullMethod, "TENANT_DENIED")
 			return nil, status.Error(codes.PermissionDenied, "tenant access denied")
 		}
+		if err := i.reconcileTenantMetadata(ctx, info.FullMethod, principal, membership.TenantID, startedAt, requestID); err != nil {
+			return nil, err
+		}
 		if _, err := i.Authorizer.Authorize(principalContext, membership.TenantID, permission); err != nil {
 			i.observeAuthDecision(startedAt, membership.TenantID, authMetricOutcome(err), requestID)
 			i.auditDenied(ctx, principal, membership.TenantID, info.FullMethod, denialOutcome(err))
 			return nil, status.Error(codes.PermissionDenied, "tenant access denied")
 		}
 		i.observeAuthDecision(startedAt, membership.TenantID, authOutcomeSuccess, requestID)
-		return handler(principalContext, request)
+		return handler(WithJobTenantID(principalContext, membership.TenantID), request)
 	}
+}
+
+// reconcileTenantMetadata is the ADR-074 §3 / §6 server-side trust check.
+// The flow is:
+//
+//  1. If the incoming metadata is absent, attach the membership-derived
+//     tenant-id and fall through. This preserves the existing behaviour
+//     for callers (lifecycle controller, audit replayer) that do not send
+//     `x-astra-tenant-id`.
+//  2. If the metadata is present and canonical, verify it matches the
+//     membership's TenantID. A mismatch is a hard `PermissionDenied` with
+//     a `TENANT_DENIED` audit row. This catches BFF misconfiguration and
+//     mid-session membership rotation.
+//  3. If the metadata is malformed (non-canonical UUID, multi-value, etc.),
+//     reject with `PermissionDenied` and audit `TENANT_ENVELOPE_INVALID`.
+//
+// The function never writes the verified tenant-id back to the request
+// context; the caller (the `Unary` interceptor) does that explicitly so
+// the audit and metric outcomes remain attributable to the resolved
+// membership, not the metadata.
+func (i Interceptor) reconcileTenantMetadata(
+	ctx context.Context, fullMethod string, principal auth.Principal,
+	resolvedTenantID string, startedAt time.Time, requestID string,
+) error {
+	declared, present, err := JobTenantIDFromIncomingMetadata(ctx)
+	if err != nil {
+		i.observeAuthDecision(startedAt, resolvedTenantID, authOutcomeReject, requestID)
+		i.auditDenied(ctx, principal, resolvedTenantID, fullMethod, "TENANT_ENVELOPE_INVALID")
+		return status.Error(codes.PermissionDenied, "tenant envelope is invalid")
+	}
+	if !present {
+		// Fallback: metadata is absent. The caller (above) writes the
+		// membership-derived value to the context. Returning nil here lets
+		// the Authorizer path continue as before.
+		return nil
+	}
+	if declared != resolvedTenantID {
+		i.observeAuthDecision(startedAt, resolvedTenantID, authOutcomeReject, requestID)
+		i.auditDenied(ctx, principal, resolvedTenantID, fullMethod, "TENANT_DENIED")
+		return status.Error(codes.PermissionDenied, "tenant envelope does not match tenant scope")
+	}
+	return nil
 }
 
 func (i Interceptor) observeAuthDecision(startedAt time.Time, tenantID, outcome, requestID string) {
