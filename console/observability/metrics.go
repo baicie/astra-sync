@@ -13,6 +13,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"io.astrasync/console/internal/syncjobcr"
 )
 
 const (
@@ -33,11 +34,21 @@ var ConsoleRenderDuration = promauto.NewHistogramVec(prometheus.HistogramOpts{
 	Buckets: prometheus.DefBuckets,
 }, []string{"handler"})
 
+// DualWriteTotal counts Console -> SyncJob CR dual-write outcomes. ADR-073 §11.
+// The mutation label has 3 values (create/update/delete); the outcome label
+// has 5 values (success/admission_rejected/timeout/invalid/disabled). Total
+// cardinality: 3 * 5 = 15.
+var DualWriteTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+	Name: "controller_syncjob_console_dual_write_total",
+	Help: "Console -> SyncJob CR dual-write outcomes (ADR-073 Slice 28-B).",
+}, []string{"mutation", "outcome"})
+
 // Recorder updates the Console request metric families owned by HTTP business
 // call sites.
 type Recorder struct {
 	requestTotal   *prometheus.CounterVec
 	renderDuration *prometheus.HistogramVec
+	dualWrite      *prometheus.CounterVec
 }
 
 // NewRecorder registers an isolated Console recorder. Production uses
@@ -57,8 +68,12 @@ func NewRecorder(registerer prometheus.Registerer) (*Recorder, error) {
 			Help:    "Latency of Console HTML rendering.",
 			Buckets: prometheus.DefBuckets,
 		}, []string{"handler"}),
+		dualWrite: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "controller_syncjob_console_dual_write_total",
+			Help: "Console -> SyncJob CR dual-write outcomes (ADR-073 Slice 28-B).",
+		}, []string{"mutation", "outcome"}),
 	}
-	for _, collector := range []prometheus.Collector{recorder.requestTotal, recorder.renderDuration} {
+	for _, collector := range []prometheus.Collector{recorder.requestTotal, recorder.renderDuration, recorder.dualWrite} {
 		if err := registerer.Register(collector); err != nil {
 			return nil, fmt.Errorf("register Console metric: %w", err)
 		}
@@ -69,7 +84,52 @@ func NewRecorder(registerer prometheus.Registerer) (*Recorder, error) {
 // DefaultRecorder returns a recorder backed by the process-global metric
 // families exposed by Handler.
 func DefaultRecorder() *Recorder {
-	return &Recorder{requestTotal: ConsoleRequestTotal, renderDuration: ConsoleRenderDuration}
+	return &Recorder{requestTotal: ConsoleRequestTotal, renderDuration: ConsoleRenderDuration,
+		dualWrite: DualWriteTotal}
+}
+
+// RecordDualWrite increments the dual-write counter. It is safe to call on a
+// nil receiver; the call is a no-op. The mutation and outcome values are
+// normalized through whitelist tables so cardinality remains bounded.
+func (r *Recorder) RecordDualWrite(mutation, outcome string) {
+	if r == nil || r.dualWrite == nil {
+		return
+	}
+	r.dualWrite.WithLabelValues(normalizeMutation(mutation), normalizeDualOutcome(outcome)).Inc()
+}
+
+// syncjobcrRecorder adapts the Recorder to the syncjobcr.Recorder interface
+// (which uses typed MutationKind / Outcome). This keeps the observability
+// package free of the syncjobcr import to avoid an import cycle (server
+// already imports both).
+type syncjobcrRecorder struct{ inner *Recorder }
+
+func (a syncjobcrRecorder) RecordDualWrite(mutation syncjobcr.MutationKind, outcome syncjobcr.Outcome) {
+	a.inner.RecordDualWrite(string(mutation), string(outcome))
+}
+
+// SyncjobcrRecorder returns a syncjobcr.Recorder backed by this metrics
+// Recorder. Use this in main.go when wiring the dual-writer.
+func (r *Recorder) SyncjobcrRecorder() syncjobcrRecorder {
+	return syncjobcrRecorder{inner: r}
+}
+
+func normalizeMutation(value string) string {
+	switch value {
+	case "create", "update", "delete":
+		return value
+	default:
+		return "unknown"
+	}
+}
+
+func normalizeDualOutcome(value string) string {
+	switch value {
+	case "success", "admission_rejected", "timeout", "invalid", "disabled":
+		return value
+	default:
+		return "invalid"
+	}
 }
 
 // ObserveRequest records one completed Console request. Tenant and label

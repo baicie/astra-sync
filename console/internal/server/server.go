@@ -24,6 +24,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"io.astrasync/console/internal/authflow"
+	"io.astrasync/console/internal/syncjobcr"
 	consolemetrics "io.astrasync/console/observability"
 	jobv1 "io.astrasync/control-plane/api-server/gen/go/v1"
 	"io.astrasync/control-plane/auth"
@@ -65,6 +66,10 @@ type Config struct {
 	MaximumBody  int64
 	Metrics      RequestMetrics
 	Clock        func() time.Time
+	// CRWriter is the SyncJob CR dual-write pipeline. ADR-073 Slice 28-B.
+	// Optional; nil falls back to a no-op writer that records OutcomeSuccess.
+	// Production wires syncjobcr.NewDualWriter(NewInCluster(), recorder, nil).
+	CRWriter any
 }
 
 type Server struct {
@@ -83,6 +88,49 @@ type Server struct {
 	maximumBody  int64
 	metrics      RequestMetrics
 	clock        func() time.Time
+	crWriter     crWriter
+}
+
+// crWriter is a transport-agnostic interface used by the mutation handlers.
+// The Console injects a syncjobcr-backed implementation in production and
+// a noop implementation in tests. Defined here so the server package's
+// mutation code does not need to import syncjobcr's full surface.
+//
+// The interface uses syncjobcr.Scope / syncjobcr.MutationKind /
+// syncjobcr.SyncJobSpec by value pointer. Because crWriter is a *pointer-
+// to-package-type* consumer, the server package must import syncjobcr —
+// but only for type references, never for transitive deps. The syncjobcr
+// package's only dependency beyond the standard library is crypto/x509
+// (already on the indirect closure via k8s.io) and the k8s in-cluster
+// helpers, none of which surface here.
+type crWriter interface {
+	WriteCR(ctx context.Context, scope syncjobcr.Scope, name string, mutation syncjobcr.MutationKind, spec *syncjobcr.SyncJobSpec)
+}
+
+// crWriterFromConfig converts the any-typed Config.CRWriter into a crWriter.
+// A nil value or a non-DualWriter value falls back to a no-op writer that
+// does nothing. ADR-073 §5.
+func crWriterFromConfig(value any) crWriter {
+	if value == nil {
+		return noopCRWriter{}
+	}
+	// DualWriter is a pointer-receiver interface (write-first); check both
+	// value and pointer forms.
+	if w, ok := value.(syncjobcr.DualWriter); ok {
+		return syncjobcr.WriterAdapter{Writer: w}
+	}
+	if w, ok := value.(*syncjobcr.DualWriter); ok {
+		return syncjobcr.WriterAdapter{Writer: *w}
+	}
+	if w, ok := value.(crWriter); ok {
+		return w
+	}
+	return noopCRWriter{}
+}
+
+type noopCRWriter struct{}
+
+func (noopCRWriter) WriteCR(context.Context, syncjobcr.Scope, string, syncjobcr.MutationKind, *syncjobcr.SyncJobSpec) {
 }
 
 // New preserves the development-only read-only constructor used by the first
@@ -138,6 +186,7 @@ func NewWithConfig(configuration Config) (*Server, error) {
 	server.mutations, _ = configuration.Backend.(JobMutationClient)
 	server.validator, _ = configuration.Backend.(JobValidator)
 	server.audit, _ = configuration.Backend.(AuditReader)
+	server.crWriter = crWriterFromConfig(configuration.CRWriter)
 	if server.jobs == nil {
 		return nil, fmt.Errorf("Console backend does not implement JobReader")
 	}
@@ -506,6 +555,13 @@ func (s *Server) requireMutation(request *http.Request, session authflow.Session
 }
 
 func (s *Server) backendContext(request *http.Request, session authflow.Session, timeout time.Duration) (context.Context, context.CancelFunc) {
+	return s.backendContextWithTenant(request, session, timeout, "")
+}
+
+// backendContextWithTenant builds an outgoing gRPC context. When tenantID is
+// non-empty it appends x-astra-tenant-id to the outgoing metadata, providing
+// the authoritative tenant context to the control plane. ADR-072.
+func (s *Server) backendContextWithTenant(request *http.Request, session authflow.Session, timeout time.Duration, tenantID string) (context.Context, context.CancelFunc) {
 	ctx, cancel := context.WithTimeout(request.Context(), timeout)
 	requestID := strings.TrimSpace(request.Header.Get("X-Request-ID"))
 	if requestID == "" || len(requestID) > 128 {
@@ -515,6 +571,9 @@ func (s *Server) backendContext(request *http.Request, session authflow.Session,
 	if session.Record.Tokens.AccessToken != "" {
 		ctx = metadata.AppendToOutgoingContext(ctx, "authorization", "Bearer "+session.Record.Tokens.AccessToken,
 			"x-request-id", requestID)
+	}
+	if tenantID != "" {
+		ctx = metadata.AppendToOutgoingContext(ctx, "x-astra-tenant-id", tenantID)
 	}
 	return ctx, cancel
 }

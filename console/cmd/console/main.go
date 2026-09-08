@@ -24,6 +24,7 @@ import (
 	"io.astrasync/console/internal/authflow"
 	"io.astrasync/console/internal/oidc"
 	"io.astrasync/console/internal/server"
+	"io.astrasync/console/internal/syncjobcr"
 	consolemetrics "io.astrasync/console/observability"
 	jobv1 "io.astrasync/control-plane/api-server/gen/go/v1"
 	"io.astrasync/control-plane/auth"
@@ -257,6 +258,8 @@ func run(ctx context.Context, configuration config) error {
 		catalog: jobv1.NewConnectorCatalogServiceClient(connection), connections: jobv1.NewConnectionServiceClient(connection),
 		audit: jobv1.NewAuditServiceClient(connection)}
 
+	componentLogger := newComponentLogger("console", os.Stdout, os.Getenv("LOG_LEVEL"))
+
 	var sessionManager server.SessionManager
 	var authRepository *authpostgres.Repository
 	if configuration.authMode == "oidc" {
@@ -301,9 +304,18 @@ func run(ctx context.Context, configuration config) error {
 	if err != nil {
 		return fmt.Errorf("configure trusted-proxy boundary: %w", err)
 	}
+	recorder := consolemetrics.DefaultRecorder()
+	crManager := syncjobcr.NewFromEnv(os.Getenv)
+	if crManager.Enabled() {
+		componentLogger.Info("syncjob CR writer is enabled (in-cluster)")
+	} else {
+		componentLogger.Warn("syncjob CR writer is disabled; controller will reconcile from PostgreSQL alone",
+			"reason", crManager.DisabledReason())
+	}
+	crWriter := syncjobcr.NewDualWriter(crManager, recorder.SyncjobcrRecorder(), nil)
 	console, err := server.NewWithConfig(server.Config{Backend: backend, Sessions: sessionManager,
 		Namespace: configuration.namespace, PublicOrigin: configuration.publicOrigin, AuthMode: configuration.authMode, Ready: ready,
-		Metrics: consolemetrics.DefaultRecorder()})
+		Metrics: recorder, CRWriter: crWriter})
 	if err != nil {
 		return fmt.Errorf("create Console server: %w", err)
 	}
