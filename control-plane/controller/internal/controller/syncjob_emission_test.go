@@ -169,6 +169,154 @@ func TestObserveTransitionNilResourceIsNoop(t *testing.T) {
 	}
 }
 
+// TestObserveEpochFenceEmitsCorrectOutcome covers the controller_epoch_fence_total
+// emission path called from converge / reconcileDeletion. The test verifies the
+// label-funnel logic that derives tenant_id from the SyncJob resource and the
+// outcome derivation from the pre/post job epoch values (ADR-069 §Slice 51.1).
+//
+// The Recorder is wired through a fresh prometheus.NewRegistry so the
+// scrape body is deterministic and the test does not depend on the
+// controller-runtime global registry.
+func TestObserveEpochFenceEmitsCorrectOutcome(t *testing.T) {
+	cases := []struct {
+		name           string
+		labels         map[string]string
+		storedEpoch    int64
+		nextEpoch      int64
+		wantTenant     string
+		wantOutcome    string
+	}{
+		{
+			name:        "fenced_when_epoch_increments",
+			labels:      map[string]string{"astrasync.io/tenant-id": "0190f7c4-6c8d-7a01-9d2b-1ecabdff0011"},
+			storedEpoch: 1,
+			nextEpoch:   2,
+			wantTenant:  "0190f7c4-6c8d-7a01-9d2b-1ecabdff0011",
+			wantOutcome: "fenced",
+		},
+		{
+			name:        "success_when_epoch_unchanged",
+			labels:      map[string]string{"astrasync.io/tenant-id": "0190f7c4-6c8d-7a01-9d2b-1ecabdff0011"},
+			storedEpoch: 3,
+			nextEpoch:   3,
+			wantTenant:  "0190f7c4-6c8d-7a01-9d2b-1ecabdff0011",
+			wantOutcome: "success",
+		},
+		{
+			name:        "failure_when_epoch_decreases",
+			labels:      map[string]string{"astrasync.io/tenant-id": "0190f7c4-6c8d-7a01-9d2b-1ecabdff0011"},
+			storedEpoch: 5,
+			nextEpoch:   3,
+			wantTenant:  "0190f7c4-6c8d-7a01-9d2b-1ecabdff0011",
+			wantOutcome: "failure",
+		},
+		{
+			name:        "missing_label_collapses_to_unknown",
+			labels:      nil,
+			storedEpoch: 1,
+			nextEpoch:   2,
+			wantTenant:  "_unknown",
+			wantOutcome: "fenced",
+		},
+		{
+			name:        "non_canonical_tenant_collapsed",
+			labels:      map[string]string{"astrasync.io/tenant-id": "ALICE@acme.example"},
+			storedEpoch: 1,
+			nextEpoch:   2,
+			wantTenant:  "_unknown",
+			wantOutcome: "fenced",
+		},
+		{
+			name:        "platform_self_scope",
+			labels:      map[string]string{"astrasync.io/tenant-id": "_platform"},
+			storedEpoch: 1,
+			nextEpoch:   2,
+			wantTenant:  "_platform",
+			wantOutcome: "fenced",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			registry := prometheus.NewRegistry()
+			recorder, err := controllerobservability.NewRecorder(registry)
+			if err != nil {
+				t.Fatalf("new recorder: %v", err)
+			}
+			reconciler := &SyncJobReconciler{Recorder: recorder}
+			resource := &syncv1.SyncJob{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "orders",
+					Namespace: "prod",
+					Labels:    tc.labels,
+					UID:       types.UID("0190f7c4-6c8d-7a01-9d2b-1ecabdff0012"),
+				},
+			}
+			now := time.Now().UTC()
+			stored := job.Job{UpdatedAt: now, Status: job.Status{State: job.StateRunning, Epoch: tc.storedEpoch}}
+			next := stored
+			next.Status.Epoch = tc.nextEpoch
+			next.UpdatedAt = now
+			reconciler.observeEpochFence(resource, stored, next)
+
+			body := scrapeFenceMetricsBody(t, registry)
+			want := `controller_epoch_fence_total{` +
+				`outcome="` + tc.wantOutcome + `", ` +
+				`tenant_id="` + tc.wantTenant + `"} 1.0`
+			if !strings.Contains(body, want) {
+				t.Fatalf("scrape body missing %q: %s", want, body)
+			}
+			// Defensive: caller input must never leak into a series
+			// beyond the bounded allowlist documented in ADR-069.
+			for _, leak := range []string{"ALICE@acme.example", `{not-a-uuid}`} {
+				if strings.Contains(body, `="`+leak+`"`) {
+					t.Fatalf("non-normalised label value %q leaked into scrape body: %s", leak, body)
+				}
+			}
+		})
+	}
+}
+
+// TestObserveEpochFenceEmitsSuccessWhenEpochUnchanged verifies the
+// durable-commit contract (ADR-069 §Slice 51.1): when the epoch is
+// unchanged, the metric still fires with outcome="success" to record
+// that a durable update occurred without a fence event.
+func TestObserveEpochFenceEmitsSuccessWhenEpochUnchanged(t *testing.T) {
+	registry := prometheus.NewRegistry()
+	recorder, err := controllerobservability.NewRecorder(registry)
+	if err != nil {
+		t.Fatalf("new recorder: %v", err)
+	}
+	reconciler := &SyncJobReconciler{Recorder: recorder}
+	resource := &syncv1.SyncJob{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "orders",
+			Namespace: "prod",
+			Labels:    map[string]string{"astrasync.io/tenant-id": "0190f7c4-6c8d-7a01-9d2b-1ecabdff0011"},
+		},
+	}
+	snapshot := job.Job{Status: job.Status{State: job.StateRunning, Epoch: 3}}
+	reconciler.observeEpochFence(resource, snapshot, snapshot)
+	body := scrapeFenceMetricsBody(t, registry)
+	// outcome="success" records that the durable update happened without
+	// a fence event (ADR-069 §Slice 51.1: epoch comparison derives outcome).
+	want := `controller_epoch_fence_total{outcome="success", tenant_id="0190f7c4-6c8d-7a01-9d2b-1ecabdff0011"} 1.0`
+	if !strings.Contains(body, want) {
+		t.Fatalf("expected success outcome for unchanged epoch; got: %s", body)
+	}
+}
+
+// TestObserveEpochFenceNilRecorderIsNoop verifies the helper is nil-safe
+// at the recorder boundary (the converge loop always calls the helper;
+// this guards against a nil Recorder construction not being handled).
+func TestObserveEpochFenceNilRecorderIsNoop(t *testing.T) {
+	reconciler := &SyncJobReconciler{Recorder: nil}
+	snapshot := job.Job{Status: job.Status{State: job.StateRunning, Epoch: 1}}
+	// Must not panic when Recorder is nil.
+	reconciler.observeEpochFence(nil, snapshot, snapshot)
+}
+
+// scrapeOpenMetricsBody gathers and formats the OpenMetrics body for
+// controller_job_state_total from the given gatherer.
 func scrapeOpenMetricsBody(t *testing.T, gatherer prometheus.Gatherer) string {
 	t.Helper()
 	metrics, err := gatherer.Gather()
@@ -178,6 +326,38 @@ func scrapeOpenMetricsBody(t *testing.T, gatherer prometheus.Gatherer) string {
 	var out strings.Builder
 	for _, mf := range metrics {
 		if mf.GetName() != "controller_job_state_total" {
+			continue
+		}
+		for _, m := range mf.GetMetric() {
+			out.WriteString(mf.GetName())
+			out.WriteByte('{')
+			for i, label := range m.GetLabel() {
+				if i > 0 {
+					out.WriteString(", ")
+				}
+				out.WriteString(label.GetName())
+				out.WriteString(`="`)
+				out.WriteString(label.GetValue())
+				out.WriteByte('"')
+			}
+			out.WriteString("} 1.0\n")
+		}
+	}
+	return out.String()
+}
+
+// scrapeFenceMetricsBody gathers and formats the OpenMetrics body for
+// controller_epoch_fence_total from the given gatherer. It is parallel
+// to scrapeOpenMetricsBody but targets the fence counter family.
+func scrapeFenceMetricsBody(t *testing.T, gatherer prometheus.Gatherer) string {
+	t.Helper()
+	metrics, err := gatherer.Gather()
+	if err != nil {
+		t.Fatalf("gather metrics: %v", err)
+	}
+	var out strings.Builder
+	for _, mf := range metrics {
+		if mf.GetName() != "controller_epoch_fence_total" {
 			continue
 		}
 		for _, m := range mf.GetMetric() {

@@ -18,6 +18,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	controlv1 "io.astrasync/control-plane/api-server/gen/go/v1"
+	"io.astrasync/control-plane/api-server/internal/metrics"
 	"io.astrasync/control-plane/auth"
 )
 
@@ -33,10 +34,11 @@ const (
 // audit event in the same transaction; the audit write is not optional.
 type AccessService struct {
 	controlv1.UnimplementedAccessServiceServer
-	repository AccessRepository
-	authorizer auth.Authorizer
-	now        func() time.Time
-	uid        func() string
+	repository     AccessRepository
+	authorizer     auth.Authorizer
+	now            func() time.Time
+	uid            func() string
+	revokeRecorder *metrics.Recorder
 }
 
 // AccessRepository is the storage contract the access service depends on. It
@@ -63,6 +65,16 @@ type AccessRepository interface {
 		ctx context.Context, principalID string, role string,
 		actorID string, audit auth.SecurityAuditEvent,
 	) (auth.PlatformRoleGrant, error)
+	// RevokeConsoleSessionsForPrincipal deletes every Console session for the
+	// supplied principal and writes the matching audit event in the same
+	// transaction (ADR-037 / ADR-068). The returned slice is the list of
+	// unique active tenant IDs the principal held at the moment of the
+	// revoke; each entry corresponds to one apiserver_session_revoke_total
+	// series emitted by the handler.
+	RevokeConsoleSessionsForPrincipal(
+		ctx context.Context, principalID, actorID string,
+		audit auth.SecurityAuditEvent,
+	) (int64, []string, error)
 }
 
 type auditWriter interface {
@@ -90,6 +102,18 @@ func WithAccessUIDSource(uid func() string) AccessServiceOption {
 			return fmt.Errorf("access UID source must not be nil")
 		}
 		service.uid = uid
+		return nil
+	}
+}
+
+// WithAccessRevokeRecorder injects a metrics.Recorder used by the
+// RevokeConsoleSession handler to emit apiserver_session_revoke_total. The
+// recorder is nil-safe (see metrics.Recorder.ObserveSessionRevoke) so the
+// option may be omitted in unit tests; the production main wires the
+// process-global recorder.
+func WithAccessRevokeRecorder(recorder *metrics.Recorder) AccessServiceOption {
+	return func(service *AccessService) error {
+		service.revokeRecorder = recorder
 		return nil
 	}
 }
@@ -423,6 +447,57 @@ func (s *AccessService) RevokePlatformRole(
 	auditEvent.Attributes["principalId"] = grant.PrincipalID
 	auditEvent.Attributes["role"] = grant.Role
 	return &emptypb.Empty{}, nil
+}
+
+// RevokeConsoleSession deletes every Console session for the supplied
+// principal and emits apiserver_session_revoke_total once per unique active
+// tenant the principal holds a membership in (ADR-058 / ADR-068). The RPC
+// is restricted to platform admins; tenant-scoped admins continue to use
+// the admin CLI revoke-session command documented in ADR-065.
+func (s *AccessService) RevokeConsoleSession(
+	ctx context.Context, request *controlv1.RevokeConsoleSessionRequest,
+) (*controlv1.RevokeConsoleSessionResponse, error) {
+	if request == nil {
+		return nil, status.Error(codes.InvalidArgument, "request must not be nil")
+	}
+	principal, ok := auth.PrincipalFromContext(ctx)
+	if !ok || !principal.Active {
+		return nil, status.Error(codes.Unauthenticated, "authentication is required")
+	}
+	if !principal.PlatformAdmin {
+		return nil, status.Error(codes.PermissionDenied, "console session revocations require platform_admin")
+	}
+	if err := validateIdempotencyKey(request.GetIdempotencyKey()); err != nil {
+		return nil, err
+	}
+	if _, err := tenantIDPatternFromString(request.GetPrincipalId()); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "principal_id is invalid: %v", err)
+	}
+	actorID := principalActorID(auth.Decision{Principal: principal})
+	auditEvent := auth.SecurityAuditEvent{
+		EventID: s.uid(), EventType: "access.console_session.revoked",
+		ActorID:   actorID,
+		RequestID: accessAuditRequestID(ctx, s.uid),
+		Outcome:   "CHANGED",
+		Attributes: map[string]any{
+			"principalId":    request.GetPrincipalId(),
+			"idempotencyKey": request.GetIdempotencyKey(),
+		},
+		OccurredAt: s.now().UTC(),
+	}
+	count, tenantIDs, err := s.repository.RevokeConsoleSessionsForPrincipal(
+		ctx, request.GetPrincipalId(), actorID, auditEvent,
+	)
+	if err != nil {
+		return nil, accessRepositoryError(err)
+	}
+	for _, tenantID := range tenantIDs {
+		s.revokeRecorder.ObserveSessionRevoke(tenantID, actorID)
+	}
+	return &controlv1.RevokeConsoleSessionResponse{
+		SessionsRevoked: count,
+		TenantCount:     int32(len(tenantIDs)),
+	}, nil
 }
 
 func (s *AccessService) authorize(

@@ -20,12 +20,13 @@ import (
 const _ = grpc.SupportPackageIsVersion8
 
 const (
-	AccessService_ListMembers_FullMethodName        = "/astra.control.v1.AccessService/ListMembers"
-	AccessService_GrantTenantRole_FullMethodName    = "/astra.control.v1.AccessService/GrantTenantRole"
-	AccessService_RevokeTenantRole_FullMethodName   = "/astra.control.v1.AccessService/RevokeTenantRole"
-	AccessService_ListRoles_FullMethodName          = "/astra.control.v1.AccessService/ListRoles"
-	AccessService_GrantPlatformRole_FullMethodName  = "/astra.control.v1.AccessService/GrantPlatformRole"
-	AccessService_RevokePlatformRole_FullMethodName = "/astra.control.v1.AccessService/RevokePlatformRole"
+	AccessService_ListMembers_FullMethodName          = "/astra.control.v1.AccessService/ListMembers"
+	AccessService_GrantTenantRole_FullMethodName      = "/astra.control.v1.AccessService/GrantTenantRole"
+	AccessService_RevokeTenantRole_FullMethodName     = "/astra.control.v1.AccessService/RevokeTenantRole"
+	AccessService_ListRoles_FullMethodName            = "/astra.control.v1.AccessService/ListRoles"
+	AccessService_GrantPlatformRole_FullMethodName    = "/astra.control.v1.AccessService/GrantPlatformRole"
+	AccessService_RevokePlatformRole_FullMethodName   = "/astra.control.v1.AccessService/RevokePlatformRole"
+	AccessService_RevokeConsoleSession_FullMethodName = "/astra.control.v1.AccessService/RevokeConsoleSession"
 )
 
 // AccessServiceClient is the client API for AccessService service.
@@ -42,6 +43,23 @@ type AccessServiceClient interface {
 	ListRoles(ctx context.Context, in *ListRolesRequest, opts ...grpc.CallOption) (*ListRolesResponse, error)
 	GrantPlatformRole(ctx context.Context, in *GrantPlatformRoleRequest, opts ...grpc.CallOption) (*PlatformRoleGrant, error)
 	RevokePlatformRole(ctx context.Context, in *RevokePlatformRoleRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
+	// RevokeConsoleSession deletes every active Console session for the given
+	// principal. The call is idempotent: a second call with the same
+	// principal_id and idempotency_key is a no-op (the audit row is recorded
+	// once and the session deletes are skipped). The handler invokes
+	// authpostgres.Repository.RevokeSessionsForPrincipal in a serializable
+	// transaction (mirrors Phase 22 / ADR-065) and emits
+	// apiserver_session_revoke_total once per unique active tenant the target
+	// principal holds a membership in. The actor_id label is the
+	// authenticated caller's principal UUID; tenant_id is the active tenant.
+	//
+	// Required role: platform_admin (mirrors RevokePlatformRole). Tenant-level
+	// admins cannot invoke this RPC; they continue to use the admin CLI
+	// revoke-session command documented in ADR-065.
+	//
+	// Idempotency: 16-128 chars, mirrors the access-service idempotency
+	// contract (ADR-038).
+	RevokeConsoleSession(ctx context.Context, in *RevokeConsoleSessionRequest, opts ...grpc.CallOption) (*RevokeConsoleSessionResponse, error)
 }
 
 type accessServiceClient struct {
@@ -112,6 +130,16 @@ func (c *accessServiceClient) RevokePlatformRole(ctx context.Context, in *Revoke
 	return out, nil
 }
 
+func (c *accessServiceClient) RevokeConsoleSession(ctx context.Context, in *RevokeConsoleSessionRequest, opts ...grpc.CallOption) (*RevokeConsoleSessionResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RevokeConsoleSessionResponse)
+	err := c.cc.Invoke(ctx, AccessService_RevokeConsoleSession_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AccessServiceServer is the server API for AccessService service.
 // All implementations must embed UnimplementedAccessServiceServer
 // for forward compatibility
@@ -126,6 +154,23 @@ type AccessServiceServer interface {
 	ListRoles(context.Context, *ListRolesRequest) (*ListRolesResponse, error)
 	GrantPlatformRole(context.Context, *GrantPlatformRoleRequest) (*PlatformRoleGrant, error)
 	RevokePlatformRole(context.Context, *RevokePlatformRoleRequest) (*emptypb.Empty, error)
+	// RevokeConsoleSession deletes every active Console session for the given
+	// principal. The call is idempotent: a second call with the same
+	// principal_id and idempotency_key is a no-op (the audit row is recorded
+	// once and the session deletes are skipped). The handler invokes
+	// authpostgres.Repository.RevokeSessionsForPrincipal in a serializable
+	// transaction (mirrors Phase 22 / ADR-065) and emits
+	// apiserver_session_revoke_total once per unique active tenant the target
+	// principal holds a membership in. The actor_id label is the
+	// authenticated caller's principal UUID; tenant_id is the active tenant.
+	//
+	// Required role: platform_admin (mirrors RevokePlatformRole). Tenant-level
+	// admins cannot invoke this RPC; they continue to use the admin CLI
+	// revoke-session command documented in ADR-065.
+	//
+	// Idempotency: 16-128 chars, mirrors the access-service idempotency
+	// contract (ADR-038).
+	RevokeConsoleSession(context.Context, *RevokeConsoleSessionRequest) (*RevokeConsoleSessionResponse, error)
 	mustEmbedUnimplementedAccessServiceServer()
 }
 
@@ -150,6 +195,9 @@ func (UnimplementedAccessServiceServer) GrantPlatformRole(context.Context, *Gran
 }
 func (UnimplementedAccessServiceServer) RevokePlatformRole(context.Context, *RevokePlatformRoleRequest) (*emptypb.Empty, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RevokePlatformRole not implemented")
+}
+func (UnimplementedAccessServiceServer) RevokeConsoleSession(context.Context, *RevokeConsoleSessionRequest) (*RevokeConsoleSessionResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RevokeConsoleSession not implemented")
 }
 func (UnimplementedAccessServiceServer) mustEmbedUnimplementedAccessServiceServer() {}
 
@@ -272,6 +320,24 @@ func _AccessService_RevokePlatformRole_Handler(srv interface{}, ctx context.Cont
 	return interceptor(ctx, in, info, handler)
 }
 
+func _AccessService_RevokeConsoleSession_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RevokeConsoleSessionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AccessServiceServer).RevokeConsoleSession(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AccessService_RevokeConsoleSession_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AccessServiceServer).RevokeConsoleSession(ctx, req.(*RevokeConsoleSessionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // AccessService_ServiceDesc is the grpc.ServiceDesc for AccessService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -302,6 +368,10 @@ var AccessService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RevokePlatformRole",
 			Handler:    _AccessService_RevokePlatformRole_Handler,
+		},
+		{
+			MethodName: "RevokeConsoleSession",
+			Handler:    _AccessService_RevokeConsoleSession_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

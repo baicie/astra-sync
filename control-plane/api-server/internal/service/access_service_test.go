@@ -3,17 +3,18 @@ package service_test
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	controlv1 "io.astrasync/control-plane/api-server/gen/go/v1"
+	"io.astrasync/control-plane/api-server/internal/metrics"
 	"io.astrasync/control-plane/api-server/internal/service"
 	"io.astrasync/control-plane/auth"
 )
@@ -392,6 +393,216 @@ func TestAccessServiceTransactionEmitsExactlyOneAuditPerMutation(t *testing.T) {
 	}
 }
 
+func TestAccessServiceRevokeConsoleSessionRequiresPlatformAdmin(t *testing.T) {
+	repository := &fakeAccessRepository{}
+	serviceUnderTest, err := service.NewAccessService(repository, auth.DevelopmentAuthorizer{})
+	if err != nil {
+		t.Fatalf("new access service: %v", err)
+	}
+	principal := auth.Principal{
+		ID: identityPrincipalID, Subject: "alice", Active: true, PolicyRevision: "1",
+	}
+	ctx, err := auth.WithPrincipal(context.Background(), principal)
+	if err != nil {
+		t.Fatalf("principal context: %v", err)
+	}
+	if _, err := serviceUnderTest.RevokeConsoleSession(ctx, &controlv1.RevokeConsoleSessionRequest{
+		PrincipalId: accessPrincipalID,
+		IdempotencyKey: fixtureIdempotencyKey("access-revoke-console-session-denied"),
+	}); status.Code(err) != codes.PermissionDenied {
+		t.Fatalf("expected platform_admin denial, got %v", err)
+	}
+}
+
+func TestAccessServiceRevokeConsoleSessionEmitsPerTenant(t *testing.T) {
+	now := time.Date(2026, 9, 8, 8, 0, 0, 0, time.UTC)
+	registry := prometheus.NewRegistry()
+	recorder, err := metrics.NewRecorder(registry)
+	if err != nil {
+		t.Fatalf("new recorder: %v", err)
+	}
+	repository := &fakeAccessRepository{
+		consoleSessionsRevoked: 3,
+		consoleTenants: []string{
+			"11111111-1111-1111-8111-111111111111",
+			"33333333-3333-4333-8333-333333333333",
+		},
+	}
+	serviceUnderTest, err := service.NewAccessService(repository, auth.DevelopmentAuthorizer{},
+		service.WithAccessClock(func() time.Time { return now }),
+		service.WithAccessUIDSource(func() string { return "uid-revoke" }),
+		service.WithAccessRevokeRecorder(recorder),
+	)
+	if err != nil {
+		t.Fatalf("new access service: %v", err)
+	}
+	principal := auth.Principal{
+		ID: identityPrincipalID, Subject: "alice", Active: true, PolicyRevision: "1",
+		PlatformAdmin: true,
+	}
+	ctx, err := auth.WithPrincipal(context.Background(), principal)
+	if err != nil {
+		t.Fatalf("principal context: %v", err)
+	}
+	response, err := serviceUnderTest.RevokeConsoleSession(ctx, &controlv1.RevokeConsoleSessionRequest{
+		PrincipalId: accessPrincipalID,
+		IdempotencyKey: fixtureIdempotencyKey("access-revoke-console-session-success"),
+	})
+	if err != nil {
+		t.Fatalf("revoke console session: %v", err)
+	}
+	if response.GetSessionsRevoked() != 3 {
+		t.Fatalf("unexpected sessions revoked: %d", response.GetSessionsRevoked())
+	}
+	if response.GetTenantCount() != 2 {
+		t.Fatalf("unexpected tenant count: %d", response.GetTenantCount())
+	}
+	if len(repository.auditWrites) != 1 || repository.auditWrites[0].EventType != "access.console_session.revoked" {
+		t.Fatalf("expected console session audit row, got %+v", repository.auditWrites)
+	}
+	metricFamilies, err := registry.Gather()
+	if err != nil {
+		t.Fatalf("gather: %v", err)
+	}
+	var observed int
+	for _, mf := range metricFamilies {
+		if mf.GetName() != "apiserver_session_revoke_total" {
+			continue
+		}
+		for _, metric := range mf.GetMetric() {
+			for _, label := range metric.GetLabel() {
+				if label.GetName() == "tenant_id" &&
+					(label.GetValue() == "11111111-1111-1111-8111-111111111111" ||
+						label.GetValue() == "33333333-3333-4333-8333-333333333333") {
+					observed++
+				}
+			}
+		}
+	}
+	if observed != 2 {
+		t.Fatalf("expected 2 per-tenant observations, got %d", observed)
+	}
+}
+
+func TestAccessServiceRevokeConsoleSessionRejectsInvalidIdempotencyKey(t *testing.T) {
+	repository := &fakeAccessRepository{}
+	serviceUnderTest, err := service.NewAccessService(repository, auth.DevelopmentAuthorizer{})
+	if err != nil {
+		t.Fatalf("new access service: %v", err)
+	}
+	principal := auth.Principal{
+		ID: identityPrincipalID, Subject: "alice", Active: true, PolicyRevision: "1",
+		PlatformAdmin: true,
+	}
+	ctx, err := auth.WithPrincipal(context.Background(), principal)
+	if err != nil {
+		t.Fatalf("principal context: %v", err)
+	}
+	if _, err := serviceUnderTest.RevokeConsoleSession(ctx, &controlv1.RevokeConsoleSessionRequest{
+		PrincipalId: accessPrincipalID,
+		IdempotencyKey: "short",
+	}); status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("expected idempotency-key rejection, got %v", err)
+	}
+	if len(repository.auditWrites) != 0 {
+		t.Fatalf("validation failure should leave no audit rows: %+v", repository.auditWrites)
+	}
+}
+
+func TestAccessServiceRevokeConsoleSessionRejectsMalformedPrincipal(t *testing.T) {
+	repository := &fakeAccessRepository{}
+	serviceUnderTest, err := service.NewAccessService(repository, auth.DevelopmentAuthorizer{})
+	if err != nil {
+		t.Fatalf("new access service: %v", err)
+	}
+	principal := auth.Principal{
+		ID: identityPrincipalID, Subject: "alice", Active: true, PolicyRevision: "1",
+		PlatformAdmin: true,
+	}
+	ctx, err := auth.WithPrincipal(context.Background(), principal)
+	if err != nil {
+		t.Fatalf("principal context: %v", err)
+	}
+	if _, err := serviceUnderTest.RevokeConsoleSession(ctx, &controlv1.RevokeConsoleSessionRequest{
+		PrincipalId: "bad principal",
+		IdempotencyKey: fixtureIdempotencyKey("access-revoke-console-session-bad-principal"),
+	}); status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("expected malformed-principal rejection, got %v", err)
+	}
+}
+
+func TestAccessServiceRevokeConsoleSessionRepositoryErrorIsInternal(t *testing.T) {
+	repository := &fakeAccessRepository{consoleErr: errors.New("postgres detail must remain private")}
+	serviceUnderTest, err := service.NewAccessService(repository, auth.DevelopmentAuthorizer{})
+	if err != nil {
+		t.Fatalf("new access service: %v", err)
+	}
+	principal := auth.Principal{
+		ID: identityPrincipalID, Subject: "alice", Active: true, PolicyRevision: "1",
+		PlatformAdmin: true,
+	}
+	ctx, err := auth.WithPrincipal(context.Background(), principal)
+	if err != nil {
+		t.Fatalf("principal context: %v", err)
+	}
+	if _, err := serviceUnderTest.RevokeConsoleSession(ctx, &controlv1.RevokeConsoleSessionRequest{
+		PrincipalId: accessPrincipalID,
+		IdempotencyKey: fixtureIdempotencyKey("access-revoke-console-session-internal"),
+	}); status.Code(err) != codes.Internal {
+		t.Fatalf("expected internal error sanitization, got %v", err)
+	}
+}
+
+func TestAccessServiceRevokeConsoleSessionAuditFailureIsInternal(t *testing.T) {
+	repository := &fakeAccessRepository{auditErr: errors.New("audit database unavailable")}
+	serviceUnderTest, err := service.NewAccessService(repository, auth.DevelopmentAuthorizer{})
+	if err != nil {
+		t.Fatalf("new access service: %v", err)
+	}
+	principal := auth.Principal{
+		ID: identityPrincipalID, Subject: "alice", Active: true, PolicyRevision: "1",
+		PlatformAdmin: true,
+	}
+	ctx, err := auth.WithPrincipal(context.Background(), principal)
+	if err != nil {
+		t.Fatalf("principal context: %v", err)
+	}
+	if _, err := serviceUnderTest.RevokeConsoleSession(ctx, &controlv1.RevokeConsoleSessionRequest{
+		PrincipalId: accessPrincipalID,
+		IdempotencyKey: fixtureIdempotencyKey("access-revoke-console-session-audit-failure"),
+	}); status.Code(err) != codes.Internal {
+		t.Fatalf("expected audit failure to be internal, got %v", err)
+	}
+	if len(repository.auditWrites) != 0 {
+		t.Fatalf("audit failure should leave no audit rows: %+v", repository.auditWrites)
+	}
+}
+
+func TestAccessServiceRevokeConsoleSessionRequiresAuthentication(t *testing.T) {
+	repository := &fakeAccessRepository{}
+	serviceUnderTest, err := service.NewAccessService(repository, auth.DevelopmentAuthorizer{})
+	if err != nil {
+		t.Fatalf("new access service: %v", err)
+	}
+	if _, err := serviceUnderTest.RevokeConsoleSession(context.Background(), &controlv1.RevokeConsoleSessionRequest{
+		PrincipalId: accessPrincipalID,
+		IdempotencyKey: fixtureIdempotencyKey("access-revoke-console-session-no-auth"),
+	}); status.Code(err) != codes.Unauthenticated {
+		t.Fatalf("expected unauthenticated denial, got %v", err)
+	}
+}
+
+func TestAccessServiceRevokeConsoleSessionRejectsNilRequest(t *testing.T) {
+	repository := &fakeAccessRepository{}
+	serviceUnderTest, err := service.NewAccessService(repository, auth.DevelopmentAuthorizer{})
+	if err != nil {
+		t.Fatalf("new access service: %v", err)
+	}
+	if _, err := serviceUnderTest.RevokeConsoleSession(context.Background(), nil); status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("expected nil request rejection, got %v", err)
+	}
+}
+
 type fakeAccessRepository struct {
 	mu            sync.Mutex
 	members       map[string][]auth.TenantMember
@@ -401,6 +612,9 @@ type fakeAccessRepository struct {
 	auditErr      error
 	platformGrant auth.PlatformRoleGrant
 	platformErr   error
+	consoleSessionsRevoked int64
+	consoleTenants          []string
+	consoleErr              error
 }
 
 func (r *fakeAccessRepository) ResolvePrincipalByID(_ context.Context, principalID string) (auth.Principal, error) {
@@ -521,6 +735,20 @@ func (r *fakeAccessRepository) WriteSecurityAudit(_ context.Context, event auth.
 	return nil
 }
 
-func nextAuditUID(prefix string, counter int) string {
-	return fmt.Sprintf("%s-%d", prefix, counter)
+func (r *fakeAccessRepository) RevokeConsoleSessionsForPrincipal(
+	_ context.Context, principalID, _ string, audit auth.SecurityAuditEvent,
+) (int64, []string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.consoleErr != nil {
+		return 0, nil, r.consoleErr
+	}
+	if r.auditErr != nil {
+		return 0, nil, r.auditErr
+	}
+	if audit.EventID != "" {
+		r.auditWrites = append(r.auditWrites, audit)
+	}
+	tenants := append([]string(nil), r.consoleTenants...)
+	return r.consoleSessionsRevoked, tenants, nil
 }

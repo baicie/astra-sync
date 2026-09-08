@@ -437,6 +437,7 @@ func run(ctx context.Context, configuration config, multiRegionMetrics *replicat
 	accessService, err := service.NewAccessService(authRepository, authorizer,
 		service.WithAccessClock(time.Now),
 		service.WithAccessUIDSource(uuid.NewString),
+		service.WithAccessRevokeRecorder(metricRecorder),
 	)
 	if err != nil {
 		return fmt.Errorf("create access service: %w", err)

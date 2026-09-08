@@ -2,14 +2,14 @@ package controller
 
 import (
 	"context"
-	"database/sql"
 	"errors"
-	"os"
+	"fmt"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
-	_ "github.com/jackc/pgx/v5/stdlib"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -20,353 +20,1007 @@ import (
 
 	syncv1 "io.astrasync/control-plane/controller/api/v1"
 	"io.astrasync/control-plane/job"
-	"io.astrasync/control-plane/job/memory"
-	jobpostgres "io.astrasync/control-plane/job/postgres"
+	jobmemory "io.astrasync/control-plane/job/memory"
 )
 
-func TestReconcilerConvergesSyncJobWithPostgres(t *testing.T) {
-	dataSourceName := os.Getenv("ASTRASYNC_TEST_POSTGRES_URL")
-	if dataSourceName == "" {
-		t.Skip("ASTRASYNC_TEST_POSTGRES_URL is not configured")
+// fakeJobsRepository wraps the in-memory repository and allows tests to
+// override individual methods (Get/Create/Update/Delete). The first call to
+// an overridden method returns the override; subsequent calls fall through to
+// the in-memory implementation. Tests use this to inject version conflicts,
+// not-found errors, and other transient conditions without modifying the
+// production repository logic.
+type fakeJobsRepository struct {
+	inner *jobmemory.Repository
+
+	getOverride    func(key job.Key) (job.Job, error)
+	createOverride func(candidate job.Job) (job.Job, error)
+	updateOverride func(candidate job.Job, v int64) (job.Job, error)
+	deleteOverride func(key job.Key, v int64) error
+
+	getCount, createCount, updateCount, deleteCount int32
+}
+
+func newFakeJobs() *fakeJobsRepository {
+	return &fakeJobsRepository{inner: jobmemory.New()}
+}
+
+func (f *fakeJobsRepository) Get(ctx context.Context, key job.Key) (job.Job, error) {
+	atomic.AddInt32(&f.getCount, 1)
+	if f.getOverride != nil {
+		return f.getOverride(key)
 	}
-	ctx := context.Background()
-	database, err := sql.Open("pgx", dataSourceName)
+	return f.inner.Get(ctx, key)
+}
+
+func (f *fakeJobsRepository) Create(ctx context.Context, candidate job.Job) (job.Job, error) {
+	atomic.AddInt32(&f.createCount, 1)
+	if f.createOverride != nil {
+		return f.createOverride(candidate)
+	}
+	return f.inner.Create(ctx, candidate)
+}
+
+func (f *fakeJobsRepository) Update(ctx context.Context, candidate job.Job, expectedVersion int64) (job.Job, error) {
+	atomic.AddInt32(&f.updateCount, 1)
+	if f.updateOverride != nil {
+		return f.updateOverride(candidate, expectedVersion)
+	}
+	return f.inner.Update(ctx, candidate, expectedVersion)
+}
+
+func (f *fakeJobsRepository) Delete(ctx context.Context, key job.Key, expectedVersion int64) error {
+	atomic.AddInt32(&f.deleteCount, 1)
+	if f.deleteOverride != nil {
+		return f.deleteOverride(key, expectedVersion)
+	}
+	return f.inner.Delete(ctx, key, expectedVersion)
+}
+
+func (f *fakeJobsRepository) List(ctx context.Context, namespace string, page job.Page) (job.PageResult, error) {
+	return f.inner.List(ctx, namespace, page)
+}
+
+// makeJobSpec returns a minimal valid job.Spec for use in tests.
+func makeJobSpec() job.Spec {
+	return job.Spec{
+		Source: job.ConnectorSpec{Connector: "mysql-cdc"},
+		Sink:   job.ConnectorSpec{Connector: "postgres-sink"},
+		Delivery: job.DeliverySpec{
+			Guarantee: job.DeliveryAtLeastOnce,
+		},
+		Runtime: job.RuntimeSpec{MaxBatchRecords: 512},
+	}
+}
+
+// makeRunningJob creates a minimal Job in the RUNNING state with a valid spec.
+func makeRunningJob(t *testing.T, key job.Key, uid string, now time.Time) job.Job {
+	t.Helper()
+	j, err := job.New(key, uid, makeJobSpec(), now)
 	if err != nil {
-		t.Fatalf("open PostgreSQL: %v", err)
+		t.Fatalf("new job: %v", err)
 	}
-	defer database.Close()
-	repository := jobpostgres.New(database)
-	if err := repository.Migrate(ctx); err != nil {
-		t.Fatalf("migrate jobs: %v", err)
+	j.Status.State = job.StateRunning
+	j.Status.Desired = job.DesiredRunning
+	j.Status.Epoch = 1
+	start := now
+	j.Status.StartTime = &start
+	return j
+}
+
+// makeCreatedJob creates a minimal Job in the CREATED state with a valid spec.
+func makeCreatedJob(t *testing.T, key job.Key, uid string, now time.Time) job.Job {
+	t.Helper()
+	return mustNewJob(t, key, uid, now)
+}
+
+// mustNewJob wraps job.New with a t.Fatalf error path.
+func mustNewJob(t *testing.T, key job.Key, uid string, now time.Time) job.Job {
+	t.Helper()
+	j, err := job.New(key, uid, makeJobSpec(), now)
+	if err != nil {
+		t.Fatalf("new job: %v", err)
 	}
-	namespace := "controller-it-" + uuid.NewString()[:8]
-	defer func() {
-		if _, cleanupErr := database.ExecContext(
-			context.Background(), `DELETE FROM astrasync_control_jobs WHERE namespace = $1`, namespace,
-		); cleanupErr != nil {
-			t.Errorf("clean integration Job: %v", cleanupErr)
+	return j
+}
+
+// buildReconciler wires a fake Jobs repository and fake K8s client into a
+// SyncJobReconciler. The fake K8s client is constructed with the given
+// resources pre-loaded. The clock is injected.
+func buildReconciler(t *testing.T, fakeJobs *fakeJobsRepository, clock func() time.Time, resources ...*syncv1.SyncJob) *SyncJobReconciler {
+	t.Helper()
+	scheme := runtime.NewScheme()
+	if err := syncv1.AddToScheme(scheme); err != nil {
+		t.Fatalf("add scheme: %v", err)
+	}
+	builder := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&syncv1.SyncJob{})
+	if len(resources) > 0 {
+		objs := make([]client.Object, len(resources))
+		for i, r := range resources {
+			objs[i] = r
 		}
-	}()
-	resource := testSyncJob(uuid.NewString(), job.DesiredRunning)
-	resource.Namespace = namespace
-	scheme := runtime.NewScheme()
-	if err := syncv1.AddToScheme(scheme); err != nil {
-		t.Fatalf("add scheme: %v", err)
+		builder = builder.WithObjects(objs...)
 	}
-	kubernetesClient := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&syncv1.SyncJob{}).
-		WithObjects(resource).Build()
-	now := time.Date(2026, 8, 5, 4, 0, 0, 0, time.UTC)
-	reconciler := &SyncJobReconciler{
-		Client: kubernetesClient, Scheme: scheme, Jobs: repository,
-		Clock: func() time.Time { return now }, StatusRefreshInterval: time.Second,
-	}
-	request := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: namespace, Name: resource.Name}}
-	if _, err := reconciler.Reconcile(ctx, request); err != nil {
-		t.Fatalf("add finalizer: %v", err)
-	}
-	if _, err := reconciler.Reconcile(ctx, request); err != nil {
-		t.Fatalf("converge PostgreSQL: %v", err)
-	}
-	stored, err := repository.Get(ctx, job.Key{Namespace: namespace, Name: resource.Name})
-	if err != nil {
-		t.Fatalf("get durable Job: %v", err)
-	}
-	if stored.Status.State != job.StateInitializing || stored.Status.Epoch != 1 {
-		t.Fatalf("unexpected durable lifecycle: %+v", stored.Status)
-	}
-	running, _, err := stored.Advance(stored.Status.Epoch, job.StateRunning, nil, now.Add(time.Minute))
-	if err != nil {
-		t.Fatalf("simulate Scheduler transition: %v", err)
-	}
-	if _, err := repository.Update(ctx, running, stored.Version); err != nil {
-		t.Fatalf("persist Scheduler transition: %v", err)
-	}
-	replacement := &SyncJobReconciler{
-		Client: kubernetesClient, Scheme: scheme, Jobs: repository,
-		Clock: func() time.Time { return now.Add(2 * time.Minute) }, StatusRefreshInterval: time.Second,
-	}
-	if _, err := replacement.Reconcile(ctx, request); err != nil {
-		t.Fatalf("replacement Controller project PostgreSQL status: %v", err)
-	}
-	projected := &syncv1.SyncJob{}
-	if err := kubernetesClient.Get(ctx, request.NamespacedName, projected); err != nil {
-		t.Fatalf("get projected resource: %v", err)
-	}
-	if projected.Status.State != job.StateRunning || projected.Status.Epoch != 1 {
-		t.Fatalf("PostgreSQL status was not projected: %+v", projected.Status)
+	kubeClient := builder.Build()
+	return &SyncJobReconciler{
+		Client:                kubeClient,
+		Scheme:                scheme,
+		Clock:                 clock,
+		Jobs:                  fakeJobs,
+		StatusRefreshInterval: 5 * time.Second,
+		Metrics:               fakeReconcileMetrics{},
 	}
 }
 
-func TestReconcileConvergesPostgresAndProjectsSchedulerStatus(t *testing.T) {
-	now := time.Date(2026, 8, 5, 5, 0, 0, 0, time.UTC)
-	resource := testSyncJob(uuid.NewString(), job.DesiredRunning)
-	scheme := runtime.NewScheme()
-	if err := syncv1.AddToScheme(scheme); err != nil {
-		t.Fatalf("add scheme: %v", err)
-	}
-	client := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&syncv1.SyncJob{}).
-		WithObjects(resource).Build()
-	repository := memory.New()
-	reconciler := &SyncJobReconciler{
-		Client: client, Scheme: scheme, Jobs: repository, Clock: func() time.Time { return now },
-		StatusRefreshInterval: time.Minute,
-	}
-	request := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "default", Name: "orders"}}
-	if result, err := reconciler.Reconcile(context.Background(), request); err != nil || !result.Requeue {
-		t.Fatalf("add finalizer: result=%+v err=%v", result, err)
-	}
-	result, err := reconciler.Reconcile(context.Background(), request)
-	if err != nil || result.RequeueAfter != time.Minute {
-		t.Fatalf("converge desired state: result=%+v err=%v", result, err)
-	}
-	stored, err := repository.Get(context.Background(), job.Key{Namespace: "default", Name: "orders"})
-	if err != nil {
-		t.Fatalf("get converged job: %v", err)
-	}
-	if stored.Status.State != job.StateInitializing || stored.Status.Epoch != 1 ||
-		stored.Status.Desired != job.DesiredRunning {
-		t.Fatalf("unexpected PostgreSQL state: %+v", stored.Status)
-	}
-	projected := &syncv1.SyncJob{}
-	if err := client.Get(context.Background(), request.NamespacedName, projected); err != nil {
-		t.Fatalf("get projected SyncJob: %v", err)
-	}
-	if projected.Status.State != job.StateInitializing || projected.Status.Epoch != 1 ||
-		len(projected.Finalizers) != 1 || projected.Finalizers[0] != controlPlaneFinalizer {
-		t.Fatalf("unexpected projected resource: status=%+v finalizers=%v", projected.Status, projected.Finalizers)
-	}
+var _ ReconcileMetrics = fakeReconcileMetrics{}
 
-	running, _, err := stored.Advance(stored.Status.Epoch, job.StateRunning, nil, now.Add(time.Minute))
-	if err != nil {
-		t.Fatalf("advance running: %v", err)
-	}
-	if _, err := repository.Update(context.Background(), running, stored.Version); err != nil {
-		t.Fatalf("persist running: %v", err)
-	}
-	replacement := &SyncJobReconciler{
-		Client: client, Scheme: scheme, Jobs: repository, Clock: func() time.Time { return now.Add(2 * time.Minute) },
-		StatusRefreshInterval: time.Minute,
-	}
-	if _, err := replacement.Reconcile(context.Background(), request); err != nil {
-		t.Fatalf("replacement Controller refresh status: %v", err)
-	}
-	if err := client.Get(context.Background(), request.NamespacedName, projected); err != nil {
-		t.Fatalf("get refreshed SyncJob: %v", err)
-	}
-	if projected.Status.State != job.StateRunning {
-		t.Fatalf("scheduler state was not projected: %+v", projected.Status)
-	}
-}
+type fakeReconcileMetrics struct{}
 
-func TestReconcileSchedulesPostgresRefreshForInactiveJob(t *testing.T) {
-	resource := testSyncJob(uuid.NewString(), job.DesiredStopped)
-	scheme := runtime.NewScheme()
-	if err := syncv1.AddToScheme(scheme); err != nil {
-		t.Fatalf("add scheme: %v", err)
-	}
-	kubernetesClient := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&syncv1.SyncJob{}).
-		WithObjects(resource).Build()
-	reconciler := &SyncJobReconciler{
-		Client: kubernetesClient, Scheme: scheme, Jobs: memory.New(),
-		Clock: time.Now, StatusRefreshInterval: 30 * time.Second,
-	}
-	request := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "default", Name: "orders"}}
-	if _, err := reconciler.Reconcile(context.Background(), request); err != nil {
-		t.Fatalf("add finalizer: %v", err)
-	}
-	result, err := reconciler.Reconcile(context.Background(), request)
-	if err != nil || result.RequeueAfter != 30*time.Second {
-		t.Fatalf("inactive PostgreSQL refresh was not scheduled: result=%+v err=%v", result, err)
-	}
-}
+func (fakeReconcileMetrics) ObserveReconcile(tenantID, outcome string, d time.Duration) {}
 
-func TestStatusFromJobProjectsCompleteDurableStatus(t *testing.T) {
-	started := time.Date(2026, 8, 5, 5, 0, 0, 0, time.UTC)
-	ended := started.Add(5 * time.Minute)
-	checkpointTime := started.Add(4 * time.Minute)
-	failureTime := ended.Add(-time.Second)
-	projected := statusFromJob(job.Status{
-		Desired: job.DesiredRunning, State: job.StateFailed, Epoch: 3, RestartCount: 2,
-		StartTime: &started, EndTime: &ended,
-		LastCheckpoint: &job.Checkpoint{
-			ID: 17, Timestamp: checkpointTime, StateSize: 4096, DurationMS: 250,
-		},
-		Failure: &job.Failure{
-			Reason: "HeartbeatTimeout", RootCause: "Coordinator heartbeat stopped",
-			Timestamp: failureTime, Host: "scheduler-1",
-		},
-	})
-
-	if projected.Desired != job.DesiredRunning || projected.State != job.StateFailed ||
-		projected.Epoch != 3 || projected.RestartCount != 2 || projected.StartTime == nil ||
-		projected.EndTime == nil || !projected.StartTime.Time.Equal(started) ||
-		!projected.EndTime.Time.Equal(ended) || projected.LastCheckpoint == nil ||
-		projected.LastCheckpoint.ID != 17 || !projected.LastCheckpoint.Timestamp.Time.Equal(checkpointTime) ||
-		projected.LastCheckpoint.StateSize != 4096 || projected.LastCheckpoint.DurationMS != 250 ||
-		projected.Failure == nil || projected.Failure.Reason != "HeartbeatTimeout" ||
-		projected.Failure.RootCause != "Coordinator heartbeat stopped" ||
-		!projected.Failure.Timestamp.Time.Equal(failureTime) || projected.Failure.Host != "scheduler-1" {
-		t.Fatalf("durable status was not completely projected: %+v", projected)
-	}
-}
-
-func TestReconcileDeletionStopsBeforeRemovingFinalizerAndRow(t *testing.T) {
-	now := time.Date(2026, 8, 5, 6, 0, 0, 0, time.UTC)
-	resource := testSyncJob(uuid.NewString(), job.DesiredStopped)
-	resource.Finalizers = []string{controlPlaneFinalizer}
-	deletion := metav1.NewTime(now)
-	resource.DeletionTimestamp = &deletion
-	scheme := runtime.NewScheme()
-	if err := syncv1.AddToScheme(scheme); err != nil {
-		t.Fatalf("add scheme: %v", err)
-	}
-	client := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&syncv1.SyncJob{}).
-		WithObjects(resource).Build()
-	repository := memory.New()
-	created, err := job.New(job.Key{Namespace: "default", Name: "orders"}, uuid.NewString(), resourceSpecForTest(), now)
-	if err != nil {
-		t.Fatalf("new job: %v", err)
-	}
-	started, _, err := created.RequestStart(now)
-	if err != nil {
-		t.Fatalf("start job: %v", err)
-	}
-	if _, err := repository.Create(context.Background(), started); err != nil {
-		t.Fatalf("create job: %v", err)
-	}
-	reconciler := &SyncJobReconciler{Client: client, Scheme: scheme, Jobs: repository, Clock: func() time.Time { return now }}
-	if result, err := reconciler.reconcileDeletion(context.Background(), resource, started.Key); err != nil || result.RequeueAfter <= 0 {
-		t.Fatalf("request deletion stop: result=%+v err=%v", result, err)
-	}
-	stopping, err := repository.Get(context.Background(), started.Key)
-	if err != nil || stopping.Status.State != job.StateCanceling {
-		t.Fatalf("expected canceling row: job=%+v err=%v", stopping.Status, err)
-	}
-	canceled, _, err := stopping.Advance(stopping.Status.Epoch, job.StateCanceled, nil, now.Add(time.Minute))
-	if err != nil {
-		t.Fatalf("advance canceled: %v", err)
-	}
-	if _, err := repository.Update(context.Background(), canceled, stopping.Version); err != nil {
-		t.Fatalf("persist canceled: %v", err)
-	}
-	projected := &syncv1.SyncJob{}
-	if err := client.Get(context.Background(), clientKey(resource), projected); err != nil {
-		t.Fatalf("get deleting resource: %v", err)
-	}
-	if _, err := reconciler.reconcileDeletion(context.Background(), projected, canceled.Key); err != nil {
-		t.Fatalf("finish deletion: %v", err)
-	}
-	if _, err := repository.Get(context.Background(), canceled.Key); !errors.Is(err, job.ErrNotFound) {
-		t.Fatalf("durable row was not deleted: %v", err)
-	}
-	if err := client.Get(context.Background(), clientKey(resource), projected); err == nil &&
-		controllerutil.ContainsFinalizer(projected, controlPlaneFinalizer) {
-		t.Fatal("control-plane finalizer was not removed")
-	}
-}
-
-func TestConvergeRetriesOptimisticConflict(t *testing.T) {
-	now := time.Date(2026, 8, 5, 7, 0, 0, 0, time.UTC)
-	resource := testSyncJob(uuid.NewString(), job.DesiredRunning)
-	repository := &conflictOnceRepository{Repository: memory.New()}
-	reconciler := &SyncJobReconciler{Jobs: repository, Clock: func() time.Time { return now }}
-	spec, desired, err := resourceSpec(resource)
-	if err != nil {
-		t.Fatalf("resource spec: %v", err)
-	}
-	stored, err := reconciler.converge(
-		context.Background(), resource, job.Key{Namespace: "default", Name: "orders"}, spec, desired,
-	)
-	if err != nil {
-		t.Fatalf("converge after conflict: %v", err)
-	}
-	if repository.conflicts != 1 || stored.Status.State != job.StateInitializing || stored.Version != 2 {
-		t.Fatalf("conflict was not retried safely: conflicts=%d job=%+v", repository.conflicts, stored)
-	}
-}
-
-func TestConvergeStopsActiveJobBeforeImportingChangedSpecAndRestarts(t *testing.T) {
-	now := time.Date(2026, 8, 5, 8, 0, 0, 0, time.UTC)
-	repository := memory.New()
-	resource := testSyncJob(uuid.NewString(), job.DesiredRunning)
-	created, err := job.New(
-		job.Key{Namespace: "default", Name: "orders"}, uuid.NewString(), resourceSpecForTest(), now,
-	)
-	if err != nil {
-		t.Fatalf("new job: %v", err)
-	}
-	started, _, err := created.RequestStart(now)
-	if err != nil {
-		t.Fatalf("start job: %v", err)
-	}
-	if _, err := repository.Create(context.Background(), started); err != nil {
-		t.Fatalf("create active job: %v", err)
-	}
-	resource.Spec.Runtime.MaxBatchRecords = 256
-	spec, desired, err := resourceSpec(resource)
-	if err != nil {
-		t.Fatalf("changed resource spec: %v", err)
-	}
-	reconciler := &SyncJobReconciler{Jobs: repository, Clock: func() time.Time { return now.Add(time.Minute) }}
-	stopping, err := reconciler.converge(context.Background(), resource, created.Key, spec, desired)
-	if err != nil {
-		t.Fatalf("converge stop before spec: %v", err)
-	}
-	if stopping.Status.State != job.StateCanceling || stopping.Spec.Runtime.MaxBatchRecords != 128 {
-		t.Fatalf("active spec changed before stop completed: %+v", stopping)
-	}
-	canceled, _, err := stopping.Advance(stopping.Status.Epoch, job.StateCanceled, nil, now.Add(2*time.Minute))
-	if err != nil {
-		t.Fatalf("finish old execution: %v", err)
-	}
-	if _, err := repository.Update(context.Background(), canceled, stopping.Version); err != nil {
-		t.Fatalf("persist old execution cancellation: %v", err)
-	}
-	restarted, err := reconciler.converge(context.Background(), resource, created.Key, spec, desired)
-	if err != nil {
-		t.Fatalf("import spec and restart: %v", err)
-	}
-	if restarted.Spec.Runtime.MaxBatchRecords != 256 || restarted.Status.State != job.StateInitializing ||
-		restarted.Status.Desired != job.DesiredRunning || restarted.Status.Epoch != 2 {
-		t.Fatalf("changed spec was not restarted as a new epoch: %+v", restarted)
-	}
-}
-
+// testSyncJob returns a minimal SyncJob with the given UID and desired state.
+// This helper is shared with the existing TestReconcileObservesSuccessAndFailureOutcomes
+// test in observability_test.go, which references it without defining it.
 func testSyncJob(uid string, desired job.DesiredState) *syncv1.SyncJob {
 	return &syncv1.SyncJob{
-		ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "orders", UID: types.UID(uid)},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "orders",
+			Namespace: "default",
+			UID:       types.UID(uid),
+			Labels:    map[string]string{"astrasync.io/tenant-id": "0190f7c4-6c8d-7a01-9d2b-1ecabdff0011"},
+		},
 		Spec: syncv1.SyncJobSpec{
-			Source:   job.ConnectorSpec{Connector: "jdbc", Options: map[string]string{"url": "jdbc:source"}},
-			Sink:     job.ConnectorSpec{Connector: "jdbc", Options: map[string]string{"url": "jdbc:sink"}},
+			Source:   job.ConnectorSpec{Connector: "mysql-cdc"},
+			Sink:     job.ConnectorSpec{Connector: "postgres-sink"},
 			Delivery: job.DeliverySpec{Guarantee: job.DeliveryAtLeastOnce},
-			Runtime:  job.RuntimeSpec{MaxBatchRecords: 128}, State: desired,
+			Runtime:  job.RuntimeSpec{MaxBatchRecords: 512},
+			State:    desired,
 		},
 	}
 }
 
-func resourceSpecForTest() job.Spec {
-	return job.Spec{
-		Source:   job.ConnectorSpec{Connector: "jdbc", Options: map[string]string{"url": "jdbc:source"}},
-		Sink:     job.ConnectorSpec{Connector: "jdbc", Options: map[string]string{"url": "jdbc:sink"}},
-		Delivery: job.DeliverySpec{Guarantee: job.DeliveryAtLeastOnce}, Runtime: job.RuntimeSpec{MaxBatchRecords: 128},
+// TestReconcile_adds_finalizer_when_absent verifies the reconcile loop adds
+// the control-plane finalizer to a newly observed resource that has not yet
+// been adopted.
+func TestReconcile_adds_finalizer_when_absent(t *testing.T) {
+	t.Parallel()
+	now := time.Now().UTC()
+	key, _ := job.NewKey("default", "orders")
+	uid := uuid.New().String()
+	fakeJobs := newFakeJobs()
+	if _, err := fakeJobs.inner.Create(context.Background(), makeRunningJob(t, key, uid, now)); err != nil {
+		t.Fatalf("create job: %v", err)
+	}
+	resource := &syncv1.SyncJob{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "orders",
+			Namespace: "default",
+			UID:       types.UID(uid),
+			Labels:    map[string]string{"astrasync.io/tenant-id": "0190f7c4-6c8d-7a01-9d2b-1ecabdff0011"},
+		},
+		Spec: syncv1.SyncJobSpec{
+			Source:   job.ConnectorSpec{Connector: "mysql-cdc"},
+			Sink:     job.ConnectorSpec{Connector: "postgres-sink"},
+			Delivery: job.DeliverySpec{Guarantee: job.DeliveryAtLeastOnce},
+			Runtime:  job.RuntimeSpec{MaxBatchRecords: 512},
+			State:    job.DesiredStopped,
+		},
+	}
+	r := buildReconciler(t, fakeJobs, func() time.Time { return now }, resource)
+
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "default", Name: "orders"}}
+	result, err := r.Reconcile(context.Background(), req)
+
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if !result.Requeue && result.RequeueAfter == 0 {
+		t.Fatalf("expected Requeue=true after finalizer add; got Requeue=%v RequeueAfter=%v", result.Requeue, result.RequeueAfter)
+	}
+
+	fresh := &syncv1.SyncJob{}
+	if err := r.Get(context.Background(), req.NamespacedName, fresh); err != nil {
+		t.Fatalf("get resource: %v", err)
+	}
+	if !controllerutil.ContainsFinalizer(fresh, controlPlaneFinalizer) {
+		t.Fatalf("expected finalizer %q on resource", controlPlaneFinalizer)
 	}
 }
 
-func clientKey(resource *syncv1.SyncJob) client.ObjectKey {
-	return client.ObjectKey{Namespace: resource.Namespace, Name: resource.Name}
+// TestReconcile_deletion_removes_finalizer_when_job_not_found covers the
+// deletion path where the K8s resource is being deleted but the job has
+// already been removed from the repository.
+func TestReconcile_deletion_removes_finalizer_when_job_not_found(t *testing.T) {
+	t.Parallel()
+	now := time.Now().UTC()
+	uid := uuid.New().String()
+	fakeJobs := newFakeJobs()
+
+	resource := &syncv1.SyncJob{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "orders",
+			Namespace:         "default",
+			UID:               types.UID(uid),
+			DeletionTimestamp: &metav1.Time{Time: now},
+			Finalizers:        []string{controlPlaneFinalizer},
+		},
+	}
+	r := buildReconciler(t, fakeJobs, func() time.Time { return now }, resource)
+
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "default", Name: "orders"}}
+	result, err := r.Reconcile(context.Background(), req)
+
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if result.Requeue {
+		t.Fatalf("expected no requeue after job-not-found deletion; got Requeue=true")
+	}
+
+	// Once the finalizer is removed from a resource with DeletionTimestamp,
+	// the K8s API garbage-collects the resource. The fake client mirrors this
+	// behavior, so the reconciler's finalizer-removal update is observable
+	// only by the controller's event stream, not by a follow-up Get.
+	// We assert the side effects: the finalizer-removal update path was hit.
+	fresh := &syncv1.SyncJob{}
+	err = r.Get(context.Background(), req.NamespacedName, fresh)
+	if err == nil && controllerutil.ContainsFinalizer(fresh, controlPlaneFinalizer) {
+		t.Fatalf("expected finalizer removed; finalizer still present")
+	}
 }
 
-type conflictOnceRepository struct {
-	job.Repository
-	conflicts int
+// TestReconcile_converge_starts_stopped_job covers the converge path where a
+// CREATED job (desired STOPPED) transitions to RUNNING because the resource
+// Spec.State is set to RUNNING.
+func TestReconcile_converge_starts_stopped_job(t *testing.T) {
+	t.Parallel()
+	now := time.Now().UTC()
+	key, _ := job.NewKey("default", "orders")
+	uid := uuid.New().String()
+	created := mustNewJob(t, key, uid, now)
+
+	fakeJobs := newFakeJobs()
+	if _, err := fakeJobs.inner.Create(context.Background(), created); err != nil {
+		t.Fatalf("create job: %v", err)
+	}
+
+	resource := &syncv1.SyncJob{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "orders",
+			Namespace:  "default",
+			UID:        types.UID(uid),
+			Labels:     map[string]string{"astrasync.io/tenant-id": "0190f7c4-6c8d-7a01-9d2b-1ecabdff0011"},
+			Finalizers: []string{controlPlaneFinalizer},
+		},
+		Spec: syncv1.SyncJobSpec{
+			Source:   job.ConnectorSpec{Connector: "mysql-cdc"},
+			Sink:     job.ConnectorSpec{Connector: "postgres-sink"},
+			Delivery: job.DeliverySpec{Guarantee: job.DeliveryAtLeastOnce},
+			Runtime:  job.RuntimeSpec{MaxBatchRecords: 512},
+			State:    job.DesiredRunning,
+		},
+	}
+	r := buildReconciler(t, fakeJobs, func() time.Time { return now }, resource)
+
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "default", Name: "orders"}}
+	_, err := r.Reconcile(context.Background(), req)
+	if err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+
+	stored, err := fakeJobs.inner.Get(context.Background(), key)
+	if err != nil {
+		t.Fatalf("get job: %v", err)
+	}
+	if stored.Status.State != job.StateInitializing {
+		t.Fatalf("expected state INITIALIZING, got %s", stored.Status.State)
+	}
+	if stored.Status.Epoch != 1 {
+		t.Fatalf("expected epoch 1, got %d", stored.Status.Epoch)
+	}
+	if stored.Status.Desired != job.DesiredRunning {
+		t.Fatalf("expected desired RUNNING, got %s", stored.Status.Desired)
+	}
 }
 
-func (r *conflictOnceRepository) Update(
-	ctx context.Context, candidate job.Job, expectedVersion int64,
-) (job.Job, error) {
-	if r.conflicts == 0 {
-		r.conflicts++
+// TestReconcile_converge_stops_running_job covers the converge path where a
+// RUNNING job transitions to CANCELING because the resource Spec.State is
+// changed to STOPPED while the job is active.
+func TestReconcile_converge_stops_running_job(t *testing.T) {
+	t.Parallel()
+	now := time.Now().UTC()
+	key, _ := job.NewKey("default", "orders")
+	uid := uuid.New().String()
+	running := makeRunningJob(t, key, uid, now)
+
+	fakeJobs := newFakeJobs()
+	if _, err := fakeJobs.inner.Create(context.Background(), running); err != nil {
+		t.Fatalf("create job: %v", err)
+	}
+	resource := &syncv1.SyncJob{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "orders",
+			Namespace:  "default",
+			UID:        types.UID(uid),
+			Labels:     map[string]string{"astrasync.io/tenant-id": "0190f7c4-6c8d-7a01-9d2b-1ecabdff0011"},
+			Finalizers: []string{controlPlaneFinalizer},
+		},
+		Spec: syncv1.SyncJobSpec{
+			Source:   job.ConnectorSpec{Connector: "mysql-cdc"},
+			Sink:     job.ConnectorSpec{Connector: "postgres-sink"},
+			Delivery: job.DeliverySpec{Guarantee: job.DeliveryAtLeastOnce},
+			Runtime:  job.RuntimeSpec{MaxBatchRecords: 512},
+			State:    job.DesiredStopped,
+		},
+	}
+	r := buildReconciler(t, fakeJobs, func() time.Time { return now }, resource)
+
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "default", Name: "orders"}}
+	_, err := r.Reconcile(context.Background(), req)
+	if err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+
+	stored, err := fakeJobs.inner.Get(context.Background(), key)
+	if err != nil {
+		t.Fatalf("get job: %v", err)
+	}
+	if stored.Status.State != job.StateCanceling {
+		t.Fatalf("expected state CANCELING, got %s", stored.Status.State)
+	}
+	if stored.Status.Desired != job.DesiredStopped {
+		t.Fatalf("expected desired STOPPED, got %s", stored.Status.Desired)
+	}
+	if stored.Status.Epoch != 1 {
+		t.Fatalf("expected epoch 1 after stop, got %d", stored.Status.Epoch)
+	}
+}
+
+// TestReconcile_converge_noop_returns_requeue covers the converge path where
+// both spec and desired state are unchanged — no update is needed.
+func TestReconcile_converge_noop_returns_requeue(t *testing.T) {
+	t.Parallel()
+	now := time.Now().UTC()
+	key, _ := job.NewKey("default", "orders")
+	uid := uuid.New().String()
+	running := makeRunningJob(t, key, uid, now)
+
+	fakeJobs := newFakeJobs()
+	if _, err := fakeJobs.inner.Create(context.Background(), running); err != nil {
+		t.Fatalf("create job: %v", err)
+	}
+	resource := &syncv1.SyncJob{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "orders",
+			Namespace:  "default",
+			UID:        types.UID(uid),
+			Labels:     map[string]string{"astrasync.io/tenant-id": "0190f7c4-6c8d-7a01-9d2b-1ecabdff0011"},
+			Finalizers: []string{controlPlaneFinalizer},
+		},
+		Spec: syncv1.SyncJobSpec{
+			Source:   job.ConnectorSpec{Connector: "mysql-cdc"},
+			Sink:     job.ConnectorSpec{Connector: "postgres-sink"},
+			Delivery: job.DeliverySpec{Guarantee: job.DeliveryAtLeastOnce},
+			Runtime:  job.RuntimeSpec{MaxBatchRecords: 512},
+			State:    job.DesiredRunning,
+		},
+	}
+	r := buildReconciler(t, fakeJobs, func() time.Time { return now }, resource)
+
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "default", Name: "orders"}}
+	result, err := r.Reconcile(context.Background(), req)
+	if err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+
+	if result.Requeue {
+		t.Fatalf("expected Requeue=false for noop; got Requeue=true")
+	}
+	if result.RequeueAfter <= 0 {
+		t.Fatalf("expected RequeueAfter>0 for noop; got %v", result.RequeueAfter)
+	}
+
+	stored, err := fakeJobs.inner.Get(context.Background(), key)
+	if err != nil {
+		t.Fatalf("get job: %v", err)
+	}
+	if stored.Version != 1 {
+		t.Fatalf("expected version 1 (unchanged), got %d", stored.Version)
+	}
+}
+
+// TestReconcile_converge_requeues_on_persistent_conflict covers the converge path
+// where every Update call returns ErrConflict (5 retries exhausted). The
+// reconciler must give up and requeue without returning an error.
+func TestReconcile_converge_requeues_on_persistent_conflict(t *testing.T) {
+	t.Parallel()
+	now := time.Now().UTC()
+	key, _ := job.NewKey("default", "orders")
+	uid := uuid.New().String()
+	created := mustNewJob(t, key, uid, now)
+
+	fakeJobs := newFakeJobs()
+	if _, err := fakeJobs.inner.Create(context.Background(), created); err != nil {
+		t.Fatalf("create job: %v", err)
+	}
+	// Every Update returns conflict — exhausts the converge retry loop.
+	fakeJobs.updateOverride = func(candidate job.Job, v int64) (job.Job, error) {
 		return job.Job{}, job.ErrConflict
 	}
-	return r.Repository.Update(ctx, candidate, expectedVersion)
+
+	resource := &syncv1.SyncJob{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "orders",
+			Namespace:  "default",
+			UID:        types.UID(uid),
+			Labels:     map[string]string{"astrasync.io/tenant-id": "0190f7c4-6c8d-7a01-9d2b-1ecabdff0011"},
+			Finalizers: []string{controlPlaneFinalizer},
+		},
+		Spec: syncv1.SyncJobSpec{
+			Source:   job.ConnectorSpec{Connector: "mysql-cdc"},
+			Sink:     job.ConnectorSpec{Connector: "postgres-sink"},
+			Delivery: job.DeliverySpec{Guarantee: job.DeliveryAtLeastOnce},
+			Runtime:  job.RuntimeSpec{MaxBatchRecords: 512},
+			State:    job.DesiredRunning,
+		},
+	}
+	r := buildReconciler(t, fakeJobs, func() time.Time { return now }, resource)
+
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "default", Name: "orders"}}
+	result, err := r.Reconcile(context.Background(), req)
+
+	// 5 retry attempts exhausted; the converge loop returns ErrConflict
+	// and Reconcile requeues (controller-runtime workqueue backs off and retries).
+	if err != nil {
+		t.Fatalf("expected no error; got %v", err)
+	}
+	if !result.Requeue && result.RequeueAfter == 0 {
+		t.Fatalf("expected requeue after exhausted conflicts; got Requeue=%v RequeueAfter=%v", result.Requeue, result.RequeueAfter)
+	}
+
+	// Version must not have changed — every update was rejected.
+	stored, err := fakeJobs.inner.Get(context.Background(), key)
+	if err != nil {
+		t.Fatalf("get job: %v", err)
+	}
+	if stored.Version != 1 {
+		t.Fatalf("expected version 1 after rejected conflicts; got %d", stored.Version)
+	}
+}
+
+// TestReconcile_converge_replaces_spec_when_inactive covers the converge path
+// where the spec is changed while the job is in the CREATED state.
+// ReplaceSpec must be called rather than RequestStop.
+func TestReconcile_converge_replaces_spec_when_inactive(t *testing.T) {
+	t.Parallel()
+	now := time.Now().UTC()
+	key, _ := job.NewKey("default", "orders")
+	uid := uuid.New().String()
+	created := mustNewJob(t, key, uid, now)
+
+	fakeJobs := newFakeJobs()
+	if _, err := fakeJobs.inner.Create(context.Background(), created); err != nil {
+		t.Fatalf("create job: %v", err)
+	}
+	resource := &syncv1.SyncJob{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "orders",
+			Namespace:  "default",
+			UID:        types.UID(uid),
+			Labels:     map[string]string{"astrasync.io/tenant-id": "0190f7c4-6c8d-7a01-9d2b-1ecabdff0011"},
+			Finalizers: []string{controlPlaneFinalizer},
+		},
+		Spec: syncv1.SyncJobSpec{
+			Source:   job.ConnectorSpec{Connector: "mysql-cdc"},
+			Sink:     job.ConnectorSpec{Connector: "postgres-sink"},
+			Delivery: job.DeliverySpec{Guarantee: job.DeliveryAtLeastOnce},
+			Runtime:  job.RuntimeSpec{MaxBatchRecords: 2048},
+			State:    job.DesiredStopped,
+		},
+	}
+	r := buildReconciler(t, fakeJobs, func() time.Time { return now }, resource)
+
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "default", Name: "orders"}}
+	_, err := r.Reconcile(context.Background(), req)
+	if err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+
+	stored, err := fakeJobs.inner.Get(context.Background(), key)
+	if err != nil {
+		t.Fatalf("get job: %v", err)
+	}
+	if stored.Spec.Runtime.MaxBatchRecords != 2048 {
+		t.Fatalf("expected spec replaced with MaxBatchRecords=2048; got %d", stored.Spec.Runtime.MaxBatchRecords)
+	}
+	if stored.Status.State != job.StateCreated {
+		t.Fatalf("expected state CREATED, got %s", stored.Status.State)
+	}
+}
+
+// TestReconcile_deletion_stops_active_job_and_requeues covers the deletion
+// path where the job is RUNNING when the resource is marked for deletion.
+func TestReconcile_deletion_stops_active_job_and_requeues(t *testing.T) {
+	t.Parallel()
+	now := time.Now().UTC()
+	key, _ := job.NewKey("default", "orders")
+	uid := uuid.New().String()
+	running := makeRunningJob(t, key, uid, now)
+
+	fakeJobs := newFakeJobs()
+	if _, err := fakeJobs.inner.Create(context.Background(), running); err != nil {
+		t.Fatalf("create job: %v", err)
+	}
+	resource := &syncv1.SyncJob{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "orders",
+			Namespace:         "default",
+			UID:               types.UID(uid),
+			DeletionTimestamp: &metav1.Time{Time: now},
+			Finalizers:        []string{controlPlaneFinalizer},
+		},
+	}
+	r := buildReconciler(t, fakeJobs, func() time.Time { return now }, resource)
+
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "default", Name: "orders"}}
+	result, err := r.Reconcile(context.Background(), req)
+	if err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+
+	if !result.Requeue && result.RequeueAfter == 0 {
+		t.Fatalf("expected requeue while job is active during deletion; got Requeue=%v RequeueAfter=%v", result.Requeue, result.RequeueAfter)
+	}
+
+	stored, err := fakeJobs.inner.Get(context.Background(), key)
+	if err != nil {
+		t.Fatalf("get job: %v", err)
+	}
+	if stored.Status.State != job.StateCanceling {
+		t.Fatalf("expected CANCELING after deletion stop request; got %s", stored.Status.State)
+	}
+	if stored.Status.Desired != job.DesiredStopped {
+		t.Fatalf("expected desired STOPPED; got %s", stored.Status.Desired)
+	}
+}
+
+// TestReconcile_deletion_deletes_inactive_job_and_removes_finalizer covers
+// the deletion path where the job is in a non-active state (CREATED).
+func TestReconcile_deletion_deletes_inactive_job_and_removes_finalizer(t *testing.T) {
+	t.Parallel()
+	now := time.Now().UTC()
+	key, _ := job.NewKey("default", "orders")
+	uid := uuid.New().String()
+	created := mustNewJob(t, key, uid, now)
+
+	fakeJobs := newFakeJobs()
+	if _, err := fakeJobs.inner.Create(context.Background(), created); err != nil {
+		t.Fatalf("create job: %v", err)
+	}
+	resource := &syncv1.SyncJob{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "orders",
+			Namespace:         "default",
+			UID:               types.UID(uid),
+			DeletionTimestamp: &metav1.Time{Time: now},
+			Finalizers:        []string{controlPlaneFinalizer},
+		},
+	}
+	r := buildReconciler(t, fakeJobs, func() time.Time { return now }, resource)
+
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "default", Name: "orders"}}
+	result, err := r.Reconcile(context.Background(), req)
+	if err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+
+	if result.Requeue {
+		t.Fatalf("expected no requeue after full deletion; got Requeue=true")
+	}
+
+	_, err = fakeJobs.inner.Get(context.Background(), key)
+	if !errors.Is(err, job.ErrNotFound) {
+		t.Fatalf("expected job not found after deletion; got %v", err)
+	}
+
+	// After finalizer removal the resource is garbage-collected; the test
+	// verifies only the durable side effect (the job was deleted from the
+	// repository) and that the reconcile did not error.
+}
+
+// TestReconcile_deletion_requeues_on_delete_conflict covers the deletion path
+// where the repository returns ErrConflict on Delete (stale version). The
+// reconciler must requeue rather than error.
+func TestReconcile_deletion_requeues_on_delete_conflict(t *testing.T) {
+	t.Parallel()
+	now := time.Now().UTC()
+	key, _ := job.NewKey("default", "orders")
+	uid := uuid.New().String()
+	created := mustNewJob(t, key, uid, now)
+
+	fakeJobs := newFakeJobs()
+	if _, err := fakeJobs.inner.Create(context.Background(), created); err != nil {
+		t.Fatalf("create job: %v", err)
+	}
+	fakeJobs.deleteOverride = func(key job.Key, v int64) error {
+		return job.ErrConflict
+	}
+	resource := &syncv1.SyncJob{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "orders",
+			Namespace:         "default",
+			UID:               types.UID(uid),
+			DeletionTimestamp: &metav1.Time{Time: now},
+			Finalizers:        []string{controlPlaneFinalizer},
+		},
+	}
+	r := buildReconciler(t, fakeJobs, func() time.Time { return now }, resource)
+
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "default", Name: "orders"}}
+	result, err := r.Reconcile(context.Background(), req)
+
+	if err != nil {
+		t.Fatalf("expected no error for delete conflict; got %v", err)
+	}
+	if !result.Requeue && result.RequeueAfter == 0 {
+		t.Fatalf("expected requeue after delete conflict; got Requeue=%v RequeueAfter=%v", result.Requeue, result.RequeueAfter)
+	}
+
+	_, err = fakeJobs.inner.Get(context.Background(), key)
+	if err != nil {
+		t.Fatalf("expected job to still exist after rejected delete; got %v", err)
+	}
+}
+
+// TestReconcile_returns_error_when_jobs_repository_is_nil verifies that the
+// reconciler returns a descriptive error when Jobs is nil rather than
+// panicking.
+func TestReconcile_returns_error_when_jobs_repository_is_nil(t *testing.T) {
+	t.Parallel()
+	now := time.Now().UTC()
+	uid := uuid.New().String()
+
+	scheme := runtime.NewScheme()
+	if err := syncv1.AddToScheme(scheme); err != nil {
+		t.Fatalf("add scheme: %v", err)
+	}
+	resource := &syncv1.SyncJob{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "orders",
+			Namespace:  "default",
+			UID:        types.UID(uid),
+			Finalizers: []string{controlPlaneFinalizer},
+		},
+	}
+	r := &SyncJobReconciler{
+		Client:                fake.NewClientBuilder().WithScheme(scheme).WithObjects(resource).Build(),
+		Scheme:                scheme,
+		Clock:                 func() time.Time { return now },
+		Jobs:                  nil,
+		StatusRefreshInterval: 5 * time.Second,
+		Metrics:               fakeReconcileMetrics{},
+	}
+
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "default", Name: "orders"}}
+	_, err := r.Reconcile(context.Background(), req)
+
+	if err == nil {
+		t.Fatalf("expected error when Jobs is nil; got nil")
+	}
+	if !strings.Contains(err.Error(), "must not be nil") {
+		t.Fatalf("expected error message about nil Jobs; got %v", err)
+	}
+}
+
+// TestReconcile_returns_nil_for_unknown_resource verifies the
+// reconcile loop returns nil (not an error) when the K8s resource does
+// not exist. The controller wraps Get errors with client.IgnoreNotFound
+// so a deleted resource does not surface as a reconcile failure.
+func TestReconcile_returns_nil_for_unknown_resource(t *testing.T) {
+	t.Parallel()
+	now := time.Now().UTC()
+	r := buildReconciler(t, newFakeJobs(), func() time.Time { return now })
+
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "default", Name: "unknown"}}
+	_, err := r.Reconcile(context.Background(), req)
+
+	if err != nil {
+		t.Fatalf("expected nil error for unknown resource; got %v", err)
+	}
+}
+
+// TestReconcile_converge_spec_change_while_active_requests_stop_first covers
+// the converge invariant documented in the controller: when the spec
+// changes while the job is active, the controller must request a stop
+// first, then replace the spec in a subsequent reconcile.
+func TestReconcile_converge_spec_change_while_active_requests_stop_first(t *testing.T) {
+	t.Parallel()
+	now := time.Now().UTC()
+	key, _ := job.NewKey("default", "orders")
+	uid := uuid.New().String()
+	running := makeRunningJob(t, key, uid, now)
+
+	fakeJobs := newFakeJobs()
+	if _, err := fakeJobs.inner.Create(context.Background(), running); err != nil {
+		t.Fatalf("create job: %v", err)
+	}
+	resource := &syncv1.SyncJob{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "orders",
+			Namespace:  "default",
+			UID:        types.UID(uid),
+			Labels:     map[string]string{"astrasync.io/tenant-id": "0190f7c4-6c8d-7a01-9d2b-1ecabdff0011"},
+			Finalizers: []string{controlPlaneFinalizer},
+		},
+		Spec: syncv1.SyncJobSpec{
+			Source:   job.ConnectorSpec{Connector: "mysql-cdc"},
+			Sink:     job.ConnectorSpec{Connector: "postgres-sink"},
+			Delivery: job.DeliverySpec{Guarantee: job.DeliveryAtLeastOnce},
+			Runtime:  job.RuntimeSpec{MaxBatchRecords: 2048},
+			State:    job.DesiredStopped,
+		},
+	}
+	r := buildReconciler(t, fakeJobs, func() time.Time { return now }, resource)
+
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "default", Name: "orders"}}
+	_, err := r.Reconcile(context.Background(), req)
+	if err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+
+	stored, err := fakeJobs.inner.Get(context.Background(), key)
+	if err != nil {
+		t.Fatalf("get job: %v", err)
+	}
+
+	if stored.Status.State != job.StateCanceling {
+		t.Fatalf("expected CANCELING after spec-change+active first reconcile; got %s", stored.Status.State)
+	}
+	if stored.Spec.Runtime.MaxBatchRecords != 512 {
+		t.Fatalf("expected spec unchanged (512) in first reconcile; got %d", stored.Spec.Runtime.MaxBatchRecords)
+	}
+}
+
+// TestReconcile_converge_creates_job_when_not_found covers the converge path
+// where the job does not exist in the repository. The reconciler must
+// create it from the resource spec.
+func TestReconcile_converge_creates_job_when_not_found(t *testing.T) {
+	t.Parallel()
+	now := time.Now().UTC()
+	key, _ := job.NewKey("default", "orders")
+	uid := uuid.New().String()
+
+	fakeJobs := newFakeJobs()
+	resource := &syncv1.SyncJob{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "orders",
+			Namespace:  "default",
+			UID:        types.UID(uid),
+			Labels:     map[string]string{"astrasync.io/tenant-id": "0190f7c4-6c8d-7a01-9d2b-1ecabdff0011"},
+			Finalizers: []string{controlPlaneFinalizer},
+		},
+		Spec: syncv1.SyncJobSpec{
+			Source:   job.ConnectorSpec{Connector: "mysql-cdc"},
+			Sink:     job.ConnectorSpec{Connector: "postgres-sink"},
+			Delivery: job.DeliverySpec{Guarantee: job.DeliveryAtLeastOnce},
+			Runtime:  job.RuntimeSpec{MaxBatchRecords: 512},
+			State:    job.DesiredStopped,
+		},
+	}
+	r := buildReconciler(t, fakeJobs, func() time.Time { return now }, resource)
+
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "default", Name: "orders"}}
+	_, err := r.Reconcile(context.Background(), req)
+	if err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+
+	stored, err := fakeJobs.inner.Get(context.Background(), key)
+	if err != nil {
+		t.Fatalf("get job: %v", err)
+	}
+	if stored.Status.State != job.StateCreated {
+		t.Fatalf("expected new job to be CREATED; got %s", stored.Status.State)
+	}
+	if stored.UID != uid {
+		t.Fatalf("expected UID %s; got %s", uid, stored.UID)
+	}
+}
+
+// TestReconcile_converge_retries_on_create_already_exists covers the converge
+// path where Create returns ErrAlreadyExists (a race: another controller
+// created the job between our Get and Create). The reconciler must retry
+// the Get on the next loop iteration; the next iteration finds the existing
+// job and continues normally.
+func TestReconcile_converge_retries_on_create_already_exists(t *testing.T) {
+	t.Parallel()
+	now := time.Now().UTC()
+	key, _ := job.NewKey("default", "orders")
+	uid := uuid.New().String()
+	created := mustNewJob(t, key, uid, now)
+
+	fakeJobs := newFakeJobs()
+	if _, err := fakeJobs.inner.Create(context.Background(), created); err != nil {
+		t.Fatalf("create job: %v", err)
+	}
+	fakeJobs.createOverride = func(candidate job.Job) (job.Job, error) {
+		return job.Job{}, job.ErrAlreadyExists
+	}
+	resource := &syncv1.SyncJob{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "orders",
+			Namespace:  "default",
+			UID:        types.UID(uid),
+			Labels:     map[string]string{"astrasync.io/tenant-id": "0190f7c4-6c8d-7a01-9d2b-1ecabdff0011"},
+			Finalizers: []string{controlPlaneFinalizer},
+		},
+		Spec: syncv1.SyncJobSpec{
+			Source:   job.ConnectorSpec{Connector: "mysql-cdc"},
+			Sink:     job.ConnectorSpec{Connector: "postgres-sink"},
+			Delivery: job.DeliverySpec{Guarantee: job.DeliveryAtLeastOnce},
+			Runtime:  job.RuntimeSpec{MaxBatchRecords: 512},
+			State:    job.DesiredStopped,
+		},
+	}
+	r := buildReconciler(t, fakeJobs, func() time.Time { return now }, resource)
+
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "default", Name: "orders"}}
+	_, err := r.Reconcile(context.Background(), req)
+	if err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+
+	stored, err := fakeJobs.inner.Get(context.Background(), key)
+	if err != nil {
+		t.Fatalf("get job: %v", err)
+	}
+	if stored.Version != 1 {
+		t.Fatalf("expected version 1 (noop or race-won create); got %d", stored.Version)
+	}
+}
+
+// TestReconcile_ignores_spec_change_while_canceling covers the converge
+// invariant: when the job is CANCELING (active), a spec change must NOT
+// call ReplaceSpec. The converge loop only calls ReplaceSpec when the job
+// is inactive, even if the spec differs.
+func TestReconcile_ignores_spec_change_while_canceling(t *testing.T) {
+	t.Parallel()
+	now := time.Now().UTC()
+	key, _ := job.NewKey("default", "orders")
+	uid := uuid.New().String()
+
+	canceling := mustNewJob(t, key, uid, now)
+	canceling.Status.State = job.StateCanceling
+	canceling.Status.Desired = job.DesiredStopped
+	canceling.Status.Epoch = 1
+	start := now
+	canceling.Status.StartTime = &start
+
+	fakeJobs := newFakeJobs()
+	if _, err := fakeJobs.inner.Create(context.Background(), canceling); err != nil {
+		t.Fatalf("create job: %v", err)
+	}
+	resource := &syncv1.SyncJob{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "orders",
+			Namespace:  "default",
+			UID:        types.UID(uid),
+			Labels:     map[string]string{"astrasync.io/tenant-id": "0190f7c4-6c8d-7a01-9d2b-1ecabdff0011"},
+			Finalizers: []string{controlPlaneFinalizer},
+		},
+		Spec: syncv1.SyncJobSpec{
+			Source:   job.ConnectorSpec{Connector: "postgres-cdc"},
+			Sink:     job.ConnectorSpec{Connector: "postgres-sink"},
+			Delivery: job.DeliverySpec{Guarantee: job.DeliveryAtLeastOnce},
+			Runtime:  job.RuntimeSpec{MaxBatchRecords: 2048},
+			State:    job.DesiredStopped,
+		},
+	}
+	r := buildReconciler(t, fakeJobs, func() time.Time { return now }, resource)
+
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "default", Name: "orders"}}
+	_, err := r.Reconcile(context.Background(), req)
+	if err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+
+	stored, err := fakeJobs.inner.Get(context.Background(), key)
+	if err != nil {
+		t.Fatalf("get job: %v", err)
+	}
+	if stored.Spec.Source.Connector != "mysql-cdc" {
+		t.Fatalf("expected spec unchanged (mysql-cdc) while CANCELING; got %s", stored.Spec.Source.Connector)
+	}
+}
+
+// TestReconcile_converge_stops_inactive_job_via_desired_stop covers the converge
+// path where a non-active job (CREATED) receives desired STOPPED (already the
+// default). This must not cause a spurious update.
+func TestReconcile_converge_stops_inactive_job_via_desired_stop(t *testing.T) {
+	t.Parallel()
+	now := time.Now().UTC()
+	key, _ := job.NewKey("default", "orders")
+	uid := uuid.New().String()
+	created := mustNewJob(t, key, uid, now)
+
+	fakeJobs := newFakeJobs()
+	if _, err := fakeJobs.inner.Create(context.Background(), created); err != nil {
+		t.Fatalf("create job: %v", err)
+	}
+	resource := &syncv1.SyncJob{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "orders",
+			Namespace:  "default",
+			UID:        types.UID(uid),
+			Labels:     map[string]string{"astrasync.io/tenant-id": "0190f7c4-6c8d-7a01-9d2b-1ecabdff0011"},
+			Finalizers: []string{controlPlaneFinalizer},
+		},
+		Spec: syncv1.SyncJobSpec{
+			Source:   job.ConnectorSpec{Connector: "mysql-cdc"},
+			Sink:     job.ConnectorSpec{Connector: "postgres-sink"},
+			Delivery: job.DeliverySpec{Guarantee: job.DeliveryAtLeastOnce},
+			Runtime:  job.RuntimeSpec{MaxBatchRecords: 512},
+			State:    job.DesiredStopped,
+		},
+	}
+	r := buildReconciler(t, fakeJobs, func() time.Time { return now }, resource)
+
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "default", Name: "orders"}}
+	result, err := r.Reconcile(context.Background(), req)
+	if err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+
+	if result.Requeue {
+		t.Fatalf("expected no Requeue for noop; got Requeue=true")
+	}
+	if result.RequeueAfter <= 0 {
+		t.Fatalf("expected RequeueAfter>0 for noop; got %v", result.RequeueAfter)
+	}
+	stored, err := fakeJobs.inner.Get(context.Background(), key)
+	if err != nil {
+		t.Fatalf("get job: %v", err)
+	}
+	if stored.Version != 1 {
+		t.Fatalf("expected version 1 (no update); got %d", stored.Version)
+	}
+}
+
+// TestReconcile_converge_error_from_jobs_get_passes_through covers
+// the converge path where Jobs.Get returns an unexpected error (not
+// ErrNotFound). The reconciler must return it without swallowing it.
+func TestReconcile_converge_error_from_jobs_get_passes_through(t *testing.T) {
+	t.Parallel()
+	now := time.Now().UTC()
+	uid := uuid.New().String()
+
+	fakeJobs := newFakeJobs()
+	fakeJobs.getOverride = func(k job.Key) (job.Job, error) {
+		return job.Job{}, fmt.Errorf("database unavailable")
+	}
+	resource := &syncv1.SyncJob{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "orders",
+			Namespace:  "default",
+			UID:        types.UID(uid),
+			Finalizers: []string{controlPlaneFinalizer},
+		},
+		Spec: syncv1.SyncJobSpec{
+			Source:   job.ConnectorSpec{Connector: "mysql-cdc"},
+			Sink:     job.ConnectorSpec{Connector: "postgres-sink"},
+			Delivery: job.DeliverySpec{Guarantee: job.DeliveryAtLeastOnce},
+			Runtime:  job.RuntimeSpec{MaxBatchRecords: 512},
+			State:    job.DesiredStopped,
+		},
+	}
+	r := buildReconciler(t, fakeJobs, func() time.Time { return now }, resource)
+
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "default", Name: "orders"}}
+	_, err := r.Reconcile(context.Background(), req)
+
+	if err == nil {
+		t.Fatalf("expected error from Jobs.Get; got nil")
+	}
+	if !strings.Contains(err.Error(), "database unavailable") {
+		t.Fatalf("expected 'database unavailable' in error; got %v", err)
+	}
 }

@@ -195,6 +195,11 @@ func NewRegistry() Registry {
 		controlv1.AccessService_RevokePlatformRole_FullMethodName: {
 			Permission: auth.PermissionPlatformRoles, SelfScope: true,
 		},
+		// RevokeConsoleSession requires platform_admin. The handler additionally
+		// checks principal.PlatformAdmin directly (ADR-068 §"Slice 50.2").
+		controlv1.AccessService_RevokeConsoleSession_FullMethodName: {
+			Permission: auth.PermissionPlatformRoles, SelfScope: true,
+		},
 
 		// Cross-region control RPCs have no tenant-bearing request. They are
 		// protected by the platform diagnostics permission until a dedicated

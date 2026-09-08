@@ -21,6 +21,23 @@ service AccessService {
   rpc ListRoles(ListRolesRequest) returns (ListRolesResponse);
   rpc GrantPlatformRole(GrantPlatformRoleRequest) returns (PlatformRoleGrant);
   rpc RevokePlatformRole(RevokePlatformRoleRequest) returns (google.protobuf.Empty);
+  // RevokeConsoleSession deletes every active Console session for the given
+  // principal. The call is idempotent: a second call with the same
+  // principal_id and idempotency_key is a no-op (the audit row is recorded
+  // once and the session deletes are skipped). The handler invokes
+  // authpostgres.Repository.RevokeSessionsForPrincipal in a serializable
+  // transaction (mirrors Phase 22 / ADR-065) and emits
+  // apiserver_session_revoke_total once per unique active tenant the target
+  // principal holds a membership in. The actor_id label is the
+  // authenticated caller's principal UUID; tenant_id is the active tenant.
+  //
+  // Required role: platform_admin (mirrors RevokePlatformRole). Tenant-level
+  // admins cannot invoke this RPC; they continue to use the admin CLI
+  // revoke-session command documented in ADR-065.
+  //
+  // Idempotency: 16-128 chars, mirrors the access-service idempotency
+  // contract (ADR-038).
+  rpc RevokeConsoleSession(RevokeConsoleSessionRequest) returns (RevokeConsoleSessionResponse);
 }
 
 message ListMembersRequest {
@@ -95,4 +112,22 @@ message PlatformRoleGrant {
   bool active = 3;
   google.protobuf.Timestamp granted_at = 4;
   string granted_by = 5;
+}
+
+message RevokeConsoleSessionRequest {
+  // Canonical lowercase UUID of the target principal. The handler validates
+  // the format (mirrors tenantIDPatternFromString in the access service).
+  string principal_id = 1;
+  // Idempotency key, 16-128 chars (ADR-038).
+  string idempotency_key = 2;
+}
+
+message RevokeConsoleSessionResponse {
+  // Number of Console sessions deleted. Zero if the principal had no active
+  // sessions or the call was a replay of an earlier idempotency-key call.
+  int64 sessions_revoked = 1;
+  // Number of distinct active tenants the target principal held memberships
+  // in at the moment of the revoke. Matches the apiserver_session_revoke_total
+  // series count emitted by the handler.
+  int32 tenant_count = 2;
 }

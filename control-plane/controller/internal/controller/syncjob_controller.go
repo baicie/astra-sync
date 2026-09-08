@@ -140,7 +140,11 @@ func (r *SyncJobReconciler) converge(
 				if errors.Is(updateErr, job.ErrConflict) {
 					continue
 				}
+				if updateErr != nil {
+					return job.Job{}, updateErr
+				}
 				r.observeTransition(resource, stored, updated)
+				r.observeEpochFence(resource, stored, updated)
 				return updated, updateErr
 			}
 			var replaceErr error
@@ -174,6 +178,7 @@ func (r *SyncJobReconciler) converge(
 			return job.Job{}, updateErr
 		}
 		r.observeTransition(resource, stored, updated)
+		r.observeEpochFence(resource, stored, updated)
 		return updated, nil
 	}
 	return job.Job{}, job.ErrConflict
@@ -201,6 +206,7 @@ func (r *SyncJobReconciler) reconcileDeletion(
 				return ctrl.Result{}, err
 			}
 			r.observeTransition(resource, stored, next)
+			r.observeEpochFence(resource, stored, next)
 		}
 		if err := r.projectStatus(ctx, resource, next.Status); err != nil {
 			return ctrl.Result{}, err
@@ -344,6 +350,38 @@ func (r *SyncJobReconciler) observeTransition(resource *syncv1.SyncJob, stored, 
 	if stored.Status.State != next.Status.State {
 		r.Recorder.ObserveStateTransition(tenantID, namespace, string(stored.Status.State), string(next.Status.State))
 	}
+}
+
+// observeEpochFence records the outcome of an epoch assignment at the
+// controller reconcile durable-commit boundary (ADR-069 §Slice 51.1).
+// outcome derives from the direction of the epoch change:
+//   - fenced:  next.Status.Epoch > stored.Status.Epoch  — a strictly higher epoch
+//     was assigned; the previous epoch's writer was cleanly fenced off.
+//   - success: stored.Status.Epoch == next.Status.Epoch — no epoch change.
+//   - failure: next.Status.Epoch < stored.Status.Epoch  — a lower epoch was
+//     written; safety fallback for misconfiguration.
+//
+// The recorder is nil-safe: if Recorder is nil, the call is silently dropped.
+func (r *SyncJobReconciler) observeEpochFence(resource *syncv1.SyncJob, stored, next job.Job) {
+	if r.Recorder == nil || r.Recorder.EpochFenceTotal == nil {
+		return
+	}
+	tenantID := ""
+	if resource != nil && resource.Labels != nil {
+		tenantID = resource.Labels["astrasync.io/tenant-id"]
+	}
+	if tenantID == "" {
+		tenantID = "_unknown"
+	}
+	outcome := "success"
+	if stored.Status.Epoch != next.Status.Epoch {
+		if next.Status.Epoch > stored.Status.Epoch {
+			outcome = "fenced"
+		} else {
+			outcome = "failure"
+		}
+	}
+	r.Recorder.ObserveEpochFence(tenantID, outcome)
 }
 
 // SetupWithManager registers the SyncJob controller with the given manager
