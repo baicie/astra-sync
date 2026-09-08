@@ -92,6 +92,8 @@ This directory contains the Architecture Decision Records (ADRs) for AstraSync.
 | [ADR-080](adr-080-phase31-cross-module-public-surface.md) | Phase 31 Cross-Module Fixture — Public-Surface Constraint (Go internal/ rule) | Accepted | 2026-09-08 |
 | [ADR-081](adr-081-phase32-label-translation-cr-writer.md) | Phase 32 — Tenant-Id Label Translation at the SyncJob CR Writer (Layer-1 test + `IsCanonicalTenantID` guard on `realDualWriter.create`) | Accepted | 2026-09-09 |
 | [ADR-082](adr-082-phase33-update-mutation-tenant-id-guard.md) | Phase 33 — Update-Mutation Tenant-Id Guard at the SyncJob CR Writer (`IsCanonicalTenantID` guard on `realDualWriter.update`, symmetric with Phase 32) | Accepted | 2026-09-09 |
+| [ADR-083](adr-083-phase35-testcontainers-go-postgres.md) | Phase 35 — Testcontainers-Go for Control-Plane PostgreSQL Integration Tests (`control-plane/integration-test/postgres/` shared helper module + three consumer integration tests) | Superseded by ADR-084 | 2026-09-09 |
+| [ADR-084](adr-084-phase35-testcontainers-go-migration.md) | Phase 35 — Testcontainers-Go Migration of Existing PostgreSQL Integration Tests (build tag + t.Skip removal + inline testcontainers helper + CI lane for `control-plane/job/postgres`) | Accepted | 2026-09-09 |
 
 ## Template
 

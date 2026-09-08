@@ -1,9 +1,10 @@
+//go:build integration
+
 package postgres_test
 
 import (
 	"context"
 	"errors"
-	"os"
 	"testing"
 	"time"
 
@@ -14,10 +15,7 @@ import (
 )
 
 func TestRepositoryPersistsLifecycleAcrossConnections(t *testing.T) {
-	dataSourceName := os.Getenv("ASTRASYNC_TEST_POSTGRES_URL")
-	if dataSourceName == "" {
-		t.Skip("ASTRASYNC_TEST_POSTGRES_URL is not configured")
-	}
+	dataSourceName := startPostgresContainer(t)
 	ctx := context.Background()
 	repository, err := jobpostgres.Open(ctx, dataSourceName)
 	if err != nil {

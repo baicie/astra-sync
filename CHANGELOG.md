@@ -256,6 +256,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the minimum production-code change required to make the
   metric bind the right tenant.
 
+- Phase 35 (ADR-084): migrates the two pre-existing PostgreSQL
+  integration tests under `control-plane/job/postgres/` from
+  an external PostgreSQL (`ASTRASYNC_TEST_POSTGRES_URL`) to a
+  hermetic testcontainers-go instance. Four artefacts ship:
+  `//go:build integration` build tag on both
+  `repository_integration_test.go` and
+  `mutation_integration_test.go` (fixing the missing build-tag
+  compliance violation from testing.mdc §2), removal of the
+  `t.Skip` short-circuits (fixing the `t.Skip` on invariant
+  tests violation from testing.mdc §8), a shared helper
+  (`postgres_testcontainer_helper_test.go`) that boots
+  `postgres:16-alpine` and applies `*.sql` migrations, and a
+  new CI lane (`.github/workflows/control-plane-integration.yml`)
+  that runs `go test -tags=integration` on PRs touching the
+  persistence layer. The helper is a single `startPostgresContainer(t)`
+  function exported from `package postgres_test`; both integration
+  tests call it in place of the removed `t.Skip` guard.
+  `github.com/testcontainers/testcontainers-go v0.35.0` and the
+  postgres module are added to `control-plane/go.mod` (the root
+  module that owns `control-plane/job/`). ADR-083 (shared
+  helper module + three new consumer tests) is superseded by
+  ADR-084 (migration of existing tests only); ADR-083 §Decision
+  assumed the SQL-level coverage did not exist, but
+  `mutation_integration_test.go` already covered the cross-module
+  atomic-job-mutation path with a real PostgreSQL. Phase 35 is
+  test-only plus CI and dependency changes; no production code.
+
 <!-- Add new Phase content above this line. -->
 
 ## [v0.8.0] - 2026-09-08

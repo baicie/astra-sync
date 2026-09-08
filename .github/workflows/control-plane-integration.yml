@@ -1,0 +1,89 @@
+name: control-plane-integration
+
+# Phase 35 (ADR-084). Runs the PostgreSQL integration tests under
+# control-plane/job/postgres/ using testcontainers-go.
+#
+# ADR-084 §4 (CI lane): runs on PRs that touch
+# control-plane/job/postgres/** or this workflow itself.
+# The lane uses testcontainers-go which requires Docker; ubuntu-latest
+# ships Docker out of the box.
+#
+# The lane is intentionally separate from the unit-test lane
+# (ci.yml): integration tests are opt-in via -tags=integration
+# and add ~25s to the run. The unit-test lane gates every PR;
+# the integration lane gates only PRs that touch the persistence layer.
+
+on:
+  pull_request:
+    paths:
+      - 'control-plane/job/postgres/**'
+      - 'control-plane/go.mod'
+      - 'control-plane/go.sum'
+      - '.github/workflows/control-plane-integration.yml'
+  push:
+    branches:
+      - main
+      - develop
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: control-plane-integration
+  cancel-in-progress: true
+
+jobs:
+  integration:
+    name: postgres integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@d9d4a8ee48e8d7b7b3e8e6a3c7e8c5e9d7a3c7a3 # v7
+        # docker/setup-buildx-action is already pinned in
+        # .github/workflows/catalog-check.yml.
+
+      - name: Setup Go 1.26.x
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version: '1.26.x'
+          cache: false
+
+      - name: Run PostgreSQL integration tests
+        env:
+          # goproxy.cn is used because proxy.golang.org is unreachable from
+          # some runners over IPv6. The goproxy.cn mirror is maintained by
+          # the Go module proxy community.
+          GOPROXY: https://goproxy.cn,direct
+        run: |
+          set -euo pipefail
+          # Run the two integration tests that cover:
+          #   1. repository_integration_test.go  — Job lifecycle Create/Update/Delete
+          #   2. mutation_integration_test.go   — Atomic job mutation + connection generation fence
+          # Both use testcontainers-go (postgres:16-alpine) which requires Docker.
+          go test \
+            -tags=integration \
+            -v \
+            -count=1 \
+            -timeout 300s \
+            ./control-plane/job/postgres/...
+
+      - name: Verify helper file is present
+        # ADR-084 §Decision: the helper lives in
+        # postgres_testcontainer_helper_test.go, shared by all integration
+        # tests in the postgres package.
+        run: |
+          set -euo pipefail
+          test -f control-plane/job/postgres/postgres_testcontainer_helper_test.go
+
+      - name: Verify build tag is present
+        run: |
+          set -euo pipefail
+          grep -q "^//go:build integration$" \
+            control-plane/job/postgres/repository_integration_test.go \
+            control-plane/job/postgres/mutation_integration_test.go \
+            control-plane/job/postgres/postgres_testcontainer_helper_test.go
