@@ -43,9 +43,11 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@d9d4a8ee48e8d7b7b3e8e6a3c7e8c5e9d7a3c7a3 # v7
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
         # docker/setup-buildx-action is already pinned in
-        # .github/workflows/catalog-check.yml.
+        # .github/workflows/ci.yml at the same commit SHA (8d2750c...).
+        # Phase 35 reuses the same SHA to keep the action-version drift
+        # across workflows at zero.
 
       - name: Setup Go 1.26.x
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
