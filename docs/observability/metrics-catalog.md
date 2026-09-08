@@ -190,7 +190,7 @@ wires the Console BFF request path.
 
 | Metric | Type | Labels | Description |
 |---|---|---|---|
-| `connection_test_total` | counter | `tenant_id`, `outcome` | Completed Connection Test Executor operations. `outcome` is `success`, `rejected` for an egress-policy denial, or `failure` for timeout, cancellation, credential, transport, or handshake failure. The sample is recorded only after the durable completion succeeds. |
+| `connection_test_total` | counter | `tenant_id`, `outcome` | Completed Connection Test Executor operations. `outcome` is `success`, `rejected` for an egress-policy denial, or `failure` for timeout, cancellation, credential, transport, or handshake failure. The sample is recorded only after the durable completion succeeds. Phase 19 slice 45.1 (ADR-061) wires a Recorder that routes both labels through `io.astrasync/control-plane/observability/normalize`; the `outcome` allowlist is the documented `success\|rejected\|failure` and the default value is `failure`. |
 | `console_request_total` | counter | `tenant_id`, `outcome`, `handler` | Console request outcomes by stable handler name. F11 records `success` for 2xx/3xx responses, `rejected` for 4xx responses, and `failure` for 5xx responses. The tenant comes from the server-written scope response header and falls back to `_unknown`. |
 | `console_render_duration_seconds` | histogram | `handler` | HTML response duration for the Console's fixed `static` handler. |
 

@@ -66,6 +66,7 @@ This directory contains the Architecture Decision Records (ADRs) for AstraSync.
 | [ADR-058](adr-058-observability-catalog-backlog.md) | Observability Catalog Backlog (Phase 17) | Accepted | 2026-09-07 |
 | [ADR-059](adr-059-v0.4.0-release-cut.md) | v0.4.0 Release Cut (Phase 17 Observability Activation) | Accepted | 2026-09-08 |
 | [ADR-060](adr-060-phase18-scheduler-metrics-normalize.md) | Phase 18 Scheduler Metrics Normalize (Slice 44) | Accepted | 2026-09-08 |
+| [ADR-061](adr-061-phase19-connection-test-recorder-migrate.md) | Phase 19 Connection-Test Recorder Migrate (Slice 45) | Accepted | 2026-09-08 |
 
 ## Template
 

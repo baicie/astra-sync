@@ -191,6 +191,46 @@ non-zero production sample and is owned by Phase 18+.
   (slices 44.0 / 44.1 / 44.2; slice 44.3 optional),
   acceptance criteria, and ADR cross-references.
 
+- `control-plane/scheduler/internal/connectiontestmetrics`:
+  Phase 19 slice 45.1 (ADR-061) migrates the
+  `connection_test_total` Recorder from its internal
+  `strings.TrimSpace` / `switch outcome` collapse to a single
+  call through
+  `io.astrasync/control-plane/observability/normalize`. The
+  Recorder routes `tenant_id` through `NormalizeTenant` and
+  `outcome` through `NormalizeOutcome` with the documented
+  `success | rejected | failure` allowlist and
+  `OutcomeFailure` as the default value for non-allowlisted
+  inputs. The Recorder is the fifth control-plane Recorder
+  owner to enforce the ADR-058 §3 contract; with this slice
+  the "duplicated normalize helpers are deleted as each slice
+  lands" invariant is fully satisfied across the Go control
+  plane. A new `outcomeAllowlist` package-private slice is
+  the single source of truth for the connection-test outcome
+  contract (Phase 20 candidate: promote to
+  `observability/normalize` as a named helper). A new
+  `HandlerFor(gatherer)` entry point mirrors the slice-44.1
+  design pattern so a long-running Connection Test Executor
+  consumer can host the Recorder-owned registry from its own
+  /metrics endpoint. The package-level `ConnectionTestTotal`
+  `promauto` Vec remains registered against the default
+  registry so any pre-slice-45 import path continues to
+  scrape the same series; the Recorder is strictly additive.
+
+- ADR-061 (`docs/adr/adr-061-phase19-connection-test-recorder-migrate.md`):
+  Phase 19 umbrella decision — closes the last remaining
+  duplicated `normalizeLabel`-style helper in the control
+  plane (the connection-test Recorder). Records scope (Recorder
+  migrate + observe methods + tests), non-goals (replication
+  metrics with non-tenant / non-worker-id labels; Java
+  data-plane emission follow-up `26.F9`; emission sub-slices
+  43.1.5 / 43.2.5 / 43.3.5), and acceptance criteria mirroring
+  the Phase 17 / Phase 18 template.
+
+- `docs/phase19/README.md`: phase README with roadmap (slices
+  45.0 / 45.1 / 45.2), acceptance criteria, and ADR
+  cross-references.
+
 ## [v0.3.0] - 2026-09-07
 
 This release covers Phase 13 through Phase 16, completing Kubernetes production
