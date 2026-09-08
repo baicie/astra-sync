@@ -1,0 +1,87 @@
+name: phase30-chain-tenant-id-regression
+
+# Follow-up to ADR-075 §5: even when the main `make test-go` passes,
+# independently re-run the Console tenant-id envelope chain tests
+# (`console/internal/server/chain_e2e_test.go`) so a regression that
+# silently swaps `scope.tenantID` for another identity source is caught
+# at the chain boundary, not at production scrape time when
+# `controller_job_state_total{tenant_id}` drifts.
+#
+# Triggers:
+#   - schedule: nightly at 03:17 UTC (off-the-hour, low contention)
+#   - workflow_dispatch: manual on-demand re-run
+#   - push to main / develop: gates the post-merge envelope
+#
+# Deliberately NOT triggered on `pull_request`: the main `ci.yml`
+# already runs the full console suite on every PR. This workflow exists
+# to re-run the chain tests *after* the main test target passes,
+# surfacing regressions that survive a green `make test-go` (e.g. when
+# a future slice adds a mutation path that bypasses `tenantScopeCheck`
+# or swaps identity sources inside `createJob`).
+
+on:
+  schedule:
+    - cron: '17 3 * * *'
+  push:
+    branches:
+      - main
+      - develop
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: phase30-chain-tenant-id-regression
+  cancel-in-progress: true
+
+jobs:
+  chain-tenant-id-envelope:
+    name: chain tenant-id envelope regression
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go 1.26.x
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version: '1.26.x'
+          cache: false
+
+      - name: Verify console module resolves
+        working-directory: console
+        run: |
+          set -euo pipefail
+          test -f go.mod
+          test -f go.sum
+          go version
+
+      - name: Run chain tenant-id envelope tests
+        working-directory: console
+        run: |
+          set -euo pipefail
+          # ADR-075 §1: chain tests cross the BFF egress and Console CR
+          # dual-write boundaries. The `-run` filter pins exactly the
+          # three TestConsoleTenantIDEnvelopeChain_* cases; other tests
+          # in the package are not re-run here (those run in ci.yml).
+          go test \
+            -v \
+            -count=1 \
+            -timeout 60s \
+            ./internal/server/ \
+            -run '^TestConsoleTenantIDEnvelopeChain_'
+
+      - name: Confirm chain_e2e_test.go is tracked
+        # Guard against accidental deletion of the chain test surface.
+        # If this file disappears, the workflow fails loudly instead of
+        # silently passing with `-run` matching zero tests.
+        run: |
+          set -euo pipefail
+          test -f console/internal/server/chain_e2e_test.go
+          grep -q 'TestConsoleTenantIDEnvelopeChain_WritesSurface' console/internal/server/chain_e2e_test.go
+          grep -q 'TestConsoleTenantIDEnvelopeChain_NoUnknownLeak' console/internal/server/chain_e2e_test.go
+          grep -q 'TestConsoleTenantIDEnvelopeChain_LabelPropagatesFromBFFToCR' console/internal/server/chain_e2e_test.go
