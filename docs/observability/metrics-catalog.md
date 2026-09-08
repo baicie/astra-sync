@@ -170,11 +170,11 @@ through exemplars; that wiring is not present in the current implementation.
 
 | Metric | Type | Labels | Description |
 |---|---|---|---|
-| `astrasync_multi_region_promotion_total` | counter | `target_region`, `outcome` | Promotion attempts after a promotion record is created; `outcome` is `success` or `failure`. |
+| `astrasync_multi_region_promotion_total` | counter | `target_region`, `outcome` | Promotion attempts after a promotion record is created; `outcome` is `success` or `failure`. Phase 21 slice 46.2 (ADR-063) wires a Recorder that routes `target_region` through `NormalizeFreeText` and `outcome` through `NormalizeOutcome` with `promotionOutcomeAllowlist`. |
 | `astrasync_multi_region_promotion_duration_seconds` | histogram | `target_region` | Duration of promotion attempts after a promotion record is created. |
-| `astrasync_multi_region_event_total` | counter | `peer_region`, `event_type`, `outcome` | Cross-region event delivery attempts. `event_type` is `checkpoint`, `topology`, or `health`; `outcome` is `success` or `failure`. |
+| `astrasync_multi_region_event_total` | counter | `peer_region`, `event_type`, `outcome` | Cross-region event delivery attempts. `event_type` is `checkpoint`, `topology`, or `health`; `outcome` is `success` or `failure`. Phase 21 slice 46.2 (ADR-063) wires a Recorder that routes `peer_region` through `NormalizeFreeText`, `event_type` through `NormalizeOutcome` with `eventTypeAllowlist`, and `outcome` through `NormalizeOutcome` with `eventOutcomeAllowlist`. |
 | `astrasync_multi_region_event_duration_seconds` | histogram | `peer_region`, `event_type` | Duration of cross-region event delivery attempts. |
-| `astrasync_multi_region_recovery_total` | counter | `target_region`, `outcome` | Checkpoint recovery attempts. `outcome` is `success` or `failure`; an unset target region is `_unknown`. |
+| `astrasync_multi_region_recovery_total` | counter | `target_region`, `outcome` | Checkpoint recovery attempts. `outcome` is `success` or `failure`; an unset target region is `_unknown`. Phase 21 slice 46.2 (ADR-063) wires a Recorder that routes `target_region` through `NormalizeFreeText` and `outcome` through `NormalizeOutcome` with `recoveryOutcomeAllowlist`. |
 | `astrasync_multi_region_recovery_duration_seconds` | histogram | `target_region` | Duration of checkpoint recovery attempts. |
 The recorder uses an injected Prometheus registerer so embedding services can expose the
 families from their own endpoint without creating a second listener or global registration.

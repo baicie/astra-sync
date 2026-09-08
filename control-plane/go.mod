@@ -10,6 +10,7 @@ require (
 	google.golang.org/grpc v1.83.0
 	gopkg.in/yaml.v3 v3.0.1
 	io.astrasync/control-plane/auth v0.0.0-00010101000000-000000000000
+	io.astrasync/control-plane/observability v0.0.0-00010101000000-000000000000
 	k8s.io/apimachinery v0.36.3
 	k8s.io/client-go v0.36.3
 )

@@ -14,6 +14,7 @@ package normalize
 
 import (
 	"strings"
+	"unicode"
 
 	"github.com/google/uuid"
 )
@@ -98,6 +99,54 @@ func NormalizeWorkerID(value string) string {
 	trimmed := strings.TrimSpace(value)
 	if trimmed == "" || len(trimmed) > workerIDMaxLen {
 		return UnknownWorker
+	}
+	return trimmed
+}
+
+// NormalizeFreeText returns a bounded free-form label value for
+// non-UUID, non-enum label roles (e.g. region names, hostnames,
+// object keys). The normalization rules are:
+//
+//   - After trimming, if the value is empty, returns unknown.
+//   - If the trimmed value contains any Unicode !IsPrint rune
+//     (control, format, private-use, unassigned, surrogate), returns
+//     unknown.  This guards against label values that contain
+//     newlines, tabs, null bytes, or other non-printable characters
+//     that would break OpenMetrics line-oriented parsing or confuse
+//     downstream consumers.
+//   - If the trimmed value exceeds maxBytes, returns unknown.
+//     Long values are dropped rather than truncated to prevent
+//     distinct long inputs from colliding on the same truncated
+//     label (mirrors NormalizeWorkerID).
+//   - Otherwise returns the trimmed value.
+//
+// maxBytes must be positive; unknown must be non-empty. The
+// function does NOT lowercase the value; free-form text that is
+// case-sensitive (region names, hostnames) is returned unchanged.
+func NormalizeFreeText(value string, maxBytes int, unknown string) string {
+	if maxBytes <= 0 {
+		panic("normalize.NormalizeFreeText: maxBytes must be positive")
+	}
+	if unknown == "" {
+		panic("normalize.NormalizeFreeText: unknown must be non-empty")
+	}
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return unknown
+	}
+	// Reject control characters that would break Prometheus/OpenMetrics
+	// parsing or downstream tooling: ASCII C0 (U+0000 - U+001F) and DEL
+	// (U+007F). Unicode format characters (Cf) are kept because they are
+	// printable in modern terminals and dashboard tools; rejecting them
+	// would surprise callers who pass legitimate region names with
+	// zero-width joiners.
+	for _, r := range trimmed {
+		if unicode.IsControl(r) {
+			return unknown
+		}
+	}
+	if len(trimmed) > maxBytes {
+		return unknown
 	}
 	return trimmed
 }

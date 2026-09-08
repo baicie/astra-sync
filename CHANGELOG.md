@@ -137,6 +137,71 @@ non-zero production sample and is owned by Phase 18+.
   at the Phase 17 slice / ADR-058 section that owns the row instead
   of deferring without an owner.
 
+## [Unreleased]
+
+### Added
+
+- `control-plane/observability/normalize`: Phase 21 slice 46.1
+  (ADR-063) introduces `NormalizeFreeText(value, maxBytes,
+  unknown)` for free-form Prometheus label values (region names,
+  hostnames, object keys). The function trims whitespace, rejects
+  Unicode `IsControl` characters, rejects values that exceed
+  `maxBytes` (caller-supplied, e.g. 128 bytes for region names),
+  and collapses empty / non-printable / over-length inputs to a
+  caller-supplied `unknown` sentinel. Long values are dropped
+  rather than truncated to prevent distinct long inputs from
+  colliding on the same truncated label (mirrors the existing
+  `NormalizeWorkerID` design). The function panics if `maxBytes`
+  is non-positive or `unknown` is empty because those
+  configuration errors should fail fast at compile time.
+
+- `control-plane/replication/metrics`: Phase 21 slice 46.2
+  (ADR-063) migrates the multi-region Recorder from its internal
+  `normalizeLabel` helper to the shared
+  `io.astrasync/control-plane/observability/normalize` package.
+  `target_region` / `peer_region` route through `NormalizeFreeText`;
+  `event_type` routes through `NormalizeOutcome` with the documented
+  `checkpoint | topology | health` allowlist and `_unknown` as the
+  fallback (event_type is a categorical tag, not an outcome); the
+  per-family `outcome` labels route through `NormalizeOutcome` with
+  the documented `success | failure` allowlist and `failure` as the
+  fallback. The internal `normalizeLabel` helper is deleted.
+  Per-family allowlists (`promotionOutcomeAllowlist`,
+  `eventOutcomeAllowlist`, `recoveryOutcomeAllowlist`,
+  `eventTypeAllowlist`) are exposed as package-private slices as
+  the single source of truth. A `RecorderError` type with
+  `ErrNilRegisterer` and `ErrDuplicateMetric` sentinel values
+  replaces the legacy `fmt.Errorf` string-matching contract
+  (mirrors Phase 19 slice 45.1 / Phase 18 slice 44.1 design).
+  With this slice, every Recorder owner in the Go control plane
+  routes label values through `observability/normalize`; the
+  ADR-058 §3 invariant — "duplicated normalize helpers are deleted
+  as each slice lands" — is fully satisfied across the entire Go
+  control plane (no `normalizeLabel` helper exists outside
+  `observability/normalize`).
+
+- ADR-063 (`docs/adr/adr-063-phase21-freetext-replication-recorder-migrate.md`):
+  Phase 21 umbrella decision. Records scope (FreeText helper +
+  replication Recorder migrate), non-goals (Java data-plane
+  emission `26.F9`; emission sub-slices 43.1.5 / 43.2.5 /
+  43.3.5), and acceptance criteria mirroring the Phase 17 / 18 /
+  19 template.
+
+- `docs/phase21/README.md`: phase README with roadmap (slices
+  46.0 / 46.1 / 46.2), acceptance criteria, and ADR
+  cross-references.
+
+- `docs/observability/metrics-catalog.md`: replication rows
+  (`astrasync_multi_region_promotion_total`,
+  `astrasync_multi_region_event_total`,
+  `astrasync_multi_region_recovery_total`) updated with the
+  Phase 21 normalize contract.
+
+- `control-plane/go.mod`: observability dependency lifted from
+  indirect to direct as a result of `replication/metrics`
+  importing `observability/normalize`. No transitive dependency
+  changes.
+
 ## [v0.5.0] - 2026-09-08
 
 ### Added

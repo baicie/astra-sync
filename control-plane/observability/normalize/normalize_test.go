@@ -156,3 +156,146 @@ func TestNormalizeWorkerID_should_not_truncate_to_avoid_collisions(t *testing.T)
 		t.Fatalf("NormalizeWorkerID should reject oversize inputs, got %q vs %q", ga, gb)
 	}
 }
+
+// NormalizeFreeText tests (Phase 21 slice 46.1).
+
+func TestNormalizeFreeText_should_return_trimmed_value_when_valid(t *testing.T) {
+	t.Parallel()
+	// Whitespace-only input is trimmed to empty, which is rejected.
+	// Valid non-empty input with surrounding space is trimmed and returned.
+	got := normalize.NormalizeFreeText("  us-east-1  ", 128, "_unknown")
+	if got != "us-east-1" {
+		t.Fatalf("NormalizeFreeText(%q) = %q, want %q", "  us-east-1  ", got, "us-east-1")
+	}
+}
+
+func TestNormalizeFreeText_should_return_unknown_when_input_is_empty(t *testing.T) {
+	t.Parallel()
+	for _, value := range []string{"", "   ", "\t", " \t\n"} {
+		got := normalize.NormalizeFreeText(value, 128, "_unknown")
+		if got != "_unknown" {
+			t.Fatalf("NormalizeFreeText(%q) = %q, want _unknown", value, got)
+		}
+	}
+}
+
+func TestNormalizeFreeText_should_return_unknown_when_input_contains_non_printable_characters(t *testing.T) {
+	// Prometheus/OpenMetrics label values must be printable. Any Unicode
+	// IsControl rune (C0/C1 categories) must reject the value so that
+	// downstream scrapers do not receive malformed series. The control
+	// rune is placed in the MIDDLE of the string because strings.TrimSpace
+	// strips leading/trailing C0 control characters before this check runs
+	// (mirrors the existing NormalizeWorkerID contract). The "trim-only"
+	// cases verify that a value consisting solely of trimmed controls
+	// collapses to _unknown via the empty-after-trim branch.
+	nonPrintableInputs := []struct {
+		name     string
+		value    string
+		expectOk bool // true means we accept the value (not _unknown)
+	}{
+		{name: "embedded_newline", value: "us-east-\n1"},
+		{name: "embedded_carriage_return", value: "us-east-\r1"},
+		{name: "embedded_tab", value: "us-east-\t1"},
+		{name: "embedded_vertical_tab", value: "us-east-\v1"},
+		{name: "embedded_form_feed", value: "us-east-\f1"},
+		{name: "embedded_nul_byte", value: "us-east-\x001"},
+		{name: "embedded_bell", value: "us-east-\x071"},
+		{name: "embedded_mid_newline", value: "us\n-east-1"},
+		// Pure-control inputs trim to empty -> _unknown via the earlier
+		// empty-after-trim branch. Both are valid _unknown results.
+		{name: "pure_newline", value: "\n", expectOk: true},
+		{name: "pure_tab", value: "\t", expectOk: true},
+	}
+	for _, tc := range nonPrintableInputs {
+		t.Run(tc.name, func(t *testing.T) {
+			got := normalize.NormalizeFreeText(tc.value, 128, "_unknown")
+			if !tc.expectOk {
+				if got != "_unknown" {
+					t.Fatalf("NormalizeFreeText(%q) = %q, want _unknown", tc.value, got)
+				}
+			} else {
+				// Pure-control values collapse via the empty-after-trim
+				// branch to _unknown (we document this is _unknown, not
+				// because of the IsControl check).
+				if got != "_unknown" {
+					t.Fatalf("NormalizeFreeText(%q) = %q, want _unknown via trim-collapse", tc.value, got)
+				}
+			}
+		})
+	}
+}
+
+func TestNormalizeFreeText_should_return_unknown_when_exceeds_max_bytes(t *testing.T) {
+	// Over-length input must reject to unknown, not truncate, so that
+	// two distinct long inputs cannot collide on the same truncated label.
+	overLen := strings.Repeat("a", 129)
+	got := normalize.NormalizeFreeText(overLen, 128, "_unknown")
+	if got != "_unknown" {
+		t.Fatalf("NormalizeFreeText(%d-byte input) = %q, want _unknown", len(overLen), got)
+	}
+	// Boundary: exactly maxBytes must be accepted.
+	atBoundary := strings.Repeat("b", 128)
+	got = normalize.NormalizeFreeText(atBoundary, 128, "_unknown")
+	if got != atBoundary {
+		t.Fatalf("NormalizeFreeText at 128-byte boundary should pass through; got %q", got)
+	}
+	// Two distinct over-length inputs must both reject to _unknown (no collision).
+	overLenA := strings.Repeat("a", 500)
+	overLenB := strings.Repeat("b", 500)
+	gotA := normalize.NormalizeFreeText(overLenA, 128, "_unknown")
+	gotB := normalize.NormalizeFreeText(overLenB, 128, "_unknown")
+	if gotA != "_unknown" || gotB != "_unknown" {
+		t.Fatalf("NormalizeFreeText should reject oversize inputs, got %q vs %q", gotA, gotB)
+	}
+}
+
+func TestNormalizeFreeText_should_preserve_case(t *testing.T) {
+	t.Parallel()
+	// Free-form text is case-sensitive. NormalizeFreeText does NOT lowercase.
+	got := normalize.NormalizeFreeText("US-EAST-1", 128, "_unknown")
+	if got != "US-EAST-1" {
+		t.Fatalf("NormalizeFreeText should preserve case, got %q", got)
+	}
+	got = normalize.NormalizeFreeText("us-east-1", 128, "_unknown")
+	if got != "us-east-1" {
+		t.Fatalf("NormalizeFreeText should preserve case, got %q", got)
+	}
+}
+
+func TestNormalizeFreeText_should_preserve_internal_spaces(t *testing.T) {
+	t.Parallel()
+	// Internal spaces are intentional in some region name formats.
+	// NormalizeFreeText trims but does not collapse internal whitespace.
+	got := normalize.NormalizeFreeText("us east 1", 128, "_unknown")
+	if got != "us east 1" {
+		t.Fatalf("NormalizeFreeText should preserve internal spaces, got %q", got)
+	}
+}
+
+func TestNormalizeFreeText_should_honor_caller_supplied_unknown(t *testing.T) {
+	t.Parallel()
+	// The unknown sentinel is caller-supplied so that different Recorder
+	// owners can use different sentinels if their catalog row requires it.
+	got := normalize.NormalizeFreeText("", 128, "_fallback")
+	if got != "_fallback" {
+		t.Fatalf("NormalizeFreeText should honour caller-supplied unknown; got %q", got)
+	}
+}
+
+func TestNormalizeFreeText_should_panic_when_max_bytes_is_non_positive(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatal("NormalizeFreeText with maxBytes=0 did not panic")
+		}
+	}()
+	normalize.NormalizeFreeText("any-value", 0, "_unknown")
+}
+
+func TestNormalizeFreeText_should_panic_when_unknown_is_empty(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatal("NormalizeFreeText with unknown='' did not panic")
+		}
+	}()
+	normalize.NormalizeFreeText("any-value", 128, "")
+}
