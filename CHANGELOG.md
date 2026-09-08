@@ -204,6 +204,57 @@ non-zero production sample and is owned by Phase 18+.
 
 ## [Unreleased]
 
+### Added
+
+- `control-plane/auth/postgres/repository.go`: Phase 22 slice 48.1
+  (ADR-065) adds `LoadTenantIDsForPrincipal(ctx, principalID)` which
+  returns the unique active tenant IDs for a principal via a
+  `SELECT DISTINCT tenant_id FROM astrasync_auth_memberships WHERE
+  principal_id = $1 AND status = 'ACTIVE'` query. The method is used
+  by `RevokeSessionsForPrincipal` to derive the `tenant_id` label for
+  `auth_session_revoke_total` emission. `RevokeSessionsForPrincipal`
+  now returns `(int64, []string, error)` — the session count and the
+  list of active tenant IDs — in a serializable transaction so both
+  values are from a consistent snapshot.
+
+- `control-plane/auth/cmd/admin/main.go`: Phase 22 slice 48.2
+  (ADR-065) wires `authmetrics.Recorder` into the admin CLI
+  `revoke-session` operation. For `opRevokeSession`, a
+  `prometheus.NewRegistry()` is created and
+  `authmetrics.NewRecorder(registry)` is registered and stored on
+  `adminCommand`. After `RevokeSessionsForPrincipal` succeeds, the
+  command calls `recorder.ObserveSessionRevoke(tenantID, requestID)`
+  once per active tenant the principal holds a membership in.
+  A deferred `dumpMetrics` helper logs one structured JSON info
+  line per metric family in the registry, allowing Grafana Agent or
+  Prometheus log-based service discovery to collect the sample. This
+  is the log-dump emission pattern documented in ADR-065: the
+  one-shot admin CLI does not gain a `/metrics` HTTP endpoint.
+
+- `control-plane/auth/cmd/admin/metrics_emission_test.go`: Phase 22
+  slice 48.2 test contracts. `TestDumpMetricsLogsOneLinePerFamilyForRevokeSession`
+  asserts that after one `ObserveSessionRevoke` call, the deferred
+  `dumpMetrics` emits one structured log line with the correct
+  `metric`, `tenant_count`, `tenants`, `operation`, and `component`
+  fields. `TestDumpMetricsIsNoopForNonMetricOperations` asserts that
+  a nil registry produces no output and no panic.
+
+- `docs/observability/metrics-catalog.md`: Phase 22 slice 48.3
+  (ADR-065) updates the `auth_session_revoke_total` row from
+  "Recorder wired; integration pending because the admin CLI is one-shot"
+  to the full log-dump emission description, including the
+  per-tenant observation semantics, the Grafana Agent collection
+  path, and the historical rate-query limitation for one-shot
+  invocations.
+
+- `docs/adr/adr-065-phase22-auth-session-revoke-emission.md`:
+  Phase 22 umbrella decision. Records scope (slice 48.1 / 48.2 /
+  48.3: `auth_session_revoke_total` emission via admin CLI), the
+  log-dump emission pattern for one-shot CLI, the serializable
+  transaction design for `RevokeSessionsForPrincipal`, non-goals
+  (slices 43.1.5 / 43.3.5 / Java 26.F9), and the outcome-contract
+  change note for empty outcome labels (Phase 21 / ADR-063 / v0.6.0).
+
 <!-- Add new Phase content above this line. -->
 
 ## [v0.5.0] - 2026-09-08

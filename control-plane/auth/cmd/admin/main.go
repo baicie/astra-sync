@@ -24,8 +24,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/prometheus/client_golang/prometheus"
 
 	"io.astrasync/control-plane/auth"
+	authmetrics "io.astrasync/control-plane/auth/internal/authmetrics"
 	authpostgres "io.astrasync/control-plane/auth/postgres"
 )
 
@@ -49,6 +51,17 @@ type adminCommand struct {
 	stderr    io.Writer
 	clock     func() time.Time
 	uid       func() string
+	// recorder is non-nil only for opRevokeSession. It is owned by the
+	// command; methods on adminCommand call ObserveSessionRevoke at the
+	// success boundary and main() defers the log-dump.
+	recorder *authmetrics.Recorder
+	// registry is the prometheus registerer that owns recorder. It is used
+	// only for the log-dump that runs after the operation completes.
+	registry prometheus.Gatherer
+	// lastObservedTenants holds the tenant IDs that received an
+	// ObserveSessionRevoke call in the most recent operation. It is read
+	// by the deferred log-dump in main().
+	lastObservedTenants []string
 }
 
 type envLookup func(string) string
@@ -87,10 +100,30 @@ func main() {
 		clock:     func() time.Time { return time.Now().UTC() },
 		uid:       uuid.NewString,
 	}
+	// For opRevokeSession, create an isolated prometheus registry and wire
+	// the authmetrics.Recorder. The registry is dumped to structured log
+	// after the operation completes (see deferred logDump below).
+	if operation == opRevokeSession {
+		reg := prometheus.NewRegistry()
+		rec, err := authmetrics.NewRecorder(reg)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "astra-auth-admin: init metrics recorder: %v\n", err)
+			os.Exit(1)
+		}
+		command.recorder = rec
+		command.registry = reg
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	logger := newComponentLogger("astra-auth-admin", command.stderr, os.Getenv("LOG_LEVEL"))
 	slog.SetDefault(logger)
+
+	// Log-dump the metrics registry after run() returns (success or failure).
+	// For non-revoke-session operations the recorder is nil and the dump is a no-op.
+	defer func() {
+		dumpMetrics(logger, command.registry, command.operation, command.lastObservedTenants)
+	}()
+
 	if err := command.run(ctx, os.Args[2:]); err != nil {
 		logger.Error("astra-auth-admin operation failed",
 			"operation", string(operation),
@@ -306,11 +339,20 @@ func (c *adminCommand) setTenantStatus(
 func (c *adminCommand) revokeSessions(
 	ctx context.Context, repository *authpostgres.Repository, principalID string,
 ) error {
-	count, err := repository.RevokeSessionsForPrincipal(ctx, principalID)
+	count, tenantIDs, err := repository.RevokeSessionsForPrincipal(ctx, principalID)
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(c.stdout, "revoked %d console sessions for principal %s\n", count, principalID)
+	// Observe once per active tenant the principal holds a membership in.
+	// The recorder is nil when injected (i.e., when operation != opRevokeSession)
+	// but we guard here for defensive completeness.
+	requestID := c.uid()
+	for _, tenantID := range tenantIDs {
+		c.recorder.ObserveSessionRevoke(tenantID, requestID)
+	}
+	c.lastObservedTenants = tenantIDs
+	fmt.Fprintf(c.stdout, "revoked %d console sessions for principal %s (tenants=%d)\n",
+		count, principalID, len(tenantIDs))
 	return nil
 }
 
@@ -323,4 +365,29 @@ func (c *adminCommand) showRevision(
 	}
 	fmt.Fprintf(c.stdout, "tenant %s authz_revision=%s\n", tenantID, revision)
 	return nil
+}
+
+// dumpMetrics logs the content of the given gatherer to structured log
+// output. For opRevokeSession it logs one info line per metric family
+// in the registry; for other operations it is a no-op because recorder
+// is nil. This satisfies the log-dump emission pattern documented in
+// ADR-065: Grafana Agent can parse these lines and translate them into
+// Prometheus samples for one-shot CLI invocations.
+func dumpMetrics(logger *slog.Logger, registry prometheus.Gatherer, op adminOperation, tenantIDs []string) {
+	if registry == nil {
+		return
+	}
+	metrics, err := registry.Gather()
+	if err != nil {
+		logger.Warn("metrics dump gather failed", "operation", string(op), "error", err.Error())
+		return
+	}
+	for _, mf := range metrics {
+		logger.Info("authmetrics dump",
+			"operation", string(op),
+			"metric", mf.GetName(),
+			"type", mf.GetType().String(),
+			"tenant_count", len(tenantIDs),
+			"tenants", strings.Join(tenantIDs, ","))
+	}
 }
