@@ -63,7 +63,7 @@ This directory contains the Architecture Decision Records (ADRs) for AstraSync.
 | [ADR-055](adr-055-connector-catalog-lifecycle-automation.md) | Connector Catalog Lifecycle Automation | Accepted | 2026-09-07 |
 | [ADR-056](adr-056-ci-hygiene-and-release-tooling.md) | CI / Test Hygiene & Release Tooling | Accepted | 2026-09-07 |
 | [ADR-057](adr-057-v0.3.0-release-cut.md) | v0.3.0 Release Cut (Phases 13-16) | Accepted | 2026-09-07 |
-| [ADR-058](adr-058-observability-catalog-backlog.md) | Observability Catalog Backlog (Phase 17) | Accepted | 2026-09-07 |
+| [ADR-058](adr-058-observability-catalog-backlog.md) | Observability Catalog Backlog (Phase 17) | Accepted — Superseded by Phase 25 closeout | 2026-09-08 |
 | [ADR-059](adr-059-v0.4.0-release-cut.md) | v0.4.0 Release Cut (Phase 17 Observability Activation) | Accepted | 2026-09-08 |
 | [ADR-060](adr-060-phase18-scheduler-metrics-normalize.md) | Phase 18 Scheduler Metrics Normalize (Slice 44) | Accepted | 2026-09-08 |
 | [ADR-061](adr-061-phase19-connection-test-recorder-migrate.md) | Phase 19 Connection-Test Recorder Migrate (Slice 45) | Accepted | 2026-09-08 |
@@ -73,6 +73,9 @@ This directory contains the Architecture Decision Records (ADRs) for AstraSync.
 | [ADR-065](adr-065-phase22-auth-session-revoke-emission.md) | Phase 22 Emission Sub-Slice 43.2.5 — auth_session_revoke_total via admin CLI | Accepted | 2026-09-08 |
 | [ADR-066](adr-066-phase23-controller-reconcile-emission.md) | Phase 23 Controller Emission Sub-Slice 43.3.5 — controller_job_state_total via reconcile boundary | Accepted | 2026-09-08 |
 | [ADR-067](adr-067-v0.7.0-release-cut.md) | v0.7.0 Release Cut (Phase 22 Auth Session Revoke + Phase 23 Controller Reconcile Emission) | Accepted | 2026-09-08 |
+| [ADR-068](adr-068-phase24-apiserver-session-revoke-emission.md) | Phase 24 Emission Sub-Slice 43.1.5 — apiserver_session_revoke_total via API Server revoke RPC | Accepted | 2026-09-08 |
+| [ADR-069](adr-069-phase25-controller-epoch-fence-emission.md) | Phase 25 Emission Sub-Slice 51.1 — controller_epoch_fence_total via reconcile boundary | Accepted | 2026-09-08 |
+| [ADR-070](adr-070-v0.8.0-release-cut.md) | v0.8.0 Release Cut (Phase 24 API Server Session Revoke + Phase 25 Controller Epoch Fence + Phase 26 Closeout) | Accepted | 2026-09-08 |
 
 ## Template
 

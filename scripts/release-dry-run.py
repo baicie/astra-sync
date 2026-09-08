@@ -175,8 +175,9 @@ def phases_missing_from_changelog(strict: bool = False) -> list[int]:
         # under [v0.4.0] (ADR-059); Phase 18 and Phase 19 ship
         # under [v0.5.0] (ADR-062); Phase 21 ships
         # under [v0.6.0] (ADR-064); Phase 22 and Phase 23 ship
-        # under [v0.7.0] (ADR-067).
-        if not strict and number <= 23:
+        # under [v0.7.0] (ADR-067); Phase 24, Phase 25, and
+        # Phase 26 ship under [v0.8.0] (ADR-070).
+        if not strict and number <= 26:
             continue
         missing.append(number)
     return missing

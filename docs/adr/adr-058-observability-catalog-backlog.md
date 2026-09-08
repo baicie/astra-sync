@@ -2,7 +2,12 @@
 
 ## Status
 
-Accepted
+Accepted — **Superseded by Phase 25 closeout (2026-09-08).**
+
+All six Phase 17 backlog metrics are **emitted** as of 2026-09-08.
+ADR-058 remains on record as the design umbrella; the Phase 17
+backlog is closed. Future metrics activation follows the same slice
+pattern documented in this ADR.
 
 ## Context
 
