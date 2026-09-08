@@ -6,12 +6,97 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+<!-- Add new Phase content above this line. -->
+
+## [v0.8.0] - 2026-09-08
+
+Phase 24 (API Server session-revoke emission, ADR-068) +
+Phase 25 (controller epoch-fence emission, ADR-069) +
+Phase 26 (catalog closeout + reconcile loop tests). Completes
+the emission half of the Phase 17 observability activation
+matrix for the last two remaining metrics
+(`apiserver_session_revoke_total`, `controller_epoch_fence_total`)
+and freezes the Phase 17 backlog table. See ADR-070 for the
+release-cut rationale.
+
 ### Added
+
+- `control-plane/api-server/internal/service/access_service.go`:
+  Phase 24 slice 50.2 (ADR-068 §2) adds the
+  `RevokeConsoleSession` gRPC handler. Every revoke RPC now
+  emits `apiserver_session_revoke_total` via the metrics
+  Recorder: once per unique active tenant the target principal
+  holds a membership in. `outcome` is `success` if the revoke
+  deletes one or more sessions, `noop` if there are none to
+  revoke. `tenant_id` is the per-active-tenant label. The
+  handler enforces platform-admin (gRPC `PermissionDenied`
+  otherwise), validates the principal ID (gRPC `InvalidArgument`
+  on parse failure), and emits a single
+  `access.console_session.revoked` audit event in the same
+  serializable transaction as the session DELETE.
+
+- `control-plane/auth/access_repository.go`,
+  `control-plane/auth/postgres/repository.go`: Phase 24 slice
+  50.2 adds `AccessRepository.RevokeConsoleSessionsForPrincipal`.
+  The Postgres implementation wraps the session DELETE and the
+  audit-event INSERT in a single `sql.LevelSerializable`
+  transaction; either both rows are committed or both roll back.
+
+- `control-plane/api-server/cmd/server/main.go`: Phase 24 slice
+  50.3 wires the existing `metricRecorder` into the access
+  service via the new `service.WithAccessRevokeRecorder`
+  functional option. No new wiring or initialization required.
+
+- `control-plane/controller/internal/controller/syncjob_controller.go`:
+  Phase 25 slice 51.1 (ADR-069 §2) adds the `observeEpochFence`
+  helper and calls it after every successful `r.Jobs.Update`
+  in the three converge sites: spec-change stop,
+  desired-state transition, and deletion. `outcome` is `fenced`
+  when the next epoch exceeds the stored epoch, `success` when
+  the epoch is unchanged, `failure` for a lower epoch. The
+  Recorder is nil-safe.
+
+- `control-plane/controller/internal/controller/syncjob_controller_test.go`:
+  Phase 26 slice 53.0 (ADR-069 follow-up) adds 18 table-driven
+  unit tests covering the reconcile loop's happy + rejection paths.
+  Coverage spans: finalizer adoption (`adds_finalizer_when_absent`),
+  deletion paths (`deletion_removes_finalizer_when_job_not_found`,
+  `deletion_stops_active_job_and_requeues`,
+  `deletion_deletes_inactive_job_and_removes_finalizer`,
+  `deletion_requeues_on_delete_conflict`), converge state
+  transitions (`converge_starts_stopped_job`,
+  `converge_stops_running_job`, `converge_noop_returns_requeue`,
+  `converge_requeues_on_persistent_conflict`,
+  `converge_replaces_spec_when_inactive`), invariants
+  (`converge_spec_change_while_active_requests_stop_first`,
+  `ignores_spec_change_while_canceling`,
+  `converge_stops_inactive_job_via_desired_stop`), race +
+  error handling (`converge_creates_job_when_not_found`,
+  `converge_retries_on_create_already_exists`,
+  `converge_error_from_jobs_get_passes_through`), and guards
+  (`returns_error_when_jobs_repository_is_nil`,
+  `returns_nil_for_unknown_resource`). The test file provides a
+  `testSyncJob` helper that the pre-existing
+  `observability_test.go` already references (closing pre-existing
+  test debt) and a `fakeJobsRepository` wrapper that injects
+  per-call overrides for transient conditions without touching the
+  production repository logic. `WithStatusSubresource` is enabled
+  on the fake K8s client so `projectStatus` updates do not race with
+  the controller-runtime cache.
+
+### Removed
+
+- `scripts/reorder-changelog.py`: Phase 26 slice 53.2 removes the
+  broken script. The script was destructive: when run against the
+  current CHANGELOG.md, it overwrote the file with an empty
+  `[Unreleased]` placeholder and dropped every other release
+  section. The Phase 26 closeout applies the date stamps to all
+  `[vX.Y.Z]` section headers manually instead.
 
 <!-- Add new Phase content above this line. -->
 
 
-## [v0.7.0]
+## [v0.7.0] - 2026-09-08
 
 ### Added
 
@@ -154,15 +239,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 <!-- Add new Phase content above this line. -->
 
 
-## [v0.6.0]
+## [v0.6.0] - 2026-09-08
 
-## [v0.5.0]
+## [v0.5.0] - 2026-09-08
 
-## [v0.4.0]
+## [v0.4.0] - 2026-09-08
 
-## [v0.3.0]
+## [v0.3.0] - 2026-09-07
 
-## [v0.2.0]
+## [v0.2.0] - 2026-09-07
 
-## [v0.1.0-phase0]
+## [v0.1.0-phase0] - 2026-08-02
 
