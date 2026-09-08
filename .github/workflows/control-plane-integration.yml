@@ -63,6 +63,11 @@ jobs:
           GOPROXY: https://goproxy.cn,direct
         run: |
           set -euo pipefail
+          # The root Go module that owns control-plane/job/ lives at
+          # control-plane/go.mod (control-plane/ is itself a Go module root,
+          # not just a subdirectory). `go test` must run from that root so
+          # the ./... pattern resolves inside the module graph.
+          cd control-plane
           # Run the two integration tests that cover:
           #   1. repository_integration_test.go  — Job lifecycle Create/Update/Delete
           #   2. mutation_integration_test.go   — Atomic job mutation + connection generation fence
@@ -72,7 +77,7 @@ jobs:
             -v \
             -count=1 \
             -timeout 300s \
-            ./control-plane/job/postgres/...
+            ./job/postgres/...
 
       - name: Verify helper file is present
         # ADR-084 §Decision: the helper lives in
