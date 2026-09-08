@@ -139,6 +139,58 @@ non-zero production sample and is owned by Phase 18+.
 
 ## [Unreleased]
 
+### Added
+
+- `control-plane/scheduler/internal/metrics`: Phase 18 slice 44.1
+  (ADR-060) wires `scheduler_job_assignment_total`,
+  `scheduler_lease_takeover_total`, and
+  `scheduler_job_reconcile_duration_seconds` through a new
+  Recorder that owns dedicated CounterVec / HistogramVec
+  registered against an injected `prometheus.Registerer`. Three
+  new methods — `ObserveAssignment`, `ObserveLeaseTakeover`,
+  `ObserveReconcile` — funnel every label value that derives
+  from caller input through
+  `io.astrasync/control-plane/observability/normalize`
+  (slice 43.0). The `worker_id` label routes through
+  `NormalizeWorkerID`; the `tenant_id` label routes through
+  `NormalizeTenant`; the `outcome` label routes through
+  `NormalizeOutcome` with documented allowlists per family
+  (`success | rejected | failure` for
+  `scheduler_job_assignment_total`; `success` for
+  `scheduler_lease_takeover_total`). The package-level
+  `JobAssignmentTotal` / `LeaseTakeoverTotal` /
+  `JobReconcileDuration` `promauto` Vecs remain registered
+  against the default registry so any pre-slice-44 import
+  path continues to scrape the same series; the Recorder is
+  strictly additive. Nine new boundary-driven tests cover the
+  success / rejected / failure canonical paths, the
+  `_platform` self-scope, non-canonical UUID collapse
+  (uppercase, braced, raw e-mail), outcome allowlist collapse
+  for both allowlists, empty / whitespace worker-id collapse,
+  negative-duration clamping for the histogram, nil-receiver
+  safety, nil-registerer rejection, duplicate-registration
+  rejection, and a cross-call cardinality bound that asserts
+  eleven distinct caller inputs across the three families
+  produce only eleven bounded series.
+
+- `control-plane/scheduler/go.mod`: require + replace
+  `io.astrasync/control-plane/observability` so the scheduler
+  module joins api-server + auth + controller as a consumer
+  of the slice-43.0 normalize helper. Slice 44.0 (ADR-060).
+
+- ADR-060 (`docs/adr/adr-060-phase18-scheduler-metrics-normalize.md`):
+  Phase 18 umbrella decision — closes the last remaining
+  control-plane Recorder-owner gap (the Scheduler metric
+  package). Records scope (Recorder + observe methods +
+  tests), non-goals (replication metrics with non-tenant /
+  non-worker-id labels; Java data-plane emission follow-up
+  `26.F9`), and acceptance criteria mirroring the Phase 17
+  template.
+
+- `docs/phase18/README.md`: phase README with roadmap
+  (slices 44.0 / 44.1 / 44.2; slice 44.3 optional),
+  acceptance criteria, and ADR cross-references.
+
 ## [v0.3.0] - 2026-09-07
 
 This release covers Phase 13 through Phase 16, completing Kubernetes production
