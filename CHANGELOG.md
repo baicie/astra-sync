@@ -62,6 +62,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   no production code, no new metric, no new dependency, no helm
   resource change.
 
+- Phase 31 (ADR-076, Proposed): cross-module tenant-id envelope
+  chain test fixture (`tests/cross-module/chain-tenant-id/`)
+  extends the regression surface from single-module chain
+  (Phase 30) to cross-module chain — pinning the join between the
+  Console BFF, the API Server interceptor, the mutation
+  repository, and the PostgreSQL `astrasync_control_jobs.
+  tenant_id` column in a single test binary. Five cases (full
+  chain match, BFF-vs-membership mismatch rejection, malformed
+  metadata rejection, no-metadata fallback, migration `003_jobs_
+  tenant_id.sql` persistence) are exercised in-process via a
+  real `*grpc.Server` + `authn.Interceptor` + in-memory
+  `Memory.Repository` and a BFF client adapter that invokes the
+  same handler code path the HTTP server invokes. The new
+  module's `go.mod` uses `replace` directives to import `console`
+  and `api-server` without forcing either module to take on a
+  dependency on the other. Phase 31 ships only test code; no
+  production change, no schema migration, no metric, no RBAC
+  change. New CI workflow
+  `.github/workflows/cross-module-chain-tenant-id.yml` runs the
+  five cases on PR / push-to-main-or-develop, with path-filtered
+  triggers so unrelated PRs do not pay the ~5s cost.
+
 <!-- Add new Phase content above this line. -->
 
 ## [v0.8.0] - 2026-09-08

@@ -1,0 +1,87 @@
+name: cross-module-chain-tenant-id
+
+# Follow-up to ADR-076 (Phase 31). Runs the cross-module tenant-id
+# envelope chain test fixture under tests/cross-module/chain-tenant-id/.
+#
+# Triggers:
+#   - pull_request: only when the diff touches console/, control-plane/api-server/,
+#     control-plane/job/, docs/phase31/, or tests/cross-module/chain-tenant-id/
+#     (path filter via `paths:`).
+#   - push to main / develop: post-merge envelope gate.
+#   - workflow_dispatch: manual on-demand re-run.
+#
+# Deliberately NOT scheduled nightly: the existing
+# phase30-chain-tenant-id-regression.yml already provides nightly coverage
+# of the single-module chain. The cross-module chain tests are slower
+# (~5s vs <1s) and only need to re-run on PR / push.
+
+on:
+  pull_request:
+    paths:
+      - 'console/**'
+      - 'control-plane/api-server/**'
+      - 'control-plane/job/**'
+      - 'docs/phase31/**'
+      - 'tests/cross-module/chain-tenant-id/**'
+      - '.github/workflows/cross-module-chain-tenant-id.yml'
+  push:
+    branches:
+      - main
+      - develop
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cross-module-chain-tenant-id
+  cancel-in-progress: true
+
+jobs:
+  cross-module-chain-tenant-id:
+    name: cross-module chain tenant-id envelope
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go 1.26.x
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version: '1.26.x'
+          cache: false
+
+      - name: Verify cross-module module resolves
+        working-directory: tests/cross-module/chain-tenant-id
+        run: |
+          set -euo pipefail
+          test -f go.mod
+          go mod tidy
+
+      - name: Verify fixture test file is tracked
+        run: |
+          set -euo pipefail
+          test -f tests/cross-module/chain-tenant-id/chain_test.go
+          # ADR-076 §4: five cases must be present so a future accidental
+          # deletion cannot make the workflow silently pass.
+          for t in \
+            TestCrossModule_ChainMatchesBFFScopeAndAPIServerMutation \
+            TestCrossModule_APIServerRejectsBFFMismatch \
+            TestCrossModule_APIServerRejectsMalformedMetadata \
+            TestCrossModule_NoTenantIDInMetadataFallsBackToMembership \
+            TestCrossModule_APIServerMigration003PersistsVerifiedTenantID; do
+            grep -q "$t" tests/cross-module/chain-tenant-id/chain_test.go
+          done
+
+      - name: Run cross-module chain tenant-id tests
+        working-directory: tests/cross-module/chain-tenant-id
+        run: |
+          set -euo pipefail
+          go test \
+            -v \
+            -count=1 \
+            -timeout 120s \
+            ./...

@@ -81,6 +81,7 @@ This directory contains the Architecture Decision Records (ADRs) for AstraSync.
 | [ADR-073](adr-073-phase28-slice28b-console-syncjob-cr-dual-write.md) | Phase 28 Slice 28-B — Console Owns `SyncJob` CR Dual-Write via controller-runtime | Accepted | 2026-09-08 |
 | [ADR-074](adr-074-phase29-api-server-consumes-tenant-id.md) | Phase 29 — API Server Consumes `x-astra-tenant-id` (Server-side Interceptor + `job.Job.tenant_id` Column) | Accepted | 2026-09-08 |
 | [ADR-075](adr-075-phase30-chain-tenant-id-regression.md) | Phase 30 — Tenant-Id Envelope End-to-End Regression Chain | Accepted | 2026-09-08 |
+| [ADR-076](adr-076-phase31-cross-module-chain-test.md) | Phase 31 — Tenant-Id Envelope Cross-Module Chain Test (BFF ↔ API Server ↔ Mutation Repository) | Proposed | 2026-09-08 |
 
 ## Template
 
