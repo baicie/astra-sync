@@ -52,7 +52,11 @@ func startPostgresContainer(t *testing.T) string {
 		t.Fatalf("get working directory: %v", err)
 	}
 	t.Logf("DEBUG working directory: %s", cwd)
-	migrationsPath := filepath.Join(cwd, migrationsDir)
+	// go test runs the binary from the package directory
+	// (control-plane/job/postgres/), not from the module root
+	// (control-plane/). The migrations are at
+	// control-plane/job/postgres/migrations/, which is cwd + "/../" + migrationsDir.
+	migrationsPath := filepath.Join(cwd, "..", migrationsDir)
 	t.Logf("DEBUG migrations path: %s", migrationsPath)
 
 	pgC, err := postgres.RunContainer(ctx,
