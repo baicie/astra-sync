@@ -32,8 +32,11 @@ require (
 	golang.org/x/text v0.37.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260526163538-3dc84a4a5aaa // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260526163538-3dc84a4a5aaa // indirect
+	io.astrasync/control-plane/observability v0.0.0-00010101000000-000000000000 // indirect
 )
 
 replace io.astrasync/control-plane/api-server => ../control-plane/api-server
 
 replace io.astrasync/control-plane/auth => ../control-plane/auth
+
+replace io.astrasync/control-plane/observability => ../control-plane/observability
