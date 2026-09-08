@@ -80,8 +80,13 @@ This directory contains the Architecture Decision Records (ADRs) for AstraSync.
 | [ADR-072](adr-072-phase28-console-tenant-id-egress.md) | Phase 28 Slice 28-A — Console BFF Forwards `x-astra-tenant-id` on Job Mutations | Accepted | 2026-09-08 |
 | [ADR-073](adr-073-phase28-slice28b-console-syncjob-cr-dual-write.md) | Phase 28 Slice 28-B — Console Owns `SyncJob` CR Dual-Write via controller-runtime | Accepted | 2026-09-08 |
 | [ADR-074](adr-074-phase29-api-server-consumes-tenant-id.md) | Phase 29 — API Server Consumes `x-astra-tenant-id` (Server-side Interceptor + `job.Job.tenant_id` Column) | Accepted | 2026-09-08 |
+| [ADR-071](adr-071-phase27-tenant-id-label-on-syncjob-cr.md) | Phase 27 — Tenant-Id Label on SyncJob CR (Controller Surface) | Accepted | 2026-09-08 |
+| [ADR-072](adr-072-phase28-console-tenant-id-egress.md) | Phase 28-A — Console BFF Tenant-Id Egress | Accepted | 2026-09-08 |
+| [ADR-073](adr-073-phase28-slice28b-console-syncjob-cr-dual-write.md) | Phase 28-B — Console SyncJob CR Dual-Write (Slice 28-B) | Accepted | 2026-09-08 |
+| [ADR-074](adr-074-phase29-api-server-consumes-tenant-id.md) | Phase 29 — API Server Consumes Tenant-Id (Server-Side Consumption) | Accepted | 2026-09-08 |
 | [ADR-075](adr-075-phase30-chain-tenant-id-regression.md) | Phase 30 — Tenant-Id Envelope End-to-End Regression Chain | Accepted | 2026-09-08 |
 | [ADR-076](adr-076-phase31-cross-module-chain-test.md) | Phase 31 — Tenant-Id Envelope Cross-Module Chain Test (BFF ↔ API Server ↔ Mutation Repository) | Proposed | 2026-09-08 |
+| [ADR-077](adr-077-phase27-28-29-audit-backfill.md) | Phase 27 / 28 / 29 Audit — Backfill of Untracked Implementation Files | Proposed | 2026-09-08 |
 
 ## Template
 

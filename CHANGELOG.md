@@ -84,6 +84,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   five cases on PR / push-to-main-or-develop, with path-filtered
   triggers so unrelated PRs do not pay the ~5s cost.
 
+- Phase 27 / 28 / 29 audit backfill (ADR-077, Proposed): the
+  branch `phase13/kubernetes-production-hardening` previously
+  landed design ADRs (ADR-071 / 072 / 073 / 074) and Phase
+  READMEs (`docs/phase28/README.md`, `docs/phase29/README.md`)
+  on disk but without committing them, and likewise held the
+  corresponding production code (api-server tenant metadata,
+  api-server interceptor, console BFF egress + dual-write,
+  controller CRD types, postgres migration `003_jobs_tenant_id`,
+  helm syncjob-cr-role + console tenant scope) as untracked or
+  modified-but-uncommitted. Phase 30 / 31 tests passed locally
+  because the working tree held the implementation; a fresh clone
+  of the branch tip would not. This audit ADR records the
+  discrepancy and the eight-commit per-slice backfill strategy,
+  restoring branch tip integrity without squashing the existing
+  Phase 30 / 31 history.
+
 <!-- Add new Phase content above this line. -->
 
 ## [v0.8.0] - 2026-09-08
