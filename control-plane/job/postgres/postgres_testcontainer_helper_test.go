@@ -28,9 +28,9 @@ const postgresImage = "postgres:16-alpine"
 
 // migrationsDir is the directory whose `*.sql` files are applied to
 // the container after boot. The helper resolves the path relative to
-// the working directory of the test runner; CI workflows must keep
-// the working directory at the repository root.
-const migrationsDir = "control-plane/job/postgres/migrations"
+// the module root (control-plane/); CI workflows run from
+// control-plane/ so the path is "job/postgres/migrations".
+const migrationsDir = "job/postgres/migrations"
 
 // startPostgresContainer spins up a PostgreSQL container via
 // testcontainers-go, applies every `*.sql` file under migrationsDir
