@@ -116,6 +116,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   audit methodology (`git diff` step required) for future
   audits.
 
+- Phase 31 implementation corrections (ADR-079, Proposed):
+  Pre-implementation audit of ADR-076 §2.3, §4.2, §7 against
+  the actual `control-plane/job`, `control-plane/api-server/
+  internal/authn`, and `job_mutation_service_test.go` surfaces
+  revealed three corrections before Phase 31 cross-module
+  fixture implementation begins. (1) `jobmemory.Repository`
+  does **not** implement `MutationRepository`; the fixture
+  must adopt the `recordingJobMutationRepository` pattern
+  (embed `job.Repository` interface, override `ApplyMutation` /
+  `ReplayMutation`). (2) Metadata key is `x-astra-tenant-id`
+  per the `authn.TenantMetadataKey` constant; the fixture
+  imports the constant rather than a string literal. (3)
+  Migration test default becomes SQL parse + insert-path
+  assertion (not testcontainers); the in-memory adapter for
+  migration verification does not exist, so dry-run parse is
+  the only viable option in this slice.
+
 <!-- Add new Phase content above this line. -->
 
 ## [v0.8.0] - 2026-09-08
