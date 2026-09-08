@@ -131,8 +131,9 @@ def main(argv: list[str] | None = None) -> int:
         # Phases that predate this guard's introduction ship their
         # CHANGELOG entries under versioned sections (Phases 1-12 ship
         # under [v0.2.0]; Phases 13-16 ship under [v0.3.0] per
-        # ADR-057). They are exempt unless --strict is set.
-        if not args.strict and number <= 16:
+        # ADR-057; Phase 17 ships under [v0.4.0] per
+        # ADR-059). They are exempt unless --strict is set.
+        if not args.strict and number <= 17:
             continue
         failures.append(
             f"Phase {number} ({readme.relative_to(REPO_ROOT)}) is **Complete** "

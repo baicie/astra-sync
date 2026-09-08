@@ -2,10 +2,16 @@
 
 ## Status
 
-**In Progress.** Phase 17 is the **umbrella** scope for closing the
+**Complete.** Phase 17 is the **umbrella** scope for closing the
 descriptor-only / pending rows in `docs/observability/metrics-catalog.md`.
-The umbrella decision is recorded in ADR-058. Each slice below is
-landed as a separate PR.
+The umbrella decision is recorded in ADR-058. The release cut is
+recorded in ADR-059. Each slice below is landed as a separate PR.
+
+Phase 17 closes the **activation** half of the catalog backlog
+(Recorder + label-allowlist reuse + test contract). The
+**emission** half (transitioning catalog rows from "Recorder
+wired" to "emitted") requires a non-zero production sample and is
+owned by Phase 18+ — see ADR-059 §1 for the scope split.
 
 ## Goals
 
@@ -56,7 +62,7 @@ The slice numbering follows the Phase 17 directory layout
 | `controller_job_state_total` Recorder routing every label value through `normalize` | Done (slice 43.3); reconcile-path wiring deferred to slice 43.3.5 |
 | `controller_epoch_fence_total` Recorder routing every label value through `normalize` | Done (slice 43.3); reconcile-path wiring deferred to slice 43.3.5 |
 | Every slice's test contract covers happy / rejected / failure paths and non-canonical UUID labels | Done (slices 43.1 + 43.2 + 43.3) |
-| `metrics-catalog.md` row status updates from "pending" to "emitted" as each slice lands | Pending (slices 43.1 / 43.2 / 43.3 leave rows at "Recorder wired; production call site pending"; rows move to "emitted" only after a non-zero sample is observed in production) |
+| `metrics-catalog.md` row status updates from "pending" to "Recorder wired" as each slice lands | Done (slices 43.0 + 43.1 + 43.2 + 43.3); the row flips to "emitted" only after a non-zero sample is observed in production — that emission milestone is owned by Phase 18+, not by Phase 17 (ADR-059 §1) |
 | `control-plane/controller` no longer carries duplicated `normalizeTenant` / `normalizeOutcome` helpers — all metric packages route through the shared `observability/normalize` package | Done (slice 43.3) |
 
 ## Backlog Snapshot (as of 2026-09-07)

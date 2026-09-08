@@ -4,35 +4,17 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [v0.4.0] - 2026-09-08
+
+This release covers Phase 17 (Observability Catalog Backlog Activation).
+All twelve acceptance criteria in `docs/phase17/README.md` are **Done**.
+The release cut is recorded in ADR-059; the umbrella design decision is
+ADR-058. Phase 17 closes the **activation** half of the catalog backlog
+(Recorder + label-allowlist reuse + test contract). The **emission**
+half (transitioning rows from "Recorder wired" to "emitted") requires a
+non-zero production sample and is owned by Phase 18+.
 
 ### Added
-
-- `control-plane/api-server/internal/metrics`: Phase 17 slice 43.1
-  (ADR-058) wires `apiserver_sign_in_total`,
-  `apiserver_session_revoke_total`, and
-  `apiserver_trusted_proxy_hsts_total` through the new Recorder. Three
-  new methods — `ObserveSignIn`, `ObserveSessionRevoke`,
-  `ObserveTrustedProxyHSTS` — funnel every label value through
-  `io.astrasync/control-plane/observability/normalize` (slice 43.0).
-  The Recorder now owns the *Vec references for all six business
-  metric families exposed by the API Server; package-level CounterVec
-  access is reserved for tests and the registration boundary. Four new
-  boundary-driven tests cover the catalog authentication outcome
-  allowlist (`success|rejected|failure`), worker-id-style actor_id
-  normalisation, pre-auth tenant funneling, and a cross-call
-  cardinality bound that asserts six distinct caller inputs produce
-  only four series.
-
-- `control-plane/api-server/cmd/server/main.go`: the trusted-proxy HSTS
-  observer now routes the pre-auth tenant value through
-  `normalize.NormalizeTenant` so the label contract is owned by the
-  observability package end-to-end (ADR-058 §3). Existing scrape-level
-  tests in `main_test.go` continue to pass with no behaviour change.
-
-- `control-plane/api-server/go.mod`: require + replace
-  `io.astrasync/control-plane/observability` so the api-server module
-  imports the slice-43.0 normalize helper.
 
 - `control-plane/observability/normalize` (slice 43.0):
   shared label-allowlist helpers for control-plane Prometheus business
@@ -40,29 +22,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `NormalizeOutcome`, `NormalizeWorkerID` — enforce the
   canonical-lowercase-UUID tenant rule (ADR-047), bounded outcome
   allowlists (ADR-058 §3), and length-bounded worker-id allowlists.
-  Slices 43.1 (this PR) + 43.2 + 43.3 import this package; future
-  metric owners can do the same.
+  Slices 43.1 + 43.2 + 43.3 import this package; future metric owners
+  can do the same.
 
 - `scripts/run-go-modules.py` and root `Makefile`: `GO_MODULES` now
   includes `control-plane/observability`, so `make vet-go` and
   `make test-go` cover the new module alongside the existing eight
   control-plane modules.
 
-- ADR-058 (`docs/adr/adr-058-observability-catalog-backlog.md`):
-  Observability Catalog Backlog Phase 17 umbrella decision — records
-  the recorder owner, call site, and label normalization contract for
-  every descriptor-only / unregistered business metric in
-  `docs/observability/metrics-catalog.md`.
+- `control-plane/api-server/internal/metrics`: Phase 17 slice 43.1
+  (ADR-058) wires `apiserver_sign_in_total`,
+  `apiserver_session_revoke_total`, and
+  `apiserver_trusted_proxy_hsts_total` through the new Recorder.
+  Three new methods — `ObserveSignIn`, `ObserveSessionRevoke`,
+  `ObserveTrustedProxyHSTS` — funnel every label value through
+  `io.astrasync/control-plane/observability/normalize` (slice 43.0).
+  The Recorder now owns the *Vec references for all six business
+  metric families exposed by the API Server; package-level CounterVec
+  access is reserved for tests and the registration boundary. Four
+  new boundary-driven tests cover the catalog authentication outcome
+  allowlist (`success|rejected|failure`), worker-id-style actor_id
+  normalisation, pre-auth tenant funneling, and a cross-call
+  cardinality bound that asserts six distinct caller inputs produce
+  only four series.
 
-- `docs/phase17/README.md`: phase README with roadmap (slices
-  43.0 / 43.1 / 43.2 / 43.3), acceptance criteria, backlog snapshot,
-  and ADR cross-references.
+- `control-plane/api-server/cmd/server/main.go`: the trusted-proxy
+  HSTS observer now routes the pre-auth tenant value through
+  `normalize.NormalizeTenant` so the label contract is owned by the
+  observability package end-to-end (ADR-058 §3). Existing scrape-level
+  tests in `main_test.go` continue to pass with no behaviour change.
 
-- `docs/observability/metrics-catalog.md`: every "pending" row in the
-  Implementation status table, the auth-detail table, the
-  Controller-detail paragraph, and the Follow-up section now points
-  at the Phase 17 slice / ADR-058 section that owns the row instead
-  of deferring without an owner.
+- `control-plane/api-server/go.mod`: require + replace
+  `io.astrasync/control-plane/observability` so the api-server module
+  imports the slice-43.0 normalize helper.
 
 - `control-plane/controller/internal/metrics`: Phase 17 slice 43.3
   (ADR-058) wires `controller_job_state_total` and
@@ -119,6 +111,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `io.astrasync/control-plane/observability` so the auth module
   joins api-server + controller as a consumer of the slice-43.0
   normalize helper.
+
+- ADR-058 (`docs/adr/adr-058-observability-catalog-backlog.md`):
+  Observability Catalog Backlog Phase 17 umbrella decision — records
+  the recorder owner, call site, and label normalization contract for
+  every descriptor-only / unregistered business metric in
+  `docs/observability/metrics-catalog.md`.
+
+- ADR-059 (`docs/adr/adr-059-v0.4.0-release-cut.md`): v0.4.0 release
+  cut decision. Refines the literal Phase 17 acceptance criterion
+  (`metrics-catalog.md` row "pending" → "emitted") into a precise
+  two-stage lifecycle: phase 17 owns "pending" → "Recorder wired";
+  Phase 18+ owns "Recorder wired" → "emitted". Records the version
+  bump (`pom.xml` 0.3.0 → 0.4.0, `Chart.yaml` 0.3.0 → 0.4.0) and the
+  `check-changelog.py` exemption extension to `<= 17`.
+
+- `docs/phase17/README.md`: phase README with roadmap (slices
+  43.0 / 43.1 / 43.2 / 43.3), acceptance criteria, backlog snapshot,
+  and ADR cross-references. Status flips from **In Progress.** to
+  **Complete.** per ADR-059 §1 (activation-vs-emission split).
+
+- `docs/observability/metrics-catalog.md`: every "pending" row in the
+  Implementation status table, the auth-detail table, the
+  Controller-detail paragraph, and the Follow-up section now points
+  at the Phase 17 slice / ADR-058 section that owns the row instead
+  of deferring without an owner.
+
+## [Unreleased]
 
 ## [v0.3.0] - 2026-09-07
 

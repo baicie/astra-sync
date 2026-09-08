@@ -64,6 +64,7 @@ This directory contains the Architecture Decision Records (ADRs) for AstraSync.
 | [ADR-056](adr-056-ci-hygiene-and-release-tooling.md) | CI / Test Hygiene & Release Tooling | Accepted | 2026-09-07 |
 | [ADR-057](adr-057-v0.3.0-release-cut.md) | v0.3.0 Release Cut (Phases 13-16) | Accepted | 2026-09-07 |
 | [ADR-058](adr-058-observability-catalog-backlog.md) | Observability Catalog Backlog (Phase 17) | Accepted | 2026-09-07 |
+| [ADR-059](adr-059-v0.4.0-release-cut.md) | v0.4.0 Release Cut (Phase 17 Observability Activation) | Accepted | 2026-09-08 |
 
 ## Template
 
