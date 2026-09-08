@@ -85,11 +85,13 @@ This directory contains the Architecture Decision Records (ADRs) for AstraSync.
 | [ADR-073](adr-073-phase28-slice28b-console-syncjob-cr-dual-write.md) | Phase 28-B — Console SyncJob CR Dual-Write (Slice 28-B) | Accepted | 2026-09-08 |
 | [ADR-074](adr-074-phase29-api-server-consumes-tenant-id.md) | Phase 29 — API Server Consumes Tenant-Id (Server-Side Consumption) | Accepted | 2026-09-08 |
 | [ADR-075](adr-075-phase30-chain-tenant-id-regression.md) | Phase 30 — Tenant-Id Envelope End-to-End Regression Chain | Accepted | 2026-09-08 |
-| [ADR-076](adr-076-phase31-cross-module-chain-test.md) | Phase 31 — Tenant-Id Envelope Cross-Module Chain Test (BFF ↔ API Server ↔ Mutation Repository) | Proposed | 2026-09-08 |
-| [ADR-077](adr-077-phase27-28-29-audit-backfill.md) | Phase 27 / 28 / 29 Audit — Backfill of Untracked Implementation Files | Proposed | 2026-09-08 |
-| [ADR-078](adr-078-phase27-29-audit-clarification.md) | Phase 27 / 29 Audit Clarification — Real Diffs in Working-Tree Files (ADR-077 §Context correction) | Proposed | 2026-09-08 |
-| [ADR-079](adr-079-phase31-implementation-corrections.md) | Phase 31 Implementation Corrections — MutationRepository, Metadata Key, Migration Fallback | Proposed | 2026-09-08 |
-| [ADR-080](adr-080-phase31-cross-module-public-surface.md) | Phase 31 Cross-Module Fixture — Public-Surface Constraint (Go internal/ rule) | Proposed | 2026-09-08 |
+| [ADR-076](adr-076-phase31-cross-module-chain-test.md) | Phase 31 — Tenant-Id Envelope Cross-Module Chain Test (BFF ↔ API Server ↔ Mutation Repository) | Accepted — §2 superseded by ADR-080 | 2026-09-08 |
+| [ADR-077](adr-077-phase27-28-29-audit-backfill.md) | Phase 27 / 28 / 29 Audit — Backfill of Untracked Implementation Files | Accepted (audit-only) | 2026-09-08 |
+| [ADR-078](adr-078-phase27-29-audit-clarification.md) | Phase 27 / 29 Audit Clarification — Real Diffs in Working-Tree Files (ADR-077 §Context correction) | Accepted (audit-only) | 2026-09-08 |
+| [ADR-079](adr-079-phase31-implementation-corrections.md) | Phase 31 Implementation Corrections — MutationRepository, Metadata Key, Migration Fallback | Accepted — superseded on public-surface by ADR-080 | 2026-09-08 |
+| [ADR-080](adr-080-phase31-cross-module-public-surface.md) | Phase 31 Cross-Module Fixture — Public-Surface Constraint (Go internal/ rule) | Accepted | 2026-09-08 |
+| [ADR-081](adr-081-phase32-label-translation-cr-writer.md) | Phase 32 — Tenant-Id Label Translation at the SyncJob CR Writer (Layer-1 test + `IsCanonicalTenantID` guard on `realDualWriter.create`) | Accepted | 2026-09-09 |
+| [ADR-082](adr-082-phase33-update-mutation-tenant-id-guard.md) | Phase 33 — Update-Mutation Tenant-Id Guard at the SyncJob CR Writer (`IsCanonicalTenantID` guard on `realDualWriter.update`, symmetric with Phase 32) | Accepted | 2026-09-09 |
 
 ## Template
 

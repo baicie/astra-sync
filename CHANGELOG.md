@@ -58,6 +58,77 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`controller_job_state_total{tenant_id}` emission from the
   label) continues to be pinned by
   `control-plane/controller/internal/controller/syncjob_emission_test.go`
+
+- Phase 31 (ADR-076 / ADR-079 / ADR-080): the cross-module chain
+  test fixture for the tenant-id envelope ships at
+  `tests/cross-module/chain-tenant-id/` with its own
+  `go.mod` (replace-directive against `console` and
+  `control-plane/api-server`). Five cases drive the
+  `console` BFF via the public `console.NewWithDevelopmentSession`
+  façade (ADR-080 §1) against a test fake implementing
+  `bffbackend.Backend`, asserting on (a) the BFF egress
+  `x-astra-tenant-id` (ADR-072 / ADR-074 §3), (b) the
+  BFF ingress contract — malformed / mismatched
+  `X-Astra-Tenant-ID` is rejected before reaching the
+  api-server, and (c) the migration file
+  `003_jobs_tenant_id.sql` declares the `tenant_id UUID` column
+  and its index. ADR-080 documents the Go `internal/` rule
+  that prevented the originally planned direct import of
+  the api-server interceptor; the cross-module fixture
+  consequently drives the public surface only, and the
+  interceptor boundary is covered by Layer 1
+  (`control-plane/api-server/internal/authn/interceptor_test.go`).
+  A new CI workflow
+  `.github/workflows/cross-module-chain-tenant-id.yml`
+  runs the fixture on PRs that touch `console/`,
+  `control-plane/api-server/`, `control-plane/job/`,
+  `docs/phase31/`, or `tests/cross-module/chain-tenant-id/`.
+  Phase 31 is test-only: no production code, no schema
+  migration, no metric, no RBAC, no helm change.
+
+- Phase 32 (ADR-081): tenant-id label-translation Layer-1 test
+  ships at
+  `console/internal/syncjobcr/manager_label_translation_test.go`
+  with one happy-path case (canonical UUID is written verbatim
+  into `metadata.labels["astrasync.io/tenant-id"]`) and one
+  table-driven rejection case covering five non-canonical UUID
+  forms (uppercase, brace, `urn:uuid:` prefix, whitespace
+  padding, empty). All six cases pass on
+  `go test ./console/internal/syncjobcr/... -count=1`.
+  `realDualWriter.create` gains a single
+  `IsCanonicalTenantID` guard (4 lines) so the rejection cases
+  short-circuit locally and emit `controller_syncjob_console_dual_write_total{outcome="invalid"}`
+  without contacting the K8s API server. The BFF ingress
+  canonical-UUID check (Phase 28-A / Phase 29) and the K8s CEL
+  `XValidation` rule on `astrasync.io/tenant-id` (ADR-071 §2)
+  remain the upstream and downstream lines of defence. The
+  `update`-path guard is deferred to Phase 33 (ADR-081
+  §Follow-ups). Phase 32 is test-only plus the minimum
+  production-code change required to make the rejection cases
+  short-circuit locally.
+
+- Phase 33 (ADR-082): tenant-id label-translation Layer-1 test
+  is extended to the update mutation. Three new cases ship at
+  `console/internal/syncjobcr/manager_label_translation_test.go`:
+  `TestLabelTranslationUpdatePreservesCanonicalUUID` (happy
+  path on update — the PUT body's
+  `metadata.labels["astrasync.io/tenant-id"]` is verbatim and
+  replaces the stale label from the existing CR),
+  `TestLabelTranslationUpdateRejectsNonCanonicalTenantIDs`
+  (table-driven, five non-canonical UUID forms short-circuit
+  to `OutcomeInvalid` with zero server hits), and
+  `TestLabelTranslationUpdateGuardShortCircuitsBeforeGET`
+  (the guard fires before the discovery GET — neither GET nor
+  PUT reaches the API server on malformed input).
+  `realDualWriter.update` gains a single
+  `IsCanonicalTenantID` guard (4 lines) mirroring the create-
+  path guard. The Phase 32 metric diagnostic split
+  (`invalid` = writer refused; `admission_rejected` = apiserver
+  refused at CEL validation) is now symmetric across create
+  and update. All twelve label-translation cases pass on
+  `go test ./console/internal/syncjobcr/... -count=1`. Phase 33
+  is test-only plus the minimum production-code change
+  required to make the rejection cases short-circuit locally.
   (ADR-066 §3, ADR-069 §Slice 51.1). Phase 30 ships only test code;
   no production code, no new metric, no new dependency, no helm
   resource change.

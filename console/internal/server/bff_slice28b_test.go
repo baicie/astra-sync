@@ -103,7 +103,7 @@ func newSlice28bHandler(t *testing.T, backend interface {
 	if cap, ok := crWriter.(*captureCRWriter); ok {
 		cap.recorder = recorder
 	}
-	wrapper := &backendWrapper{backend}
+	wrapper := &backendWrapper{fakeBFFBackend: &fakeBFFBackend{}, inner: backend}
 	console, err := server.NewWithConfig(server.Config{Backend: wrapper, Sessions: newFakeSessions(t),
 		AuthMode: "oidc", PublicOrigin: "https://console.example", CRWriter: crWriter})
 	if err != nil {
@@ -116,6 +116,7 @@ func newSlice28bHandler(t *testing.T, backend interface {
 // io.astrasync/console/internal/server Backend interface by supplying
 // stub implementations for the read paths used by tests.
 type backendWrapper struct {
+	*fakeBFFBackend
 	inner interface {
 		server.JobMutationClient
 		server.JobValidator
