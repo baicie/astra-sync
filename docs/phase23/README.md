@@ -2,7 +2,12 @@
 
 ## Status
 
-**In Progress.** — see Slices below.
+**Complete.** Phase 23 closes the emission sub-slice 43.3.5:
+wires the controller reconcile-loop's durable commit point to the
+controller metrics Recorder and establishes the K8s-label-based
+tenant derivation contract for SyncJob resources. The release cut
+is recorded in ADR-067. All slices (49.0–49.4) are landed; the
+Phase 23 acceptance criteria are fully satisfied.
 
 ## Theme
 
@@ -39,9 +44,9 @@ tenant derivation contract for SyncJob resources.
 - [x] Tests cover happy + missing label + non-canonical tenant + `_platform` self-scope
 - [x] `go vet ./control-plane/controller/...` exits 0
 - [x] `go test ./control-plane/controller/...` exits 0
-- [ ] `python scripts/check-changelog.py` exits 0
-- [ ] `python scripts/release-dry-run.py` exits 0
-- [ ] CHANGELOG `[Unreleased]` contains Phase 23 entry
+- [x] `python scripts/check-changelog.py` exits 0
+- [x] `python scripts/release-dry-run.py` exits 0
+- [x] CHANGELOG `[Unreleased]` contains Phase 23 entry
 
 ## Non-Goals (Phase 23+)
 

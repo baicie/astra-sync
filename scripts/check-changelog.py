@@ -133,9 +133,10 @@ def main(argv: list[str] | None = None) -> int:
         # under [v0.2.0]; Phases 13-16 ship under [v0.3.0] per
         # ADR-057; Phase 17 ships under [v0.4.0] per
         # ADR-059; Phase 18 and Phase 19 ship under [v0.5.0] per
-        # ADR-062; Phase 21 ships under [v0.6.0] per
-        # ADR-064). They are exempt unless --strict is set.
-        if not args.strict and number <= 21:
+        # ADR-062; Phase 21 ships under [v0.6.0] per ADR-064;
+        # Phase 22 and Phase 23 ship under [v0.7.0] per ADR-067).
+        # They are exempt unless --strict is set.
+        if not args.strict and number <= 23:
             continue
         failures.append(
             f"Phase {number} ({readme.relative_to(REPO_ROOT)}) is **Complete** "

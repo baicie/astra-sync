@@ -70,8 +70,9 @@ This directory contains the Architecture Decision Records (ADRs) for AstraSync.
 | [ADR-062](adr-062-v0.5.0-release-cut.md) | v0.5.0 Release Cut (Phase 18 Scheduler + Phase 19 Connection-Test Observability) | Accepted | 2026-09-08 |
 | [ADR-063](adr-063-phase21-freetext-replication-recorder-migrate.md) | Phase 21 FreeText Helper + Replication Recorder Migrate (Slice 46) | Accepted | 2026-09-08 |
 | [ADR-064](adr-064-v0.6.0-release-cut.md) | v0.6.0 Release Cut (Phase 21 FreeText + Replication Recorder Migrate) | Accepted | 2026-09-08 |
-| [ADR-065](adr-065-phase22-auth-session-revoke-emission.md) | Phase 22 Emission Sub-Slice 43.2.5 — auth_session_revoke_total via admin CLI | Proposed | — |
-| [ADR-066](adr-066-phase23-controller-reconcile-emission.md) | Phase 23 Controller Emission Sub-Slice 43.3.5 — controller_job_state_total via reconcile boundary | Proposed | — |
+| [ADR-065](adr-065-phase22-auth-session-revoke-emission.md) | Phase 22 Emission Sub-Slice 43.2.5 — auth_session_revoke_total via admin CLI | Accepted | 2026-09-08 |
+| [ADR-066](adr-066-phase23-controller-reconcile-emission.md) | Phase 23 Controller Emission Sub-Slice 43.3.5 — controller_job_state_total via reconcile boundary | Accepted | 2026-09-08 |
+| [ADR-067](adr-067-v0.7.0-release-cut.md) | v0.7.0 Release Cut (Phase 22 Auth Session Revoke + Phase 23 Controller Reconcile Emission) | Accepted | 2026-09-08 |
 
 ## Template
 

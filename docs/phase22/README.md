@@ -2,7 +2,12 @@
 
 ## Status
 
-**In Progress.** — see Slices below.
+**Complete.** Phase 22 closes the emission sub-slice 43.2.5:
+wires the admin CLI `revoke-session` success boundary to the
+authmetrics Recorder and establishes the log-dump emission pattern
+for one-shot CLI tools. The release cut is recorded in ADR-067.
+All slices (48.0–48.3) are landed; the Phase 22 acceptance
+criteria are fully satisfied.
 
 ## Theme
 
@@ -35,10 +40,10 @@ for one-shot CLI tools.
 - [x] `TestDumpMetricsIsNoopForNonMetricOperations` passes
 - [x] `go vet ./control-plane/auth/...` exits 0
 - [x] `go test ./control-plane/auth/...` exits 0
-- [ ] `python scripts/check-changelog.py` exits 0
-- [ ] `python scripts/release-dry-run.py` exits 0
-- [ ] `docs/observability/metrics-catalog.md` `auth_session_revoke_total` row updated
-- [ ] CHANGELOG `[Unreleased]` contains Phase 22 entry
+- [x] `python scripts/check-changelog.py` exits 0
+- [x] `python scripts/release-dry-run.py` exits 0
+- [x] `docs/observability/metrics-catalog.md` `auth_session_revoke_total` row updated
+- [x] CHANGELOG `[Unreleased]` contains Phase 22 entry
 
 ## Non-Goals (Phase 22+)
 
