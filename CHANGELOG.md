@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Phase 42 (ADR-092): derive `setup-envtest` and Kubernetes envtest binary
+  versions from `control-plane/controller/go.mod` instead of hard-coding them
+  in the integration workflow. The resolver maps Kubernetes module
+  `v0.<minor>` releases to the `1.<minor>.x` envtest selector and has parser
+  plus workflow regression tests.
+
 - Phase 41 (ADR-091): enforce epoch monotonicity at the Job repository update
   boundary. Memory and PostgreSQL repositories now reject stale writers that
   present the current version with an older epoch. PostgreSQL applies the

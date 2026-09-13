@@ -187,8 +187,8 @@ the module's source, `go.mod`, and `go.sum`.
    epoch enforcement and stale-writer regression tests.
 3. **Controller metrics:** completed in Phase 39 with
    `manager_metrics_integration_test.go`.
-4. **Version automation:** keep `setup-envtest` and Kubernetes binaries aligned
-   with `control-plane/controller/go.mod`.
+4. **Version automation:** completed in Phase 42 with
+   `scripts/envtest-versions.py`.
 5. **Tenant-label admission:** completed in Phase 37 with the
    ValidatingAdmissionPolicy selected by ADR-087.
 
