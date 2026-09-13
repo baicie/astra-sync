@@ -16,9 +16,36 @@ public record BatchTask(
         AdaptiveBatchPolicy batchPolicy,
         SpillPolicy spillPolicy,
         String jobId,
-        String tenantId) {
+        String tenantId,
+        String requestId) {
     public static final String UNKNOWN_JOB_ID = "_unknown";
     public static final String UNKNOWN_TENANT_ID = "_unknown";
+    public static final String UNKNOWN_REQUEST_ID = "_unknown";
+
+    public BatchTask(
+            SourceSplit split,
+            BatchSource source,
+            BatchSink sink,
+            int maxBatchRecords,
+            int maxInFlightBatches,
+            boolean exactlyOnce,
+            AdaptiveBatchPolicy batchPolicy,
+            SpillPolicy spillPolicy,
+            String jobId,
+            String tenantId) {
+        this(
+                split,
+                source,
+                sink,
+                maxBatchRecords,
+                maxInFlightBatches,
+                exactlyOnce,
+                batchPolicy,
+                spillPolicy,
+                jobId,
+                tenantId,
+                UNKNOWN_REQUEST_ID);
+    }
 
     public BatchTask(
             SourceSplit split,
@@ -39,7 +66,8 @@ public record BatchTask(
                 batchPolicy,
                 spillPolicy,
                 UNKNOWN_JOB_ID,
-                UNKNOWN_TENANT_ID);
+                UNKNOWN_TENANT_ID,
+                UNKNOWN_REQUEST_ID);
     }
 
     public BatchTask(
@@ -101,6 +129,7 @@ public record BatchTask(
         }
         jobId = normalizeIdentity(jobId, UNKNOWN_JOB_ID);
         tenantId = normalizeIdentity(tenantId, UNKNOWN_TENANT_ID);
+        requestId = normalizeIdentity(requestId, UNKNOWN_REQUEST_ID);
     }
 
     public String taskId() {
@@ -109,6 +138,11 @@ public record BatchTask(
 
     /** Returns a copy with the trusted execution identity applied without changing task resources. */
     public BatchTask withIdentity(String jobId, String tenantId) {
+        return withIdentity(jobId, tenantId, UNKNOWN_REQUEST_ID);
+    }
+
+    /** Returns a copy with the trusted execution and request identity applied. */
+    public BatchTask withIdentity(String jobId, String tenantId, String requestId) {
         return new BatchTask(
                 split,
                 source,
@@ -119,7 +153,8 @@ public record BatchTask(
                 batchPolicy,
                 spillPolicy,
                 jobId,
-                tenantId);
+                tenantId,
+                requestId);
     }
 
     private static String normalizeIdentity(String value, String fallback) {

@@ -123,6 +123,7 @@ class InProcessBatchWorkerTest {
     void emitsTaskLogsWithTrustedIdentity() {
         String jobId = UUID.randomUUID().toString();
         String tenantId = UUID.randomUUID().toString();
+        String requestId = UUID.randomUUID().toString();
         Logger logger = (Logger) LoggerFactory.getLogger(InProcessBatchWorker.class);
         LoggerContext context = (LoggerContext) LoggerFactory.getILoggerFactory();
         ListAppender<ILoggingEvent> appender = new ListAppender<>();
@@ -134,7 +135,8 @@ class InProcessBatchWorkerTest {
 
         try {
             new InProcessBatchWorker("worker-a")
-                    .execute(new BatchTask(split("split-1"), source, sink, 1, 1).withIdentity(jobId, tenantId));
+                    .execute(new BatchTask(split("split-1"), source, sink, 1, 1)
+                            .withIdentity(jobId, tenantId, requestId));
         } finally {
             logger.detachAppender(appender);
         }
@@ -144,6 +146,37 @@ class InProcessBatchWorkerTest {
             assertThat(event.getMDCPropertyMap()).containsEntry("tenant_id", tenantId);
             assertThat(event.getMDCPropertyMap()).containsEntry("job_id", jobId);
             assertThat(event.getMDCPropertyMap()).containsEntry("worker_id", "worker-a");
+            assertThat(event.getMDCPropertyMap()).containsEntry("request_id", requestId);
+        });
+    }
+
+    @Test
+    void emitsRequestIdOnFailureLogs() {
+        String jobId = UUID.randomUUID().toString();
+        String tenantId = UUID.randomUUID().toString();
+        String requestId = UUID.randomUUID().toString();
+        Logger logger = (Logger) LoggerFactory.getLogger(InProcessBatchWorker.class);
+        LoggerContext context = (LoggerContext) LoggerFactory.getILoggerFactory();
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.setContext(context);
+        appender.start();
+        logger.addAppender(appender);
+        LifecycleSource source = new LifecycleSource(RowBatch.last(List.of(Row.of("id", 1))));
+        LifecycleSink sink = new LifecycleSink(new ArrayList<>());
+        sink.writeFailure = new IllegalStateException("sink failed");
+
+        try {
+            assertThatThrownBy(() -> new InProcessBatchWorker("worker-a")
+                            .execute(new BatchTask(split("split-1"), source, sink, 1, 1)
+                                    .withIdentity(jobId, tenantId, requestId)))
+                    .isInstanceOf(BatchTaskException.class);
+        } finally {
+            logger.detachAppender(appender);
+        }
+
+        assertThat(appender.list).anySatisfy(event -> {
+            assertThat(event.getMDCPropertyMap()).containsEntry("outcome", "failure");
+            assertThat(event.getMDCPropertyMap()).containsEntry("request_id", requestId);
         });
     }
 

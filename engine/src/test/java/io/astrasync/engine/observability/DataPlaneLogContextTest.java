@@ -11,7 +11,8 @@ class DataPlaneLogContextTest {
         MDC.put("tenant_id", "outer-tenant");
         try {
             try (DataPlaneLogContext ignored =
-                    DataPlaneLogContext.open("inner-tenant", "job-1", 4L, "worker-a", "read", "success")) {
+                    DataPlaneLogContext.open("request-1", "inner-tenant", "job-1", 4L, "worker-a", "read", "success")) {
+                assertThat(MDC.get("request_id")).isEqualTo("request-1");
                 assertThat(MDC.get("tenant_id")).isEqualTo("inner-tenant");
                 assertThat(MDC.get("job_id")).isEqualTo("job-1");
                 assertThat(MDC.get("epoch")).isEqualTo("4");
@@ -21,6 +22,7 @@ class DataPlaneLogContextTest {
             }
 
             assertThat(MDC.get("tenant_id")).isEqualTo("outer-tenant");
+            assertThat(MDC.get("request_id")).isNull();
             assertThat(MDC.get("job_id")).isNull();
             assertThat(MDC.get("epoch")).isNull();
             assertThat(MDC.get("worker_id")).isNull();
@@ -41,6 +43,16 @@ class DataPlaneLogContextTest {
 
             assertThat(MDC.get("stage")).isEqualTo("read");
             assertThat(MDC.get("outcome")).isNull();
+        } finally {
+            MDC.clear();
+        }
+    }
+
+    @Test
+    void omitsUnknownRequestId() {
+        try (DataPlaneLogContext ignored =
+                DataPlaneLogContext.open("_unknown", "tenant-1", "job-1", 1L, null, null, null)) {
+            assertThat(MDC.get("request_id")).isNull();
         } finally {
             MDC.clear();
         }

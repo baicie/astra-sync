@@ -37,6 +37,7 @@ final class WorkerProtocolMapper {
                 .setSpill(toSpill(task.spillPolicy()))
                 .setJobId(task.jobId())
                 .setTenantId(task.tenantId())
+                .setRequestId(task.requestId())
                 .build();
         return WorkerRequest.newBuilder()
                 .setProtocolVersion(WorkerProtocol.CURRENT_VERSION)
@@ -74,6 +75,7 @@ final class WorkerProtocolMapper {
                 .setAdaptiveBatch(toAdaptiveBatch(task.batchPolicy()))
                 .setSpill(toSpill(task.spillPolicy()))
                 .setTenantId(task.tenantId())
+                .setRequestId(task.requestId())
                 .build();
         return WorkerRequest.newBuilder()
                 .setProtocolVersion(WorkerProtocol.CHECKPOINT_VERSION)

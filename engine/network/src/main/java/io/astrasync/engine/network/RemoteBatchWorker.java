@@ -39,19 +39,19 @@ public final class RemoteBatchWorker implements BatchWorker, CheckpointBatchWork
     @Override
     public WorkerResult execute(BatchTask task) {
         BatchTask checked = Objects.requireNonNull(task, "task must not be null");
-        try (DataPlaneLogContext ignored =
-                DataPlaneLogContext.open(checked.tenantId(), checked.jobId(), null, workerId, null, null)) {
+        try (DataPlaneLogContext ignored = DataPlaneLogContext.open(
+                checked.requestId(), checked.tenantId(), checked.jobId(), null, workerId, null, null)) {
             LOG.info("remote worker task started");
             try {
                 WorkerResult result = executeWithPermit(checked);
                 try (DataPlaneLogContext outcome = DataPlaneLogContext.open(
-                        checked.tenantId(), checked.jobId(), null, workerId, null, "success")) {
+                        checked.requestId(), checked.tenantId(), checked.jobId(), null, workerId, null, "success")) {
                     LOG.info("remote worker task completed");
                 }
                 return result;
             } catch (RuntimeException exception) {
                 try (DataPlaneLogContext outcome = DataPlaneLogContext.open(
-                        checked.tenantId(), checked.jobId(), null, workerId, null, "failure")) {
+                        checked.requestId(), checked.tenantId(), checked.jobId(), null, workerId, null, "failure")) {
                     LOG.warn(
                             "remote worker task failed with {}",
                             exception.getClass().getSimpleName());
@@ -81,6 +81,7 @@ public final class RemoteBatchWorker implements BatchWorker, CheckpointBatchWork
         CheckpointExecutionContext checkedContext = Objects.requireNonNull(context, "context must not be null");
         BatchTask checkedTask = Objects.requireNonNull(task, "task must not be null");
         try (DataPlaneLogContext ignored = DataPlaneLogContext.open(
+                checkedTask.requestId(),
                 checkedTask.tenantId(),
                 checkedContext.jobId(),
                 checkedContext.executionEpoch(),
@@ -91,6 +92,7 @@ public final class RemoteBatchWorker implements BatchWorker, CheckpointBatchWork
             try {
                 WorkerResult result = checkpointClient.execute(workerId, checkedContext, checkedTask, progressListener);
                 try (DataPlaneLogContext outcome = DataPlaneLogContext.open(
+                        checkedTask.requestId(),
                         checkedTask.tenantId(),
                         checkedContext.jobId(),
                         checkedContext.executionEpoch(),
@@ -102,6 +104,7 @@ public final class RemoteBatchWorker implements BatchWorker, CheckpointBatchWork
                 return result;
             } catch (RuntimeException exception) {
                 try (DataPlaneLogContext outcome = DataPlaneLogContext.open(
+                        checkedTask.requestId(),
                         checkedTask.tenantId(),
                         checkedContext.jobId(),
                         checkedContext.executionEpoch(),

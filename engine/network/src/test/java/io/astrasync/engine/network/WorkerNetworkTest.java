@@ -45,6 +45,7 @@ class WorkerNetworkTest {
     private static final Duration TIMEOUT = Duration.ofSeconds(5);
     private static final String JOB_ID = "3f36d9c6-77a2-4e83-8c7d-dc59b9b94a54";
     private static final String TENANT_ID = "4f36d9c6-77a2-4e83-8c7d-dc59b9b94a55";
+    private static final String REQUEST_ID = "5f36d9c6-77a2-4e83-8c7d-dc59b9b94a56";
 
     @Test
     void executesTaskThroughVersionedRemoteWorkerAndMaterializesOnServer() {
@@ -53,7 +54,7 @@ class WorkerNetworkTest {
             server.start();
             RemoteBatchWorker remote = remote(server, 2);
 
-            WorkerResult result = remote.execute(task("split-1").withIdentity(JOB_ID, TENANT_ID));
+            WorkerResult result = remote.execute(task("split-1").withIdentity(JOB_ID, TENANT_ID, REQUEST_ID));
 
             assertThat(result).isEqualTo(new WorkerResult("worker-a", "split-1", new SyncResult(3, 3, 2, 2, 7)));
             assertThat(worker.tasks).singleElement().satisfies(materialized -> {
@@ -62,6 +63,7 @@ class WorkerNetworkTest {
                 assertThat(materialized.maxInFlightBatches()).isEqualTo(2);
                 assertThat(materialized.jobId()).isEqualTo(JOB_ID);
                 assertThat(materialized.tenantId()).isEqualTo(TENANT_ID);
+                assertThat(materialized.requestId()).isEqualTo(REQUEST_ID);
             });
         }
     }
@@ -78,7 +80,7 @@ class WorkerNetworkTest {
 
         try (WorkerServer server = server(worker, 1, 1, 4)) {
             server.start();
-            remote(server, 2).execute(task("split-1").withIdentity(JOB_ID, TENANT_ID));
+            remote(server, 2).execute(task("split-1").withIdentity(JOB_ID, TENANT_ID, REQUEST_ID));
         } finally {
             logger.detachAppender(appender);
         }
@@ -88,6 +90,7 @@ class WorkerNetworkTest {
             assertThat(event.getMDCPropertyMap()).containsEntry("tenant_id", TENANT_ID);
             assertThat(event.getMDCPropertyMap()).containsEntry("job_id", JOB_ID);
             assertThat(event.getMDCPropertyMap()).containsEntry("worker_id", "worker-a");
+            assertThat(event.getMDCPropertyMap()).containsEntry("request_id", REQUEST_ID);
         });
     }
 
@@ -186,6 +189,7 @@ class WorkerNetworkTest {
                     assertThat(materialized.split()).isEqualTo(split);
                     assertThat(materialized.jobId()).isEqualTo(BatchTask.UNKNOWN_JOB_ID);
                     assertThat(materialized.tenantId()).isEqualTo(BatchTask.UNKNOWN_TENANT_ID);
+                    assertThat(materialized.requestId()).isEqualTo(BatchTask.UNKNOWN_REQUEST_ID);
                 });
             }
         }
@@ -222,6 +226,7 @@ class WorkerNetworkTest {
         assertThat(appender.list).anySatisfy(event -> {
             assertThat(event.getLevel()).isEqualTo(ch.qos.logback.classic.Level.WARN);
             assertThat(event.getMDCPropertyMap()).containsEntry("worker_id", "worker-a");
+            assertThat(event.getMDCPropertyMap()).doesNotContainKey("request_id");
         });
     }
 
@@ -253,6 +258,7 @@ class WorkerNetworkTest {
                             .setMaxInFlightBatches(2)
                             .setSplitFingerprint("fingerprint")
                             .setTenantId(TENANT_ID)
+                            .setRequestId(REQUEST_ID)
                             .build())
                     .build();
 
@@ -270,6 +276,7 @@ class WorkerNetworkTest {
             assertThat(event.getMDCPropertyMap()).containsEntry("worker_id", "worker-a");
             assertThat(event.getMDCPropertyMap()).containsEntry("job_id", "orders");
             assertThat(event.getMDCPropertyMap()).containsEntry("tenant_id", TENANT_ID);
+            assertThat(event.getMDCPropertyMap()).containsEntry("request_id", REQUEST_ID);
         });
     }
 

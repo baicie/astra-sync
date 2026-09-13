@@ -217,7 +217,13 @@ public final class WorkerServer implements AutoCloseable {
             int protocolVersion, ExecuteCheckpointTaskRequest request, InputStream input, OutputStream output)
             throws IOException {
         try (DataPlaneLogContext ignored = DataPlaneLogContext.open(
-                request.getTenantId(), request.getJobId(), request.getExecutionEpoch(), workerId, "checkpoint", null)) {
+                request.getRequestId(),
+                request.getTenantId(),
+                request.getJobId(),
+                request.getExecutionEpoch(),
+                workerId,
+                "checkpoint",
+                null)) {
             executeCheckpointWithContext(protocolVersion, request, input, output);
         }
     }
@@ -314,7 +320,8 @@ public final class WorkerServer implements AutoCloseable {
             SourceSplit split = WorkerProtocolMapper.toSplit(request);
             BatchTask materializedTask =
                     Objects.requireNonNull(taskFactory.create(split, context), "task factory returned null");
-            BatchTask task = materializedTask.withIdentity(context.jobId(), request.getTenantId());
+            BatchTask task =
+                    materializedTask.withIdentity(context.jobId(), request.getTenantId(), request.getRequestId());
             if (!split.equals(task.split())
                     || !request.getTaskId().equals(task.taskId())
                     || request.getMaxBatchRecords() != task.maxBatchRecords()
@@ -387,8 +394,8 @@ public final class WorkerServer implements AutoCloseable {
     }
 
     private WorkerResponse execute(ExecuteTaskRequest request) {
-        try (DataPlaneLogContext ignored =
-                DataPlaneLogContext.open(request.getTenantId(), request.getJobId(), null, workerId, null, null)) {
+        try (DataPlaneLogContext ignored = DataPlaneLogContext.open(
+                request.getRequestId(), request.getTenantId(), request.getJobId(), null, workerId, null, null)) {
             return executeWithContext(request);
         }
     }
@@ -438,7 +445,8 @@ public final class WorkerServer implements AutoCloseable {
         try {
             BatchTask materializedTask =
                     Objects.requireNonNull(taskFactory.create(split), "task factory returned null");
-            BatchTask task = materializedTask.withIdentity(request.getJobId(), request.getTenantId());
+            BatchTask task =
+                    materializedTask.withIdentity(request.getJobId(), request.getTenantId(), request.getRequestId());
             if (!split.equals(task.split())
                     || !request.getTaskId().equals(task.taskId())
                     || request.getMaxBatchRecords() != task.maxBatchRecords()

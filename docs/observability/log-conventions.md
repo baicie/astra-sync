@@ -55,13 +55,12 @@ and `7556e0a` (F1 and F2).
 ## Structured fields
 
 The table below is the stable field contract. A call site emits a field
-only when that context is available; the current closeout guarantees
-`component` at each migrated entry point but does not yet propagate all
-request-, tenant-, job-, epoch-, or stage-scoped fields.
+only when that context is available. Missing or unknown values are omitted
+instead of being written as decorative placeholders.
 
 | Field | Type | Description |
 |---|---|---|
-| `request_id` | UUID | The request ID assigned by the API Server or the data plane. Joins the record to the audit table and to a Prometheus exemplar. |
+| `request_id` | UUID | The correlation ID assigned by the request boundary or generated for one data-plane execution. Joins records that carry the same ID; audit and exemplar joins require those paths to propagate it. |
 | `tenant_id` | UUID | Tenant UUID. Dropped on logs that are not tenant-scoped. |
 | `job_id` | UUID | Job UUID. Dropped on logs that are not job-scoped. |
 | `worker_id` | string | Bounded Worker identifier. Used by remote dispatch and Worker task logs for metrics/log correlation. |
@@ -72,8 +71,9 @@ request-, tenant-, job-, epoch-, or stage-scoped fields.
 
 Structured fields are emitted in addition to the message. The deployment
 log store (Loki, Elasticsearch, etc.) can ingest them as labels or columns.
-Direct `request_id` correlation becomes available only after the relevant
-request interceptors and business call sites attach that field.
+Phase 55 (ADR-102) propagates one Coordinator execution `request_id` through
+normal and checkpoint Worker requests. Old requests omit the field; OpenMetrics
+exemplar emission remains separate work.
 
 The fields are stable. A change to a field name or type is a
 breaking change and requires a corresponding update to the
@@ -210,9 +210,10 @@ startup, shutdown, and error records in `api-server`, `console`,
 loggers with `component`. Phase 50 (ADR-100) adds scoped `tenant_id`,
 `job_id`, `epoch`, `stage`, and `outcome` context to Coordinator and Worker
 logs. Phase 52 (ADR-101) adds `worker_id` to remote dispatch and Worker task
-logs. Request-scoped `request_id` propagation and exemplar correlation remain
-follow-up instrumentation; logger tests only verify that supplied structured
-fields are preserved.
+logs. Phase 55 (ADR-102) adds `request_id` to Coordinator execution, remote
+dispatch, Worker task, stage, outcome, and checkpoint logs. OpenMetrics
+exemplar emission remains follow-up instrumentation; logger tests only verify
+that supplied structured fields are preserved.
 
 The implementation commits are recorded in
 [`changelog.md`](changelog.md).

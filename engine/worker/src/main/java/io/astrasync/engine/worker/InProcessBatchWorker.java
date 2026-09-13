@@ -62,19 +62,19 @@ public final class InProcessBatchWorker implements BatchWorker, CheckpointBatchW
     @Override
     public WorkerResult execute(BatchTask task) {
         BatchTask checked = Objects.requireNonNull(task, "task must not be null");
-        try (DataPlaneLogContext ignored =
-                DataPlaneLogContext.open(checked.tenantId(), checked.jobId(), null, workerId, null, null)) {
+        try (DataPlaneLogContext ignored = DataPlaneLogContext.open(
+                checked.requestId(), checked.tenantId(), checked.jobId(), null, workerId, null, null)) {
             LOG.info("worker batch task started");
             try {
                 WorkerResult result = executeTask(checked);
                 try (DataPlaneLogContext outcome = DataPlaneLogContext.open(
-                        checked.tenantId(), checked.jobId(), null, workerId, null, "success")) {
+                        checked.requestId(), checked.tenantId(), checked.jobId(), null, workerId, null, "success")) {
                     LOG.info("worker batch task completed");
                 }
                 return result;
             } catch (RuntimeException exception) {
                 try (DataPlaneLogContext outcome = DataPlaneLogContext.open(
-                        checked.tenantId(), checked.jobId(), null, workerId, null, "failure")) {
+                        checked.requestId(), checked.tenantId(), checked.jobId(), null, workerId, null, "failure")) {
                     LOG.warn(
                             "worker batch task failed with {}",
                             exception.getClass().getSimpleName());
@@ -94,14 +94,14 @@ public final class InProcessBatchWorker implements BatchWorker, CheckpointBatchW
                 new AdaptiveBatchController(task.batchPolicy(), task.maxBatchRecords());
         ExecutorService executor = Executors.newFixedThreadPool(2, new WorkerThreadFactory(workerId, task.taskId()));
         Future<ThreadOutcome> sourceFuture = executor.submit(() -> {
-            try (DataPlaneLogContext ignored =
-                    DataPlaneLogContext.open(task.tenantId(), task.jobId(), null, workerId, "read", null)) {
+            try (DataPlaneLogContext ignored = DataPlaneLogContext.open(
+                    task.requestId(), task.tenantId(), task.jobId(), null, workerId, "read", null)) {
                 return produce(task, exchange, batchController, startedNanos);
             }
         });
         Future<ThreadOutcome> sinkFuture = executor.submit(() -> {
-            try (DataPlaneLogContext ignored =
-                    DataPlaneLogContext.open(task.tenantId(), task.jobId(), null, workerId, "write", null)) {
+            try (DataPlaneLogContext ignored = DataPlaneLogContext.open(
+                    task.requestId(), task.tenantId(), task.jobId(), null, workerId, "write", null)) {
                 return consume(task, exchange, batchController, startedNanos);
             }
         });
@@ -140,6 +140,7 @@ public final class InProcessBatchWorker implements BatchWorker, CheckpointBatchW
         BatchTask checkedTask = Objects.requireNonNull(task, "task must not be null");
         CheckpointProgressListener checkedListener = CheckpointProgressListener.require(progressListener);
         try (DataPlaneLogContext ignored = DataPlaneLogContext.open(
+                checkedTask.requestId(),
                 checkedTask.tenantId(),
                 checkedContext.jobId(),
                 checkedContext.executionEpoch(),
@@ -150,6 +151,7 @@ public final class InProcessBatchWorker implements BatchWorker, CheckpointBatchW
             try {
                 WorkerResult result = executeCheckpointTask(checkedContext, checkedTask, checkedListener);
                 try (DataPlaneLogContext outcome = DataPlaneLogContext.open(
+                        checkedTask.requestId(),
                         checkedTask.tenantId(),
                         checkedContext.jobId(),
                         checkedContext.executionEpoch(),
@@ -161,6 +163,7 @@ public final class InProcessBatchWorker implements BatchWorker, CheckpointBatchW
                 return result;
             } catch (RuntimeException exception) {
                 try (DataPlaneLogContext outcome = DataPlaneLogContext.open(
+                        checkedTask.requestId(),
                         checkedTask.tenantId(),
                         checkedContext.jobId(),
                         checkedContext.executionEpoch(),

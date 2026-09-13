@@ -30,6 +30,7 @@ class RuntimeContractsTest {
         assertThat(task.maxInFlightBatches()).isEqualTo(2);
         assertThat(task.jobId()).isEqualTo(BatchTask.UNKNOWN_JOB_ID);
         assertThat(task.tenantId()).isEqualTo(BatchTask.UNKNOWN_TENANT_ID);
+        assertThat(task.requestId()).isEqualTo(BatchTask.UNKNOWN_REQUEST_ID);
         assertThat(result.workerId()).isEqualTo("worker-1");
         assertThat(result.metrics().writtenCount()).isEqualTo(1);
     }
@@ -40,10 +41,11 @@ class RuntimeContractsTest {
         BatchSink sink = new EmptySink();
         BatchTask original = new BatchTask(split("split-1"), source, sink, 4, 2);
 
-        BatchTask identified = original.withIdentity("job-1", "tenant-1");
+        BatchTask identified = original.withIdentity("job-1", "tenant-1", "request-1");
 
         assertThat(identified.jobId()).isEqualTo("job-1");
         assertThat(identified.tenantId()).isEqualTo("tenant-1");
+        assertThat(identified.requestId()).isEqualTo("request-1");
         assertThat(identified.source()).isSameAs(source);
         assertThat(identified.sink()).isSameAs(sink);
         assertThat(identified.split()).isEqualTo(original.split());

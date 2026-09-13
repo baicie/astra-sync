@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Phase 55 (ADR-102): propagate one Coordinator execution `request_id` through
+  normal and checkpoint Worker requests. Coordinator, remote dispatch, Worker
+  task, stage, outcome, and checkpoint logs now share the ID; old requests omit
+  the field and no OpenMetrics exemplar is emitted.
+
 - Phase 54: add structured checkpoint admission logs. Invalid requests, fenced
   epochs, duplicate tasks, capacity rejection, cancellation, and failures now
   carry bounded Worker/job/tenant/epoch context.

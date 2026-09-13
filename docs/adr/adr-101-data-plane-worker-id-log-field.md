@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Accepted — followed by ADR-102 for request identity.
 
 ## Context
 
@@ -37,7 +37,8 @@ options, credentials, or other user input.
   values.
 - Coordinator-side dispatch and Worker-side execution use the same Worker
   identifier.
-- No protobuf, metric family, deployment, or dependency change is required.
+- No protobuf, metric family, deployment, or dependency change is required for
+  `worker_id`. ADR-102 later appends a separate `request_id` protocol field.
 
 ## Rollback
 

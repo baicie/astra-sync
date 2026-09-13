@@ -35,6 +35,11 @@ message ExecuteTaskRequest {
   // Empty values are accepted from older Coordinators and normalize to the
   // bounded unknown identity at the Worker metric boundary.
   string tenant_id = 9;
+  // Correlation identifier for one Coordinator execution.
+  //
+  // Empty values are accepted from older Coordinators and omitted from
+  // structured logs until a trusted request identity is supplied.
+  string request_id = 10;
 }
 
 message CancelTaskRequest {
@@ -62,6 +67,11 @@ message ExecuteCheckpointTaskRequest {
   // Empty values are accepted from older Coordinators and normalize to the
   // bounded unknown identity at the Worker metric boundary.
   string tenant_id = 14;
+  // Correlation identifier for one Coordinator execution.
+  //
+  // Empty values are accepted from older Coordinators and omitted from
+  // structured logs until a trusted request identity is supplied.
+  string request_id = 15;
 }
 
 message AdaptiveBatchSettings {
