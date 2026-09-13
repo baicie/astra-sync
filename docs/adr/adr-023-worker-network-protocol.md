@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Accepted — extended by ADR-098 with optional task identity attribution.
 
 ## Context
 
@@ -29,6 +29,10 @@ Worker cannot accumulate unlimited remote task state.
    connector resources, preserving resource ownership on the Worker.
 5. Cancellation is explicit. The server tracks active task futures and calls `Future.cancel(true)`
    for a matching cancel request. No retry or replay is performed after a transport or task failure.
+
+ADR-098 appends optional `job_id` and `tenant_id` fields to the execute
+messages for metric attribution. The additions do not change the protocol
+versions or task dispatch semantics.
 
 ## Consequences
 

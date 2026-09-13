@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Phase 48 (ADR-098): propagate trusted `job_id` and `tenant_id` through the
+  Worker protocol and Java data-plane metrics. The fields are append-only and
+  optional, old requests fall back to `_unknown`, and checkpoint requests now
+  carry tenant identity alongside their existing job identity.
+
 - Phase 47 (ADR-097): resolve data-plane OpenMetrics negotiation through
   exact, type-wildcard, and global-wildcard media range precedence. Exact
   `Accept` ranges outrank `type/*`, `type/*` outranks `*/*`, and OpenMetrics

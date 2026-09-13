@@ -14,11 +14,15 @@ import io.astrasync.engine.runtime.BatchTask;
 import io.astrasync.engine.runtime.BatchTaskFactory;
 import io.astrasync.engine.runtime.BatchWorker;
 import io.astrasync.engine.runtime.WorkerResult;
+import io.astrasync.protocol.worker.ExecuteTaskRequest;
+import io.astrasync.protocol.worker.SplitDescriptor;
 import io.astrasync.protocol.worker.WorkerRequest;
+import io.astrasync.protocol.worker.WorkerResponse;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
+import java.net.Socket;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -33,6 +37,8 @@ import org.junit.jupiter.api.Test;
 
 class WorkerNetworkTest {
     private static final Duration TIMEOUT = Duration.ofSeconds(5);
+    private static final String JOB_ID = "3f36d9c6-77a2-4e83-8c7d-dc59b9b94a54";
+    private static final String TENANT_ID = "4f36d9c6-77a2-4e83-8c7d-dc59b9b94a55";
 
     @Test
     void executesTaskThroughVersionedRemoteWorkerAndMaterializesOnServer() {
@@ -41,13 +47,15 @@ class WorkerNetworkTest {
             server.start();
             RemoteBatchWorker remote = remote(server, 2);
 
-            WorkerResult result = remote.execute(task("split-1"));
+            WorkerResult result = remote.execute(task("split-1").withIdentity(JOB_ID, TENANT_ID));
 
             assertThat(result).isEqualTo(new WorkerResult("worker-a", "split-1", new SyncResult(3, 3, 2, 2, 7)));
             assertThat(worker.tasks).singleElement().satisfies(materialized -> {
                 assertThat(materialized.split()).isEqualTo(split("split-1"));
                 assertThat(materialized.maxBatchRecords()).isEqualTo(3);
                 assertThat(materialized.maxInFlightBatches()).isEqualTo(2);
+                assertThat(materialized.jobId()).isEqualTo(JOB_ID);
+                assertThat(materialized.tenantId()).isEqualTo(TENANT_ID);
             });
         }
     }
@@ -113,6 +121,42 @@ class WorkerNetworkTest {
                     .isInstanceOf(NetworkWorkerException.class)
                     .hasMessageContaining("task factory changed the requested split");
             assertThat(worker.tasks).isEmpty();
+        }
+    }
+
+    @Test
+    void acceptsOlderRequestsWithoutIdentityFields() throws Exception {
+        RecordingWorker worker = new RecordingWorker("worker-a");
+        try (WorkerServer server = server(worker, 1, 1, 4)) {
+            server.start();
+            SourceSplit split = split("split-1");
+            WorkerRequest request = WorkerRequest.newBuilder()
+                    .setProtocolVersion(WorkerProtocol.CURRENT_VERSION)
+                    .setExecuteTask(ExecuteTaskRequest.newBuilder()
+                            .setWorkerId("worker-a")
+                            .setTaskId("split-1")
+                            .setSplit(SplitDescriptor.newBuilder()
+                                    .setSplitId("split-1")
+                                    .setSourceId("test-source")
+                                    .putStartOffsets("id", "1")
+                                    .build())
+                            .setMaxBatchRecords(3)
+                            .setMaxInFlightBatches(2)
+                            .build())
+                    .build();
+
+            try (Socket socket = new Socket("127.0.0.1", server.port())) {
+                WorkerProtocolCodec.writeRequest(socket.getOutputStream(), request);
+                WorkerResponse response = WorkerProtocolCodec.readResponse(socket.getInputStream());
+
+                assertThat(response.hasTaskResult()).isTrue();
+                assertThat(response.getTaskResult().getSuccess()).isTrue();
+                assertThat(worker.tasks).singleElement().satisfies(materialized -> {
+                    assertThat(materialized.split()).isEqualTo(split);
+                    assertThat(materialized.jobId()).isEqualTo(BatchTask.UNKNOWN_JOB_ID);
+                    assertThat(materialized.tenantId()).isEqualTo(BatchTask.UNKNOWN_TENANT_ID);
+                });
+            }
         }
     }
 

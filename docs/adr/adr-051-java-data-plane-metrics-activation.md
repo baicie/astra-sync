@@ -4,7 +4,8 @@
 
 Accepted (implements Phase 7 Slice 26 follow-up `26.F8`). Read/write stage
 breakdown completed by ADR-094; OpenMetrics negotiation completed by ADR-095
-and refined by ADR-096 and ADR-097.
+and refined by ADR-096 and ADR-097. Worker protocol identity propagation is
+completed by ADR-098.
 
 ## Context
 
@@ -71,9 +72,8 @@ All metric names use the prefixes already locked by
   paths that already wrap a checkpoint or a resumable full-load run.
 - `worker_*` — recorded by `DataPlaneMetrics` from inside
   `InProcessBatchWorker` and `WorkerServer` checkpoint paths. The
-  remote `RemoteBatchWorker` records at the Coordinator side because
-  the Worker protocol message today does not carry a job identity; the
-  Recorder only observes job-scoped series for checkpoint tasks.
+  Worker protocol carries `job_id` and `tenant_id` after ADR-098. Missing
+  or non-canonical values collapse to `_unknown`.
 
 ### First-activation families
 
@@ -92,13 +92,12 @@ The activation implements all seven families reserved by the catalog:
 
 ### Label cardinality and tenant handling
 
-`tenant_id` is fixed to the constant `_unknown` for `26.F8`. The Java
-data plane currently receives no trusted tenant identity in the
-`WorkerProtocol` or in `JobSpec`. Using `_unknown` matches the
-auth/audit catalogue rule that prevents arbitrary caller input from
-becoming a series. ADR-036 governs tenant identifiers in the control
-plane; the Java data plane defers tenant labelling to a follow-up
-slice that wires the trusted tenant UUID through the protocol.
+`tenant_id` is supplied by the trusted Worker request and normalized by the
+metric recorder. Empty values from older clients and non-canonical values
+collapse to `_unknown`. The current Coordinator executable has no trusted
+tenant source in `JobSpec`, so it sends `_unknown` until a separate
+tenant-binding slice supplies one. ADR-036 continues to govern tenant
+identifiers in the control plane.
 
 `job_id` is derived from one of:
 
@@ -107,9 +106,9 @@ slice that wires the trusted tenant UUID through the protocol.
   `WorkerServer.executeCheckpoint`).
 - The `BatchCoordinator.run(jobId, ...)` argument for the resumable
   Coordinator path.
-- The fixed value `_unknown` for the non-checkpoint
-  `BatchCoordinator.run(...)` overloads, which today lack a job
-  identity.
+- The appended `ExecuteTaskRequest.job_id` for the non-checkpoint remote
+  path (ADR-098).
+- `_unknown` when the Coordinator has no trusted job identity.
 
 The recorder normalises a non-canonical-lowercase UUID value to
 `_unknown`, matching the API Server F7 rule.
@@ -183,19 +182,18 @@ semantics.
   and record-count samples. `coordinator_spill_bytes_total` measures only
   encoded payload bytes that were durably written and enqueued. It does not
   count failed writes, filesystem metadata, capacity release, or cleanup.
-- `tenant_id` stays at `_unknown` for the data plane. The follow-up
-  slice that trusts tenant identity in the Worker protocol will update
-  the catalog status, refresh the ADR boundary, and possibly tighten
-  the SPI.
+- The Worker protocol now carries optional `tenant_id` and `job_id`
+  attribution fields. The current Coordinator still supplies `_unknown`
+  tenant until a trusted tenant-binding source is added; the metric recorder
+  rejects non-canonical identifiers.
 - Operators continue to opt in to scrape by exporting
   `METRICS_LISTEN_ADDRESS`; no Helm or Docker change is required for
   the default-disabled contract.
 - `coordinator_spill_bytes_total` is semantically a Coordinator metric but is
   sampled where spill executes: the Worker-local exchange. The Worker process
   exposes it through the existing opt-in `METRICS_LISTEN_ADDRESS` endpoint.
-  Non-checkpoint exchange work has no trusted job identity, so its
-  `tenant_id` and `job_id` labels remain `_unknown` until a protocol-backed
-  identity slice is accepted.
+  Non-checkpoint exchange work uses the appended request identity when the
+  Coordinator supplies it and falls back to `_unknown`.
 - The Java executables do not migrate to SLF4J; the existing CLI
   summaries and liveness output are unchanged. The follow-up slice
   `26.F9` can address that migration independently of metric
@@ -213,11 +211,10 @@ semantics.
   resource surface. Operators must opt in to expose the data-plane
   port so a misconfigured deployment cannot silently publish
   per-tenant batch counts.
-- **Track tenant_id from the Worker protocol.** Deferred. The current
-  protocol carries only the worker id and the split id; introducing a
-  tenant identity requires a protocol version bump that ADR-023
-  governs. F8 keeps `_unknown` and lets `26.F9` carry the protocol
-  change.
+- **Track tenant_id from the Worker protocol.** Implemented by ADR-098 as an
+  append-only protobuf extension. Empty fields preserve compatibility with
+  older Coordinators, and a trusted tenant source remains a separate
+  control-plane concern.
 - **Sample `coordinator_batch_duration_seconds{stage}` per stage.**
   Deferred. The in-process Worker exposes only wall-clock batch
   duration today; per-stage breakdown requires instrumenting the

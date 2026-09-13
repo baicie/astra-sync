@@ -35,6 +35,8 @@ final class WorkerProtocolMapper {
                 .setMaxInFlightBatches(task.maxInFlightBatches())
                 .setAdaptiveBatch(toAdaptiveBatch(task.batchPolicy()))
                 .setSpill(toSpill(task.spillPolicy()))
+                .setJobId(task.jobId())
+                .setTenantId(task.tenantId())
                 .build();
         return WorkerRequest.newBuilder()
                 .setProtocolVersion(WorkerProtocol.CURRENT_VERSION)
@@ -71,6 +73,7 @@ final class WorkerProtocolMapper {
                 .setExactlyOnce(task.exactlyOnce())
                 .setAdaptiveBatch(toAdaptiveBatch(task.batchPolicy()))
                 .setSpill(toSpill(task.spillPolicy()))
+                .setTenantId(task.tenantId())
                 .build();
         return WorkerRequest.newBuilder()
                 .setProtocolVersion(WorkerProtocol.CHECKPOINT_VERSION)

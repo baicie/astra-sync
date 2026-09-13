@@ -29,10 +29,13 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
 class CheckpointNetworkTest {
+    private static final String TENANT_ID = "7f36d9c6-77a2-4e83-8c7d-dc59b9b94a58";
+
     @Test
     void workerBlocksAtEachCommittedBatchUntilCoordinatorAcknowledgesIt() {
         List<CheckpointSource> sources = new ArrayList<>();
         CheckpointSink sink = new CheckpointSink();
+        CheckpointWorker worker = new CheckpointWorker("worker-a");
         BatchTaskFactory factory = new BatchTaskFactory() {
             @Override
             public BatchTask create(SourceSplit split) {
@@ -46,8 +49,7 @@ class CheckpointNetworkTest {
                 return new BatchTask(split, source, sink, 1, 1);
             }
         };
-        try (WorkerServer server =
-                new WorkerServer("worker-a", 0, factory, new CheckpointWorker("worker-a"), 1, 0, 4)) {
+        try (WorkerServer server = new WorkerServer("worker-a", 0, factory, worker, 1, 0, 4)) {
             server.start();
             RemoteBatchWorker remote = new RemoteBatchWorker(
                     "worker-a", new WorkerClient("127.0.0.1", server.port(), Duration.ofSeconds(5)), 1);
@@ -58,7 +60,9 @@ class CheckpointNetworkTest {
             List<Long> sequences = new ArrayList<>();
 
             WorkerResult result = remote.executeCheckpoint(
-                    context, task("split-0"), progress -> sequences.add(progress.checkpointSequence()));
+                    context,
+                    task("split-0").withIdentity("orders", TENANT_ID),
+                    progress -> sequences.add(progress.checkpointSequence()));
 
             assertThat(result.metrics())
                     .isEqualTo(new SyncResult(2, 2, 2, 1, result.metrics().elapsedNanos()));
@@ -66,6 +70,8 @@ class CheckpointNetworkTest {
             assertThat(sink.values).containsExactly("1", "2");
             assertThat(sources).singleElement().satisfies(source -> assertThat(source.readCalls)
                     .isEqualTo(2));
+            assertThat(worker.lastTask.jobId()).isEqualTo("orders");
+            assertThat(worker.lastTask.tenantId()).isEqualTo(TENANT_ID);
         }
     }
 
@@ -186,6 +192,7 @@ class CheckpointNetworkTest {
 
     private static final class CheckpointWorker implements BatchWorker, CheckpointBatchWorker {
         private final String workerId;
+        private BatchTask lastTask;
 
         private CheckpointWorker(String workerId) {
             this.workerId = workerId;
@@ -206,6 +213,7 @@ class CheckpointNetworkTest {
                 CheckpointExecutionContext context,
                 BatchTask task,
                 io.astrasync.engine.runtime.CheckpointProgressListener listener) {
+            lastTask = task;
             CheckpointableBatchSource source = (CheckpointableBatchSource) task.source();
             CheckpointableBatchSink sink = (CheckpointableBatchSink) task.sink();
             source.openAt(context.sourcePosition());

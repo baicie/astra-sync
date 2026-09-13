@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test;
 
 class DataPlaneMetricsTest {
     private static final String JOB_ID = "1f36d9c6-77a2-4e83-8c7d-dc59b9b94a52";
+    private static final String TENANT_ID = "2f36d9c6-77a2-4e83-8c7d-dc59b9b94a53";
 
     @Test
     void recordsWorkerCountsWithBoundedLabels() {
@@ -41,6 +42,37 @@ class DataPlaneMetricsTest {
 
         assertThat(registry.get("worker.records.read")
                         .tag("job_id", DataPlaneMetrics.UNKNOWN_JOB_ID)
+                        .counter()
+                        .count())
+                .isEqualTo(2);
+    }
+
+    @Test
+    void recordsTrustedTenantAndJobIdentifiers() {
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        DataPlaneMetrics metrics = new DataPlaneMetrics(registry);
+
+        metrics.recordRecordsRead(TENANT_ID, JOB_ID, 3);
+
+        assertThat(registry.get("worker.records.read")
+                        .tag("tenant_id", TENANT_ID)
+                        .tag("job_id", JOB_ID)
+                        .counter()
+                        .count())
+                .isEqualTo(3);
+    }
+
+    @Test
+    void collapsesNonCanonicalTenantIdentifiersToUnknown() {
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        DataPlaneMetrics metrics = new DataPlaneMetrics(registry);
+
+        metrics.recordRecordsRead("tenant-a", JOB_ID, 1);
+        metrics.recordRecordsRead(UUID.randomUUID().toString().toUpperCase(), JOB_ID, 1);
+
+        assertThat(registry.get("worker.records.read")
+                        .tag("tenant_id", DataPlaneMetrics.UNKNOWN_TENANT_ID)
+                        .tag("job_id", JOB_ID)
                         .counter()
                         .count())
                 .isEqualTo(2);

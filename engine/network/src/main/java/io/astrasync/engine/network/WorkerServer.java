@@ -284,7 +284,9 @@ public final class WorkerServer implements AutoCloseable {
         try {
             context.assertCurrent();
             SourceSplit split = WorkerProtocolMapper.toSplit(request);
-            BatchTask task = Objects.requireNonNull(taskFactory.create(split, context), "task factory returned null");
+            BatchTask materializedTask =
+                    Objects.requireNonNull(taskFactory.create(split, context), "task factory returned null");
+            BatchTask task = materializedTask.withIdentity(context.jobId(), request.getTenantId());
             if (!split.equals(task.split())
                     || !request.getTaskId().equals(task.taskId())
                     || request.getMaxBatchRecords() != task.maxBatchRecords()
@@ -396,7 +398,9 @@ public final class WorkerServer implements AutoCloseable {
     private WorkerResponse executeTask(ExecuteTaskRequest request) {
         SourceSplit split = WorkerProtocolMapper.toSplit(request);
         try {
-            BatchTask task = Objects.requireNonNull(taskFactory.create(split), "task factory returned null");
+            BatchTask materializedTask =
+                    Objects.requireNonNull(taskFactory.create(split), "task factory returned null");
+            BatchTask task = materializedTask.withIdentity(request.getJobId(), request.getTenantId());
             if (!split.equals(task.split())
                     || !request.getTaskId().equals(task.taskId())
                     || request.getMaxBatchRecords() != task.maxBatchRecords()
