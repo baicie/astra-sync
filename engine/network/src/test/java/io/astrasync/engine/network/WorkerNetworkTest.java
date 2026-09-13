@@ -18,6 +18,7 @@ import io.astrasync.engine.runtime.BatchTask;
 import io.astrasync.engine.runtime.BatchTaskFactory;
 import io.astrasync.engine.runtime.BatchWorker;
 import io.astrasync.engine.runtime.WorkerResult;
+import io.astrasync.protocol.worker.ExecuteCheckpointTaskRequest;
 import io.astrasync.protocol.worker.ExecuteTaskRequest;
 import io.astrasync.protocol.worker.SplitDescriptor;
 import io.astrasync.protocol.worker.WorkerRequest;
@@ -221,6 +222,54 @@ class WorkerNetworkTest {
         assertThat(appender.list).anySatisfy(event -> {
             assertThat(event.getLevel()).isEqualTo(ch.qos.logback.classic.Level.WARN);
             assertThat(event.getMDCPropertyMap()).containsEntry("worker_id", "worker-a");
+        });
+    }
+
+    @Test
+    void logsCheckpointAdmissionRejectionsWithTaskIdentity() throws Exception {
+        RecordingWorker worker = new RecordingWorker("worker-a");
+        Logger logger = (Logger) LoggerFactory.getLogger(WorkerServer.class);
+        LoggerContext context = (LoggerContext) LoggerFactory.getILoggerFactory();
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.setContext(context);
+        appender.start();
+        logger.addAppender(appender);
+
+        try (WorkerServer server = server(worker, 1, 1, 4)) {
+            server.start();
+            WorkerRequest request = WorkerRequest.newBuilder()
+                    .setProtocolVersion(WorkerProtocol.CHECKPOINT_VERSION)
+                    .setExecuteCheckpointTask(ExecuteCheckpointTaskRequest.newBuilder()
+                            .setWorkerId("worker-b")
+                            .setJobId("orders")
+                            .setExecutionEpoch(1)
+                            .setTaskId("split-1")
+                            .setSplit(SplitDescriptor.newBuilder()
+                                    .setSplitId("split-1")
+                                    .setSourceId("test-source")
+                                    .putStartOffsets("id", "1")
+                                    .build())
+                            .setMaxBatchRecords(3)
+                            .setMaxInFlightBatches(2)
+                            .setSplitFingerprint("fingerprint")
+                            .setTenantId(TENANT_ID)
+                            .build())
+                    .build();
+
+            try (Socket socket = new Socket("127.0.0.1", server.port())) {
+                WorkerProtocolCodec.writeRequest(socket.getOutputStream(), request);
+                WorkerResponse response = WorkerProtocolCodec.readResponse(socket.getInputStream());
+                assertThat(response.hasError()).isTrue();
+            }
+        } finally {
+            logger.detachAppender(appender);
+        }
+
+        assertThat(appender.list).anySatisfy(event -> {
+            assertThat(event.getLevel()).isEqualTo(ch.qos.logback.classic.Level.WARN);
+            assertThat(event.getMDCPropertyMap()).containsEntry("worker_id", "worker-a");
+            assertThat(event.getMDCPropertyMap()).containsEntry("job_id", "orders");
+            assertThat(event.getMDCPropertyMap()).containsEntry("tenant_id", TENANT_ID);
         });
     }
 
