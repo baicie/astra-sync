@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Phase 49 (ADR-099): bind a trusted Coordinator process tenant through
+  `ASTRASYNC_COORDINATOR_TENANT_ID`, validate it as a canonical lowercase
+  UUID, and propagate it to Worker metrics through the Phase 48 protocol
+  fields. Missing values retain `_unknown`; invalid explicit values fail
+  startup.
+
 - Phase 48 (ADR-098): propagate trusted `job_id` and `tenant_id` through the
   Worker protocol and Java data-plane metrics. The fields are append-only and
   optional, old requests fall back to `_unknown`, and checkpoint requests now

@@ -207,8 +207,9 @@ registry at `/metrics` only when `METRICS_LISTEN_ADDRESS` is non-empty;
 Coordinator remains a one-shot process and does not bind a listener. The
 Worker request now carries optional `job_id` and `tenant_id` attribution
 fields. Missing or non-canonical identifiers normalize to `_unknown`; the
-current Coordinator sends `_unknown` tenant until a trusted tenant-binding
-source is added.
+Coordinator reads its optional trusted tenant binding from
+`ASTRASYNC_COORDINATOR_TENANT_ID` and fails startup when an explicit value is
+invalid.
 
 | Metric | Type | Labels | Description |
 |---|---|---|---|
