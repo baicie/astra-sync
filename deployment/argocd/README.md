@@ -10,6 +10,8 @@ argocd/
   namespace.yaml          # astrasync-system namespace + service account + RBAC
   application.yaml        # Single-cluster ArgoCD Application (Helm)
   applicationset.yaml     # Multi-cluster ApplicationSet (cluster × environment matrix)
+  prerequisites-application.yaml    # Single-cluster CRD + admission prerequisites
+  prerequisites-applicationset.yaml # Per-cluster prerequisite ApplicationSet
   README.md              # This file
   environments/
     dev/values-override.yaml       # Dev environment overrides
@@ -67,7 +69,30 @@ argocd cluster add $(kubectl config current-context) --name in-cluster
 kubectl apply -f deployment/argocd/namespace.yaml
 ```
 
-### 5. Option A: Single-Cluster Application
+### 5. Apply Cluster Prerequisites
+
+The SyncJob CRD and tenant-label admission policy are cluster-scoped
+prerequisites. Apply and sync them before the workload Application:
+
+```bash
+# Single cluster
+kubectl apply -n argocd -f deployment/argocd/prerequisites-application.yaml
+argocd app sync astrasync-prerequisites
+
+# Or one prerequisite Application per registered cluster
+kubectl apply -n argocd -f deployment/argocd/prerequisites-applicationset.yaml
+```
+
+Prerequisite Applications disable prune and enable self-heal. They render
+`deployment/operator/config`, which contains the SyncJob CRD, the
+`ValidatingAdmissionPolicy`, and its binding.
+
+The ArgoCD project/service account used for this Application must also be
+allowed to manage cluster-scoped `customresourcedefinitions` and
+`validatingadmissionpolicies`/`validatingadmissionpolicybindings`. These
+permissions are intentionally separate from the workload release.
+
+### 6. Option A: Single-Cluster Application
 
 For a single cluster, apply the Application directly:
 
@@ -75,7 +100,7 @@ For a single cluster, apply the Application directly:
 kubectl apply -n argocd -f deployment/argocd/application.yaml
 ```
 
-### 5. Option B: Multi-Cluster ApplicationSet
+### 6. Option B: Multi-Cluster ApplicationSet
 
 For multiple clusters, apply the ApplicationSet:
 
@@ -199,13 +224,17 @@ kubectl delete -n argocd -f deployment/argocd/application.yaml
 # Or delete the ApplicationSet
 kubectl delete -n argocd -f deployment/argocd/applicationset.yaml
 
+# Delete prerequisite Applications; CRDs and policies are preserved.
+kubectl delete -n argocd -f deployment/argocd/prerequisites-applicationset.yaml
+kubectl delete -n argocd -f deployment/argocd/prerequisites-application.yaml
+
 # Remove the namespace (this WILL delete all AstraSync resources)
 kubectl delete namespace astrasync-system
 ```
 
 ## Prerequisites
 
-- Kubernetes 1.26+
+- Kubernetes 1.30+ (required by the tenant-label ValidatingAdmissionPolicy)
 - ArgoCD 2.13+
 - Helm 3.15+
 - Git repository with read access from ArgoCD server

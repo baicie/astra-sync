@@ -1,0 +1,46 @@
+# ArgoCD Application for cluster-scoped AstraSync prerequisites.
+#
+# Apply this before the workload Application so the SyncJob CRD and
+# tenant-label ValidatingAdmissionPolicy exist before any jobs are written.
+#
+# Apply:
+#   kubectl apply -n argocd -f deployment/argocd/prerequisites-application.yaml
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: astrasync-prerequisites
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: astrasync
+    app.kubernetes.io/instance: astrasync
+    app.kubernetes.io/component: prerequisites
+    app.kubernetes.io/part-of: astrasync
+  annotations:
+    argocd.argoproj.io/sync-wave: "-10"
+spec:
+  project: default
+
+  source:
+    repoURL: https://github.com/astrasync/astra-sync
+    targetRevision: HEAD
+    path: deployment/operator/config
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: astrasync-system
+
+  syncPolicy:
+    automated:
+      prune: false
+      selfHeal: true
+      allowEmpty: false
+    syncOptions:
+      - ServerSideApply=true
+      - Prune=false
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m

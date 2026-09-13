@@ -76,11 +76,11 @@ This directory contains the Architecture Decision Records (ADRs) for AstraSync.
 | [ADR-068](adr-068-phase24-apiserver-session-revoke-emission.md) | Phase 24 Emission Sub-Slice 43.1.5 — apiserver_session_revoke_total via API Server revoke RPC | Accepted | 2026-09-08 |
 | [ADR-069](adr-069-phase25-controller-epoch-fence-emission.md) | Phase 25 Emission Sub-Slice 51.1 — controller_epoch_fence_total via reconcile boundary | Accepted | 2026-09-08 |
 | [ADR-070](adr-070-v0.8.0-release-cut.md) | v0.8.0 Release Cut (Phase 24 API Server Session Revoke + Phase 25 Controller Epoch Fence + Phase 26 Closeout) | Accepted | 2026-09-08 |
-| [ADR-071](adr-071-phase27-tenant-id-label-on-syncjob-cr.md) | Phase 27 slice 49.1.5 — `astrasync.io/tenant-id` Label on SyncJob CR | Accepted | 2026-09-08 |
+| [ADR-071](adr-071-phase27-tenant-id-label-on-syncjob-cr.md) | Phase 27 slice 49.1.5 — `astrasync.io/tenant-id` Label on SyncJob CR | Accepted — §2 superseded by ADR-086 | 2026-09-08 |
 | [ADR-072](adr-072-phase28-console-tenant-id-egress.md) | Phase 28 Slice 28-A — Console BFF Forwards `x-astra-tenant-id` on Job Mutations | Accepted | 2026-09-08 |
 | [ADR-073](adr-073-phase28-slice28b-console-syncjob-cr-dual-write.md) | Phase 28 Slice 28-B — Console Owns `SyncJob` CR Dual-Write via controller-runtime | Accepted | 2026-09-08 |
 | [ADR-074](adr-074-phase29-api-server-consumes-tenant-id.md) | Phase 29 — API Server Consumes `x-astra-tenant-id` (Server-side Interceptor + `job.Job.tenant_id` Column) | Accepted | 2026-09-08 |
-| [ADR-071](adr-071-phase27-tenant-id-label-on-syncjob-cr.md) | Phase 27 — Tenant-Id Label on SyncJob CR (Controller Surface) | Accepted | 2026-09-08 |
+| [ADR-071](adr-071-phase27-tenant-id-label-on-syncjob-cr.md) | Phase 27 — Tenant-Id Label on SyncJob CR (Controller Surface) | Accepted — §2 superseded by ADR-086 | 2026-09-08 |
 | [ADR-072](adr-072-phase28-console-tenant-id-egress.md) | Phase 28-A — Console BFF Tenant-Id Egress | Accepted | 2026-09-08 |
 | [ADR-073](adr-073-phase28-slice28b-console-syncjob-cr-dual-write.md) | Phase 28-B — Console SyncJob CR Dual-Write (Slice 28-B) | Accepted | 2026-09-08 |
 | [ADR-074](adr-074-phase29-api-server-consumes-tenant-id.md) | Phase 29 — API Server Consumes Tenant-Id (Server-Side Consumption) | Accepted | 2026-09-08 |
@@ -94,6 +94,10 @@ This directory contains the Architecture Decision Records (ADRs) for AstraSync.
 | [ADR-082](adr-082-phase33-update-mutation-tenant-id-guard.md) | Phase 33 — Update-Mutation Tenant-Id Guard at the SyncJob CR Writer (`IsCanonicalTenantID` guard on `realDualWriter.update`, symmetric with Phase 32) | Accepted | 2026-09-09 |
 | [ADR-083](adr-083-phase35-testcontainers-go-postgres.md) | Phase 35 — Testcontainers-Go for Control-Plane PostgreSQL Integration Tests (`control-plane/integration-test/postgres/` shared helper module + three consumer integration tests) | Superseded by ADR-084 | 2026-09-09 |
 | [ADR-084](adr-084-phase35-testcontainers-go-migration.md) | Phase 35 — Testcontainers-Go Migration of Existing PostgreSQL Integration Tests (build tag + t.Skip removal + inline testcontainers helper + CI lane for `control-plane/job/postgres`) | Accepted | 2026-09-09 |
+| [ADR-085](adr-085-phase36-controller-envtest-migration.md) | Phase 36 — Controller Integration Tests to Envtest (helper + CRD/status/optimistic-lock/finalizer integration tests + CI lane for `control-plane/controller`) | Accepted | 2026-09-13 |
+| [ADR-086](adr-086-syncjob-tenant-label-admission-correction.md) | SyncJob Tenant-Label Admission Correction (supersedes ADR-071 §2 after envtest proved CRD metadata CEL is not installable) | Accepted — enforcement restored by ADR-087 | 2026-09-13 |
+| [ADR-087](adr-087-syncjob-tenant-label-validating-admission-policy.md) | SyncJob Tenant-Label Validating Admission Policy (Kubernetes-native admission backstop for `metadata.labels`) | Accepted — GitOps lifecycle by ADR-088 | 2026-09-13 |
+| [ADR-088](adr-088-gitops-managed-cluster-prerequisites.md) | GitOps Management of AstraSync Cluster Prerequisites (CRD + admission policy, prune disabled) | Accepted | 2026-09-13 |
 
 ## Template
 
