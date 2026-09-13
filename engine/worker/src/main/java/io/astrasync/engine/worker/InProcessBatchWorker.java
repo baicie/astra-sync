@@ -149,6 +149,8 @@ public final class InProcessBatchWorker implements BatchWorker, CheckpointBatchW
                 long sourceReadStartedNanos = System.nanoTime();
                 RowBatch batch =
                         Objects.requireNonNull(source.readBatch(requestedBatchRecords), "source returned null batch");
+                this.metrics.recordBatchDuration(
+                        context.jobId(), "read", Math.max(0, System.nanoTime() - sourceReadStartedNanos));
                 if (batch.size() > requestedBatchRecords) {
                     throw new IllegalStateException(
                             "source returned " + batch.size() + " records, limit is " + requestedBatchRecords);
@@ -171,6 +173,8 @@ public final class InProcessBatchWorker implements BatchWorker, CheckpointBatchW
                     } else {
                         sink.writeBatch(batch);
                     }
+                    this.metrics.recordBatchDuration(
+                            context.jobId(), "write", Math.max(0, System.nanoTime() - sinkWriteStartedNanos));
                     batchController.observe(new AdaptiveBatchSample(
                             batch.size(),
                             Math.max(0, System.nanoTime() - sinkWriteStartedNanos),
@@ -259,8 +263,11 @@ public final class InProcessBatchWorker implements BatchWorker, CheckpointBatchW
                 RowBatch batch;
                 try {
                     int requestedBatchRecords = batchController.currentBatchRecords();
+                    long sourceReadStartedNanos = System.nanoTime();
                     batch = Objects.requireNonNull(
                             source.readBatch(requestedBatchRecords), "source returned null batch");
+                    this.metrics.recordBatchDuration(
+                            "_unknown", "read", Math.max(0, System.nanoTime() - sourceReadStartedNanos));
                     if (batch.size() > requestedBatchRecords) {
                         throw new IllegalStateException(
                                 "source returned " + batch.size() + " records, limit is " + requestedBatchRecords);
@@ -318,6 +325,8 @@ public final class InProcessBatchWorker implements BatchWorker, CheckpointBatchW
                     if (!batch.rows().isEmpty()) {
                         long sinkWriteStartedNanos = System.nanoTime();
                         sink.writeBatch(batch);
+                        this.metrics.recordBatchDuration(
+                                "_unknown", "write", Math.max(0, System.nanoTime() - sinkWriteStartedNanos));
                         metrics.writtenCount += batch.size();
                         this.metrics.recordRecordsWritten("_unknown", batch.size());
                         batchController.observe(new AdaptiveBatchSample(

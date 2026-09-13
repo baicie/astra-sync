@@ -98,6 +98,35 @@ class DataPlaneMetricsTest {
     }
 
     @Test
+    void recordsBatchDurationsWithBoundedStages() {
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        DataPlaneMetrics metrics = new DataPlaneMetrics(registry);
+
+        metrics.recordBatchDuration(JOB_ID, "read", 1);
+        metrics.recordBatchDuration(JOB_ID, "write", 1);
+        metrics.recordBatchDuration(JOB_ID, "transform", 1);
+
+        assertThat(registry.get("coordinator.batch.duration")
+                        .tag("job_id", JOB_ID)
+                        .tag("stage", "read")
+                        .timer()
+                        .count())
+                .isEqualTo(1);
+        assertThat(registry.get("coordinator.batch.duration")
+                        .tag("job_id", JOB_ID)
+                        .tag("stage", "write")
+                        .timer()
+                        .count())
+                .isEqualTo(1);
+        assertThat(registry.get("coordinator.batch.duration")
+                        .tag("job_id", JOB_ID)
+                        .tag("stage", "unknown")
+                        .timer()
+                        .count())
+                .isEqualTo(1);
+    }
+
+    @Test
     void ignoresZeroValueCountersAndRejectsUnknownReasons() {
         SimpleMeterRegistry registry = new SimpleMeterRegistry();
         DataPlaneMetrics metrics = new DataPlaneMetrics(registry);

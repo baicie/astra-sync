@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Phase 44 (ADR-094): record `coordinator_batch_duration_seconds` for the
+  Worker `read` and `write` boundaries. Checkpoint execution uses the trusted
+  job identifier, non-checkpoint execution uses the bounded unknown
+  identifier, and unknown stage values collapse without widening label
+  cardinality. Standalone transform sampling is explicitly not claimed.
+
 - Phase 43 (ADR-093): wire the existing Java data-plane metrics server into
   `CoordinatorApplication`. Setting `METRICS_LISTEN_ADDRESS` now exposes
   Coordinator metrics on `/metrics` for the duration of a batch run and

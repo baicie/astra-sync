@@ -211,7 +211,7 @@ are `tenant_id="_unknown"` and `job_id="_unknown"`.
 | Metric | Type | Labels | Description |
 |---|---|---|---|
 | `coordinator_batch_size_records` | histogram | `tenant_id`, `job_id` | Batch size in records after the adaptive parallelism policy. |
-| `coordinator_batch_duration_seconds` | histogram | `tenant_id`, `job_id`, `stage` | Time per stage (read, transform, write) in a single batch. |
+| `coordinator_batch_duration_seconds` | histogram | `tenant_id`, `job_id`, `stage` | Time for instrumented batch stages (`read` at `BatchSource.readBatch`, `write` at `BatchSink.writeBatch`); connector-internal transforms are included in the owning stage. |
 | `coordinator_spill_bytes_total` | counter | `tenant_id`, `job_id` | Encoded payload bytes durably written to the Worker-local spill directory and successfully enqueued when the spillable exchange overflows; failed writes, filesystem metadata, consumption, and cleanup are excluded. |
 | `coordinator_checkpoint_duration_seconds` | histogram | `tenant_id`, `job_id`, `outcome` | Time to complete a single checkpoint, including the state-backend write. `outcome` is `success` or `failure`. |
 | `worker_records_read_total` | counter | `tenant_id`, `job_id` | Records read by the Worker. |

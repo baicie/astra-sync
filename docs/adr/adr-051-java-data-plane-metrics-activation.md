@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted (implements Phase 7 Slice 26 follow-up `26.F8`).
+Accepted (implements Phase 7 Slice 26 follow-up `26.F8`). Read/write stage
+breakdown completed by ADR-094.
 
 ## Context
 
