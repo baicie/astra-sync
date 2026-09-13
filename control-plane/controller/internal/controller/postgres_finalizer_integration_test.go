@@ -13,6 +13,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/config"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	syncv1 "io.astrasync/control-plane/controller/api/v1"
@@ -43,11 +44,15 @@ func TestControllerManagerFinalizerCleanupAcrossPostgresIntegration(t *testing.T
 		t.Fatalf("migrate PostgreSQL repository: %v", err)
 	}
 
+	skipControllerNameValidation := true
 	manager, err := ctrl.NewManager(harness.config, ctrl.Options{
 		Scheme:                 harness.scheme,
 		Metrics:                metricsserver.Options{BindAddress: "0"},
 		HealthProbeBindAddress: "0",
 		LeaderElection:         false,
+		Controller: config.Controller{
+			SkipNameValidation: &skipControllerNameValidation,
+		},
 	})
 	if err != nil {
 		t.Fatalf("create controller manager: %v", err)
