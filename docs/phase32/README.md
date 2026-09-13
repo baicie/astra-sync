@@ -27,9 +27,9 @@ Kubernetes API server. The contract is:
   change).
 - `realDualWriter.create` MUST refuse non-canonical `Scope.TenantID`
   locally (defence in depth) and emit `OutcomeInvalid` without
-  contacting the API server. The K8s API server's CEL rule
-  (`XValidation` on `astrasync.io/tenant-id`) is the
-  authoritative secondary check; the writer is the primary check.
+  contacting the API server. The writer guard is the enforced check;
+  admission-level label validation is enforced by the
+  ValidatingAdmissionPolicy in ADR-087.
 
 The controller-side pin (`controller_job_state_total{tenant_id}`
 emitted from the label) continues to be covered by
@@ -214,5 +214,5 @@ The phase is test-only plus a 4-line guard in
 and the 4-line guard reverts the slice. The cross-module
 fixture, the controller emission test, and the BFF ingress
 canonical-UUID check all remain unchanged, so the existing
-defence-in-depth chain is preserved at the second line of
-defence (BFF ingress) and the third (K8s CEL `XValidation`).
+defence-in-depth chain is preserved at the BFF ingress boundary and
+the ValidatingAdmissionPolicy admission boundary from ADR-087.

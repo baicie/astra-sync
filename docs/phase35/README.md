@@ -65,16 +65,18 @@ func startPostgresContainer(t *testing.T) string
 
 The helper:
 - Boots `postgres:16-alpine` via `testcontainers-go/modules/postgres`
-- Applies every `*.sql` file under
-  `control-plane/job/postgres/migrations/` in lexical order
 - Returns the `sslmode=disable` connection string
 - Registers `t.Cleanup` to terminate the container
 
+Repository migrations stay owned by the tests and must be applied
+in cross-module dependency order (`auth → job core → connection →
+job mutations`). This avoids applying `002_job_mutations.sql`
+before its auth tenant and connection-binding dependencies exist.
+
 The helper is shared by all integration tests in the `postgres`
-package. ADR-084 §Decision discusses the trade-off between
-inline helpers (30 lines, duplicated in each file) and a
-shared helper file; Phase 35 implements the shared helper since
-two integration test files already exist.
+package. ADR-084 §Decision discusses the inline-versus-shared
+trade-off; the shared helper is used because two integration test
+files already exist.
 
 ### 3. `t.Skip` removal
 

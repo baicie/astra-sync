@@ -8,6 +8,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Phase 36 (ADR-085): controller integration tests now use
+  controller-runtime envtest against the generated SyncJob CRD. The
+  new `internal/controller` integration suite validates structural CRD
+  admission, status subresource isolation, `resourceVersion` conflicts, and
+  finalizer blocking in the standalone `control-plane/controller`
+  module. The shared integration workflow installs pinned
+  `setup-envtest v0.24.1`, exports `KUBEBUILDER_ASSETS`, and runs the
+  controller suite from the correct module root. Envtest also proved
+  that ADR-071's metadata-label CEL rule was not installable; ADR-086
+  removes the invalid rule and tracks admission enforcement separately.
+
+- Phase 37 (ADR-087): add a Kubernetes `ValidatingAdmissionPolicy` and
+  binding for SyncJob `astrasync.io/tenant-id` admission. The policy
+  denies `CREATE` and `UPDATE` requests with missing or non-canonical
+  tenant labels. Controller envtest coverage now installs the policy
+  and verifies its deny and accept paths.
+
+- Phase 38 (ADR-088): make the SyncJob CRD and tenant-label admission
+  policy declarative ArgoCD prerequisites. A dedicated Kustomize bundle
+  and single-cluster/multi-cluster Applications install the
+  cluster-scoped resources with prune disabled and self-heal enabled.
+
 - Phase 29 (ADR-074): the API Server now consumes
   `x-astra-tenant-id` incoming gRPC metadata on every mutating
   RPC. The authn interceptor (Phase 29 §3) extracts the
@@ -282,6 +304,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `mutation_integration_test.go` already covered the cross-module
   atomic-job-mutation path with a real PostgreSQL. Phase 35 is
   test-only plus CI and dependency changes; no production code.
+
+### Fixed
+
+- Align every Maven child module parent version with the root
+  `0.8.0` reactor version. The repository could not resolve its
+  parent POMs after the release version bump.
+- Fix the CLI descriptor output to map protobuf enums to names
+  before passing them to `String.join`, restoring Java compilation.
+- Make `make catalog-export` write the deployment catalog by
+  default and honor `CATALOG_OUTPUT`, matching the documented
+  re-bake workflow.
+- Keep PostgreSQL testcontainer migration ownership in the
+  integration tests and apply cross-module schemas in dependency
+  order, fixing the CI failure caused by running job mutations
+  before auth and connection schemas.
 
 <!-- Add new Phase content above this line. -->
 

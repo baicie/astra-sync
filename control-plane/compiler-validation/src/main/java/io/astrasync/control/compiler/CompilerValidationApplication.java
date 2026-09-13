@@ -96,7 +96,7 @@ public final class CompilerValidationApplication {
             return new Configuration(
                     port,
                     appEnvironment,
-                    bounded(environment.getOrDefault("COMPILER_BUILD", "0.1.0-SNAPSHOT"), "compiler build"),
+                    bounded(environment.getOrDefault("COMPILER_BUILD", "0.8.0"), "compiler build"),
                     bounded(environment.getOrDefault("CONNECTOR_EXECUTION_PROFILE", "standard"), "execution profile"),
                     concurrency,
                     certificate,

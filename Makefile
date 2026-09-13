@@ -141,10 +141,11 @@ check-mtls: vet-go
 # "files differ" message.
 CATALOG_BUILD_VERSION ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 CATALOG_EXECUTION_PROFILE ?= standard
+CATALOG_OUTPUT ?= deployment/catalog/connector-inventory.pb
 
 catalog-check:
 	mvn -pl cli -am package -DskipTests -DskipITs
-	java -jar cli/target/astrasync-cli-0.1.0-SNAPSHOT-all.jar \
+	java -jar cli/target/astrasync-cli-0.8.0-all.jar \
 		catalog-export target/connector-inventory.pb \
 		--compiler-build $(CATALOG_BUILD_VERSION) \
 		--execution-profile $(CATALOG_EXECUTION_PROFILE)
@@ -160,10 +161,10 @@ catalog-check:
 # version. Override CATALOG_BUILD_VERSION / CATALOG_EXECUTION_PROFILE for
 # ad-hoc exports (e.g. release dry-runs).
 catalog-export:
-	@echo "Exporting deployment connector inventory (build=$(CATALOG_BUILD_VERSION), profile=$(CATALOG_EXECUTION_PROFILE)) ..."
+	@echo "Exporting connector inventory to $(CATALOG_OUTPUT) (build=$(CATALOG_BUILD_VERSION), profile=$(CATALOG_EXECUTION_PROFILE)) ..."
 	mvn -pl cli -am package -DskipTests -DskipITs
-	java -jar cli/target/astrasync-cli-0.1.0-SNAPSHOT-all.jar \
-		catalog-export target/connector-inventory.pb \
+	java -jar cli/target/astrasync-cli-0.8.0-all.jar \
+		catalog-export $(CATALOG_OUTPUT) \
 		--compiler-build $(CATALOG_BUILD_VERSION) \
 		--execution-profile $(CATALOG_EXECUTION_PROFILE)
 

@@ -4,6 +4,11 @@
 
 Accepted
 
+> **Correction:** ADR-086 supersedes ADR-071 §2. The CRD CEL rule
+> described below was not installable; ADR-087 restores admission
+> enforcement with a ValidatingAdmissionPolicy, and the Phase 32 writer
+> guard remains the local boundary.
+
 ## Context
 
 The Phase 31 cross-module fixture

@@ -47,7 +47,7 @@ import picocli.CommandLine.Spec;
         mixinStandardHelpOptions = true,
         version = AstraSyncCli.VERSION)
 public final class AstraSyncCli implements Callable<Integer> {
-    static final String VERSION = "AstraSync 0.1.0-SNAPSHOT";
+    static final String VERSION = "AstraSync 0.8.0";
     public static final int EXIT_SUCCESS = 0;
     public static final int EXIT_INPUT = 2;
     public static final int EXIT_VALIDATION = 3;
@@ -227,67 +227,87 @@ public final class AstraSyncCli implements Callable<Integer> {
                 return EXIT_INPUT;
             }
             // Header lines: stable, sorted alphabetically for diff-friendliness.
-            commandSpec.commandLine().getOut().printf(
-                    "header.compiler_build=%s%n",
-                    inventory.getCompilerBuild());
-            commandSpec.commandLine().getOut().printf(
-                    "header.compiler_revision=%s%n",
-                    inventory.getCompilerRevision());
-            commandSpec.commandLine().getOut().printf(
-                    "header.execution_profile=%s%n",
-                    inventory.getExecutionProfile());
-            commandSpec.commandLine().getOut().printf(
-                    "header.inventory_revision=%s%n",
-                    inventory.getInventoryRevision());
-            commandSpec.commandLine().getOut().printf(
-                    "header.inventory_schema_version=%d%n",
-                    inventory.getInventorySchemaVersion());
-            commandSpec.commandLine().getOut().printf(
-                    "header.job_spec_schema_revision=%s%n",
-                    inventory.getJobSpecSchemaRevision());
-            commandSpec.commandLine().getOut().printf(
-                    "header.descriptor_count=%d%n",
-                    inventory.getDescriptorsCount());
+            commandSpec.commandLine().getOut().printf("header.compiler_build=%s%n", inventory.getCompilerBuild());
+            commandSpec.commandLine().getOut().printf("header.compiler_revision=%s%n", inventory.getCompilerRevision());
+            commandSpec.commandLine().getOut().printf("header.execution_profile=%s%n", inventory.getExecutionProfile());
+            commandSpec
+                    .commandLine()
+                    .getOut()
+                    .printf("header.inventory_revision=%s%n", inventory.getInventoryRevision());
+            commandSpec
+                    .commandLine()
+                    .getOut()
+                    .printf("header.inventory_schema_version=%d%n", inventory.getInventorySchemaVersion());
+            commandSpec
+                    .commandLine()
+                    .getOut()
+                    .printf("header.job_spec_schema_revision=%s%n", inventory.getJobSpecSchemaRevision());
+            commandSpec.commandLine().getOut().printf("header.descriptor_count=%d%n", inventory.getDescriptorsCount());
             // Descriptor lines: sorted alphabetically by name; stable across
             // re-exports with the same descriptor set even if descriptor field
             // ordering changes inside ConnectorDescriptor (ConnectorRevisions
             // already orders descriptors by name).
             for (ConnectorDescriptor descriptor : inventory.getDescriptorsList()) {
-                commandSpec.commandLine().getOut().printf(
-                        "descriptor.name=%s%n",
-                        descriptor.getName());
-                commandSpec.commandLine().getOut().printf(
-                        "descriptor.%s.artifact_version=%s%n",
-                        descriptor.getName(),
-                        descriptor.getArtifactVersion());
-                commandSpec.commandLine().getOut().printf(
-                        "descriptor.%s.descriptor_revision=%s%n",
-                        descriptor.getName(),
-                        descriptor.getDescriptorRevision());
-                commandSpec.commandLine().getOut().printf(
-                        "descriptor.%s.descriptor_schema_version=%d%n",
-                        descriptor.getName(),
-                        descriptor.getDescriptorSchemaVersion());
-                commandSpec.commandLine().getOut().printf(
-                        "descriptor.%s.capabilities=%s%n",
-                        descriptor.getName(),
-                        String.join(",", descriptor.getCapabilitiesList()));
-                commandSpec.commandLine().getOut().printf(
-                        "descriptor.%s.delivery_constraints=%s%n",
-                        descriptor.getName(),
-                        String.join(",", descriptor.getDeliveryConstraintsList()));
-                commandSpec.commandLine().getOut().printf(
-                        "descriptor.%s.execution_modes=%s%n",
-                        descriptor.getName(),
-                        String.join(",", descriptor.getExecutionModesList()));
-                commandSpec.commandLine().getOut().printf(
-                        "descriptor.%s.option_count=%d%n",
-                        descriptor.getName(),
-                        descriptor.getOptionsCount());
-                commandSpec.commandLine().getOut().printf(
-                        "descriptor.%s.role_count=%d%n",
-                        descriptor.getName(),
-                        descriptor.getRolesCount());
+                commandSpec.commandLine().getOut().printf("descriptor.name=%s%n", descriptor.getName());
+                commandSpec
+                        .commandLine()
+                        .getOut()
+                        .printf(
+                                "descriptor.%s.artifact_version=%s%n",
+                                descriptor.getName(), descriptor.getArtifactVersion());
+                commandSpec
+                        .commandLine()
+                        .getOut()
+                        .printf(
+                                "descriptor.%s.descriptor_revision=%s%n",
+                                descriptor.getName(), descriptor.getDescriptorRevision());
+                commandSpec
+                        .commandLine()
+                        .getOut()
+                        .printf(
+                                "descriptor.%s.descriptor_schema_version=%d%n",
+                                descriptor.getName(), descriptor.getDescriptorSchemaVersion());
+                commandSpec
+                        .commandLine()
+                        .getOut()
+                        .printf(
+                                "descriptor.%s.capabilities=%s%n",
+                                descriptor.getName(),
+                                String.join(
+                                        ",",
+                                        descriptor.getCapabilitiesList().stream()
+                                                .map(Enum::name)
+                                                .toList()));
+                commandSpec
+                        .commandLine()
+                        .getOut()
+                        .printf(
+                                "descriptor.%s.delivery_constraints=%s%n",
+                                descriptor.getName(),
+                                String.join(
+                                        ",",
+                                        descriptor.getDeliveryConstraintsList().stream()
+                                                .map(Enum::name)
+                                                .toList()));
+                commandSpec
+                        .commandLine()
+                        .getOut()
+                        .printf(
+                                "descriptor.%s.execution_modes=%s%n",
+                                descriptor.getName(),
+                                String.join(
+                                        ",",
+                                        descriptor.getExecutionModesList().stream()
+                                                .map(Enum::name)
+                                                .toList()));
+                commandSpec
+                        .commandLine()
+                        .getOut()
+                        .printf("descriptor.%s.option_count=%d%n", descriptor.getName(), descriptor.getOptionsCount());
+                commandSpec
+                        .commandLine()
+                        .getOut()
+                        .printf("descriptor.%s.role_count=%d%n", descriptor.getName(), descriptor.getRolesCount());
             }
             return EXIT_SUCCESS;
         }

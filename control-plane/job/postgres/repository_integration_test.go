@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 
+	authpostgres "io.astrasync/control-plane/auth/postgres"
 	"io.astrasync/control-plane/job"
 	jobpostgres "io.astrasync/control-plane/job/postgres"
 )
@@ -17,6 +18,17 @@ import (
 func TestRepositoryPersistsLifecycleAcrossConnections(t *testing.T) {
 	dataSourceName := startPostgresContainer(t)
 	ctx := context.Background()
+	authRepository, err := authpostgres.Open(ctx, dataSourceName)
+	if err != nil {
+		t.Fatalf("open auth repository: %v", err)
+	}
+	if err := authRepository.Migrate(ctx); err != nil {
+		authRepository.Close()
+		t.Fatalf("migrate auth: %v", err)
+	}
+	if err := authRepository.Close(); err != nil {
+		t.Fatalf("close auth repository: %v", err)
+	}
 	repository, err := jobpostgres.Open(ctx, dataSourceName)
 	if err != nil {
 		t.Fatalf("open repository: %v", err)

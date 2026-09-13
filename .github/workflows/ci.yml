@@ -52,7 +52,7 @@ jobs:
           else
             echo "java=true" >> "${GITHUB_OUTPUT}"
           fi
-          if git diff --quiet "${base_sha}" HEAD -- deployment/helm; then
+          if git diff --quiet "${base_sha}" HEAD -- deployment/helm deployment/argocd deployment/operator; then
             echo "helm=false" >> "${GITHUB_OUTPUT}"
           else
             echo "helm=true" >> "${GITHUB_OUTPUT}"
@@ -582,7 +582,12 @@ jobs:
 
           argocd_dir=deployment/argocd
 
-          for f in ${argocd_dir}/application.yaml ${argocd_dir}/applicationset.yaml ${argocd_dir}/namespace.yaml; do
+          for f in \
+            ${argocd_dir}/application.yaml \
+            ${argocd_dir}/applicationset.yaml \
+            ${argocd_dir}/prerequisites-application.yaml \
+            ${argocd_dir}/prerequisites-applicationset.yaml \
+            ${argocd_dir}/namespace.yaml; do
             if ! python -c "import yaml,sys; docs=list(yaml.safe_load_all(open(sys.argv[1]))); assert docs, 'no docs'" "${f}"; then
               echo "::error::ArgoCD manifest ${f} failed to parse as YAML"
               exit 1
@@ -591,7 +596,7 @@ jobs:
 
           # Verify the Application declares the expected top-level spec keys.
           python - <<'PY'
-          import yaml, sys
+          import os, yaml, sys
           with open('deployment/argocd/application.yaml') as f:
               app = yaml.safe_load(f)
           assert app['kind'] == 'Application', f"kind={app.get('kind')}"
@@ -599,6 +604,29 @@ jobs:
           assert 'values-production.yaml' in app['spec']['source']['helm']['valueFiles']
           assert app['spec']['syncPolicy']['automated']['prune'] is True
           assert app['spec']['syncPolicy']['automated']['selfHeal'] is True
+
+          with open('deployment/argocd/prerequisites-application.yaml') as f:
+              prereq = yaml.safe_load(f)
+          assert prereq['kind'] == 'Application'
+          assert prereq['spec']['source']['path'] == 'deployment/operator/config'
+          assert prereq['metadata']['annotations']['argocd.argoproj.io/sync-wave'] == '-10'
+          assert prereq['spec']['syncPolicy']['automated']['prune'] is False
+          assert prereq['spec']['syncPolicy']['automated']['selfHeal'] is True
+          assert 'ServerSideApply=true' in prereq['spec']['syncPolicy']['syncOptions']
+          assert 'Prune=false' in prereq['spec']['syncPolicy']['syncOptions']
+
+          with open('deployment/argocd/prerequisites-applicationset.yaml') as f:
+              prereq_set = yaml.safe_load(f)
+          assert prereq_set['kind'] == 'ApplicationSet'
+          assert prereq_set['spec']['preserveResourcesOnDeletion'] is True
+          assert prereq_set['spec']['generators'][0]['clusters'] is not None
+          assert prereq_set['spec']['template']['metadata']['annotations']['argocd.argoproj.io/sync-wave'] == '-10'
+          assert prereq_set['spec']['template']['spec']['source']['path'] == 'deployment/operator/config'
+          prereq_policy = prereq_set['spec']['template']['spec']['syncPolicy']
+          assert prereq_policy['automated']['prune'] is False
+          assert prereq_policy['automated']['selfHeal'] is True
+          assert 'ServerSideApply=true' in prereq_policy['syncOptions']
+          assert 'Prune=false' in prereq_policy['syncOptions']
 
           with open('deployment/argocd/applicationset.yaml') as f:
               appset = yaml.safe_load(f)
@@ -620,8 +648,13 @@ jobs:
                       for r in rules:
                           assert 'secrets' not in r.get('resources', []), \
                               "Role must not grant secrets access"
+
+          if not os.path.exists('deployment/operator/config/kustomization.yaml'):
+              raise SystemExit('missing prerequisite kustomization')
           print('ArgoCD manifests validated')
           PY
+
+          kubectl kustomize deployment/operator/config > /dev/null
 
   security:
     name: Repository security checks

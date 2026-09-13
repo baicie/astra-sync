@@ -37,9 +37,9 @@ class AstraSyncCliTest {
         assertThat(help.exitCode()).isZero();
         assertThat(help.stdout()).contains("Usage: astrasync", "run");
         assertThat(version.exitCode()).isZero();
-        assertThat(version.stdout()).contains("AstraSync 0.1.0-SNAPSHOT");
+        assertThat(version.stdout()).contains("AstraSync 0.8.0");
         assertThat(runVersion.exitCode()).isZero();
-        assertThat(runVersion.stdout()).contains("AstraSync 0.1.0-SNAPSHOT");
+        assertThat(runVersion.stdout()).contains("AstraSync 0.8.0");
         assertThat(missingCommand.exitCode()).isEqualTo(AstraSyncCli.EXIT_INPUT);
         assertThat(missingCommand.stderr()).contains("Usage: astrasync");
         assertThat(unknown.exitCode()).isEqualTo(AstraSyncCli.EXIT_INPUT);
@@ -94,7 +94,8 @@ class AstraSyncCliTest {
 
     @Test
     void catalogPrintReportsInvalidInputAsExitTwo() {
-        Invocation invocation = invoke("catalog-print", tempDirectory.resolve("missing.pb").toString());
+        Invocation invocation =
+                invoke("catalog-print", tempDirectory.resolve("missing.pb").toString());
 
         assertThat(invocation.exitCode()).isEqualTo(AstraSyncCli.EXIT_INPUT);
         assertThat(invocation.stderr())

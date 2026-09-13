@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Accepted — §2 superseded by ADR-086; admission enforcement restored by ADR-087
 
 ## Context
 
@@ -67,6 +67,10 @@ statement. The correct statement is:
 > authenticated principal's tenant context.
 
 ### 2. Add kubebuilder validation for the required label
+
+> **Corrected by ADR-086.** Kubernetes CRD schemas cannot validate
+> `metadata.labels`; the CEL rule below was not installable and has been
+> removed. The label remains a required trusted-writer contract.
 
 The `SyncJob` CRD is annotated with kubebuilder validation
 markers that enforce the presence and format of the label:
