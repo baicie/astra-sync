@@ -3,6 +3,10 @@ package io.astrasync.engine.worker;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.LoggerContext;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import io.astrasync.connector.api.CheckpointContext;
 import io.astrasync.connector.api.SinkCommitContext;
 import io.astrasync.connector.api.data.Row;
@@ -31,6 +35,7 @@ import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.slf4j.LoggerFactory;
 
 class InProcessBatchWorkerTest {
     @TempDir
@@ -112,6 +117,33 @@ class InProcessBatchWorkerTest {
                         .timer()
                         .count())
                 .isEqualTo(2);
+    }
+
+    @Test
+    void emitsTaskLogsWithTrustedIdentity() {
+        String jobId = UUID.randomUUID().toString();
+        String tenantId = UUID.randomUUID().toString();
+        Logger logger = (Logger) LoggerFactory.getLogger(InProcessBatchWorker.class);
+        LoggerContext context = (LoggerContext) LoggerFactory.getILoggerFactory();
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.setContext(context);
+        appender.start();
+        logger.addAppender(appender);
+        LifecycleSource source = new LifecycleSource(RowBatch.last(List.of(Row.of("id", 1))));
+        LifecycleSink sink = new LifecycleSink(new ArrayList<>());
+
+        try {
+            new InProcessBatchWorker("worker-a")
+                    .execute(new BatchTask(split("split-1"), source, sink, 1, 1).withIdentity(jobId, tenantId));
+        } finally {
+            logger.detachAppender(appender);
+        }
+
+        assertThat(appender.list).isNotEmpty();
+        assertThat(appender.list).allSatisfy(event -> {
+            assertThat(event.getMDCPropertyMap()).containsEntry("tenant_id", tenantId);
+            assertThat(event.getMDCPropertyMap()).containsEntry("job_id", jobId);
+        });
     }
 
     @Test
