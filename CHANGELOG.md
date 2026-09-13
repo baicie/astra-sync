@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Phase 58 (ADR-105): route Scheduler production metrics through the shared
+  Recorder and use one canonical request ID across assignment, lease-takeover,
+  reconcile-duration exemplars, and reconciliation failure logs.
+
 - Phase 57 (ADR-104): attach canonical `request_id` exemplars to API Server
   and auth-library sign-in and session-revoke counters. API Server session
   revoke now reuses one request ID across the audit row and per-tenant metric

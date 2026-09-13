@@ -1,10 +1,14 @@
 package scheduler
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -18,6 +22,8 @@ import (
 	"io.astrasync/control-plane/scheduler/internal/dispatch"
 	"io.astrasync/control-plane/scheduler/internal/metrics"
 )
+
+const canonicalSchedulerRequestID = "d724ad9a-30a2-4dab-9704-2b01ea1f67e1"
 
 func TestReconcilerRecordsAssignmentSuccessForAClaimedExecution(t *testing.T) {
 	clock := time.Date(2026, 8, 5, 12, 0, 0, 0, time.UTC)
@@ -136,6 +142,92 @@ func TestReconcilerRecordsLeaseTakeoverOncePerAttempt(t *testing.T) {
 	}
 	if got := testutil.ToFloat64(takeover); got != before+1 {
 		t.Fatalf("lease takeover samples = %v, want %v", got, before+1)
+	}
+}
+
+func TestReconcilerRecordsSchedulerMetricsThroughRecorderWithOneRequestID(t *testing.T) {
+	clock := time.Date(2026, 8, 5, 12, 0, 0, 0, time.UTC)
+	repository := memory.New()
+	created := createRunningJob(t, repository, clock)
+	store := newFakeStore(dispatch.Record{
+		Identity:       dispatch.Identity{JobUID: created.UID, Epoch: 1},
+		Key:            created.Key,
+		OwnerID:        "scheduler-a",
+		Phase:          dispatch.PhaseClaimed,
+		LeaseTakenOver: true,
+	})
+	dispatcher := &fakeDispatcher{observation: Observation{State: ObservationRunning}}
+	registry := prometheus.NewRegistry()
+	recorder, err := metrics.NewRecorder(registry)
+	if err != nil {
+		t.Fatalf("new recorder: %v", err)
+	}
+	reconciler := newTestReconciler(
+		t,
+		store,
+		repository,
+		dispatcher,
+		clock,
+		WithMetricsRecorder(recorder),
+		WithUIDSource(func() string { return canonicalSchedulerRequestID }),
+	)
+
+	if err := reconciler.Tick(context.Background()); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	request.Header.Set("Accept", "application/openmetrics-text")
+	response := httptest.NewRecorder()
+	metrics.HandlerFor(registry).ServeHTTP(response, request)
+	body := response.Body.String()
+	for _, family := range []string{
+		"scheduler_job_assignment_total",
+		"scheduler_lease_takeover_total",
+		"scheduler_job_reconcile_duration_seconds",
+	} {
+		if !strings.Contains(body, family) {
+			t.Fatalf("OpenMetrics body missing %q: %s", family, body)
+		}
+	}
+	if count := strings.Count(body, `request_id="`+canonicalSchedulerRequestID+`"`); count != 3 {
+		t.Fatalf("request_id exemplar count = %d, want 3: %s", count, body)
+	}
+}
+
+func TestRunTickLogsRequestID(t *testing.T) {
+	clock := time.Date(2026, 8, 5, 12, 0, 0, 0, time.UTC)
+	repository := memory.New()
+	created := createRunningJob(t, repository, clock)
+	store := newFakeStore(dispatch.Record{
+		Identity: dispatch.Identity{JobUID: created.UID, Epoch: 1},
+		Key:      created.Key,
+		OwnerID:  "scheduler-a",
+		Phase:    dispatch.PhaseStarting,
+	})
+	dispatcher := &fakeDispatcher{err: errors.New("Kubernetes API unavailable")}
+	var logs bytes.Buffer
+	reconciler, err := New(
+		Config{
+			OwnerID: "scheduler-a", MaximumActive: 2,
+			LeaseDuration: 10 * time.Minute, HeartbeatTimeout: 2 * time.Minute,
+			ReconcileEvery: time.Minute, OperationTimeout: time.Second,
+		},
+		store,
+		repository,
+		dispatcher,
+		func() time.Time { return clock },
+		slog.New(slog.NewJSONHandler(&logs, nil)),
+		WithUIDSource(func() string { return canonicalSchedulerRequestID }),
+	)
+	if err != nil {
+		t.Fatalf("new reconciler: %v", err)
+	}
+
+	reconciler.runTick(context.Background())
+
+	if !strings.Contains(logs.String(), `"request_id":"`+canonicalSchedulerRequestID+`"`) {
+		t.Fatalf("scheduler error log missing request_id: %s", logs.String())
 	}
 }
 
@@ -461,6 +553,7 @@ func newTestReconciler(
 	repository *memory.Repository,
 	dispatcher *fakeDispatcher,
 	clock time.Time,
+	options ...Option,
 ) *Reconciler {
 	t.Helper()
 	reconciler, err := New(
@@ -474,6 +567,7 @@ func newTestReconciler(
 		dispatcher,
 		func() time.Time { return clock },
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
+		options...,
 	)
 	if err != nil {
 		t.Fatalf("new reconciler: %v", err)
