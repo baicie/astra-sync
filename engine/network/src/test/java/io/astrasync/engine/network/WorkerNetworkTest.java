@@ -86,6 +86,7 @@ class WorkerNetworkTest {
         assertThat(appender.list).allSatisfy(event -> {
             assertThat(event.getMDCPropertyMap()).containsEntry("tenant_id", TENANT_ID);
             assertThat(event.getMDCPropertyMap()).containsEntry("job_id", JOB_ID);
+            assertThat(event.getMDCPropertyMap()).containsEntry("worker_id", "worker-a");
         });
     }
 

@@ -10,6 +10,7 @@ public final class DataPlaneLogContext implements AutoCloseable {
     private static final String TENANT_ID = "tenant_id";
     private static final String JOB_ID = "job_id";
     private static final String EPOCH = "epoch";
+    private static final String WORKER_ID = "worker_id";
     private static final String STAGE = "stage";
     private static final String OUTCOME = "outcome";
 
@@ -31,15 +32,22 @@ public final class DataPlaneLogContext implements AutoCloseable {
 
     /** Opens a task-scoped context with optional execution epoch. */
     public static DataPlaneLogContext open(String tenantId, String jobId, Long executionEpoch) {
-        return open(tenantId, jobId, executionEpoch, null, null);
+        return open(tenantId, jobId, executionEpoch, null, null, null);
     }
 
     /** Opens a nested context with optional stage and outcome fields. */
     public static DataPlaneLogContext open(
             String tenantId, String jobId, Long executionEpoch, String stage, String outcome) {
+        return open(tenantId, jobId, executionEpoch, null, stage, outcome);
+    }
+
+    /** Opens a worker-scoped context with optional stage and outcome fields. */
+    public static DataPlaneLogContext open(
+            String tenantId, String jobId, Long executionEpoch, String workerId, String stage, String outcome) {
         Map<String, String> values = new HashMap<>();
         values.put(TENANT_ID, tenantId);
         values.put(JOB_ID, jobId);
+        values.put(WORKER_ID, workerId);
         if (executionEpoch != null && executionEpoch > 0) {
             values.put(EPOCH, executionEpoch.toString());
         }

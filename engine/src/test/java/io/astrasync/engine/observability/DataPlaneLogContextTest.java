@@ -11,10 +11,11 @@ class DataPlaneLogContextTest {
         MDC.put("tenant_id", "outer-tenant");
         try {
             try (DataPlaneLogContext ignored =
-                    DataPlaneLogContext.open("inner-tenant", "job-1", 4L, "read", "success")) {
+                    DataPlaneLogContext.open("inner-tenant", "job-1", 4L, "worker-a", "read", "success")) {
                 assertThat(MDC.get("tenant_id")).isEqualTo("inner-tenant");
                 assertThat(MDC.get("job_id")).isEqualTo("job-1");
                 assertThat(MDC.get("epoch")).isEqualTo("4");
+                assertThat(MDC.get("worker_id")).isEqualTo("worker-a");
                 assertThat(MDC.get("stage")).isEqualTo("read");
                 assertThat(MDC.get("outcome")).isEqualTo("success");
             }
@@ -22,6 +23,7 @@ class DataPlaneLogContextTest {
             assertThat(MDC.get("tenant_id")).isEqualTo("outer-tenant");
             assertThat(MDC.get("job_id")).isNull();
             assertThat(MDC.get("epoch")).isNull();
+            assertThat(MDC.get("worker_id")).isNull();
             assertThat(MDC.get("stage")).isNull();
             assertThat(MDC.get("outcome")).isNull();
         } finally {

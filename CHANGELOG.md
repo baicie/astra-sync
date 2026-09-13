@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Phase 52 (ADR-101): add `worker_id` to Worker execution and Coordinator-side
+  remote dispatch logs. Multi-Worker jobs can now correlate logs and metrics
+  with the same bounded Worker identity without a protocol change.
+
 - Phase 51: extend structured log context to Coordinator-side
   `RemoteBatchWorker` dispatch. Remote task start, completion, failure, and
   checkpoint events now carry tenant/job identity and bounded outcomes.
