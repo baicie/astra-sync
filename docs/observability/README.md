@@ -36,7 +36,9 @@ canonical UUID `request_id` can be emitted as a bounded exemplar. Phase 57
 and session-revoke counters. Phase 58 (ADR-105) adds per-tick Scheduler
 exemplars and request-ID failure logs. Phase 59 (ADR-106) assigns one Console
 BFF request ID across downstream gRPC metadata, the auth flow, and Console
-request/render exemplars. F8 adds a
+request/render exemplars. Phase 60 (ADR-107) attaches the durable Connection
+Test operation ID to `connection_test_total` and enables OpenMetrics on the
+executor handler. F8 adds a
 Micrometer-backed Java data-plane registry: `CheckpointBatchCoordinator` emits
 batch/checkpoint samples, `InProcessBatchWorker` emits record-count samples,
 and the Worker-local spillable exchange emits
@@ -46,13 +48,14 @@ Coordinator remains one-shot. Phase 56 (ADR-103) attaches canonical
 `request_id` exemplars to all seven Java data-plane families in the
 OpenMetrics representation. F10 records `connection_test_total` only after
 the executor durably completes a claimed operation; policy-denied probes use
-the bounded `rejected` outcome. F11 records Console BFF request outcomes and
-HTML render latency with bounded handler names. F12 records trusted-proxy HSTS
-responses at the API Server security boundary. F13 records Controller
-reconcile duration with fixed `_unknown` tenant scope. Other control-plane
-business call sites remain pending; the catalog marks each family separately.
-Phase 10 verifies the multi-region families through the API Server shared
-registry and documents their dashboard recipes.
+the bounded `rejected` outcome. Phase 60 (ADR-107) attaches the durable
+operation ID as its `request_id` exemplar. F11 records Console BFF request
+outcomes and HTML render latency with bounded handler names. F12 records
+trusted-proxy HSTS responses at the API Server security boundary. F13 records
+Controller reconcile duration with fixed `_unknown` tenant scope. Other
+control-plane business call sites remain pending; the catalog marks each
+family separately. Phase 10 verifies the multi-region families through the
+API Server shared registry and documents their dashboard recipes.
 
 ## Documents
 
@@ -131,7 +134,8 @@ The handbook does:
 - Record F8 Java data-plane observations, their `_unknown` tenant fallback,
   and the explicit Worker metrics listener contract.
 - Record F10 Connection Test Executor outcomes after durable completion, with
-  policy rejection separated from executor or remote failures.
+  policy rejection separated from executor or remote failures. Phase 60
+  (ADR-107) records the durable operation ID as a bounded exemplar.
 - Record F11 Console BFF request outcomes and HTML render latency using a
   fixed handler allowlist and trusted response tenant scope.
 - Record F12 trusted-proxy HSTS observations only when the API Server adds the

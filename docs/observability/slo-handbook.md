@@ -169,6 +169,8 @@ sum by (tenant_id, outcome) (
 denial, and `failure` covers timeout, cancellation, credential, transport, and
 handshake failures. The executor records the sample only after the durable
 operation completion succeeds, so a lost lease does not create an observation.
+Phase 60 (ADR-107) attaches the durable operation ID as a `request_id`
+exemplar, allowing the sample to be joined to the authoritative operation row.
 
 ## Console diagnostics
 
@@ -258,8 +260,9 @@ HSTS, and Controller reconcile families. Phase 56 (ADR-103) adds canonical
 request-ID exemplars to the Java data-plane families, and Phase 57 (ADR-104)
 adds them to sign-in and session-revoke counters. Phase 58 (ADR-105) adds
 per-tick Scheduler exemplars, and Phase 59 (ADR-106) adds Console BFF request
-and render exemplars. Remaining follow-up work must instrument the other Go
-control-plane descriptors. The completed slices are recorded in ADR-047 and
-the observability changelog.
+and render exemplars. Phase 60 (ADR-107) adds Connection Test operation-ID
+exemplars. Remaining follow-up work must instrument the other Go control-plane
+descriptors. The completed slices are recorded in ADR-047 and the
+observability changelog.
 
 <!-- placeholders: slo-availability-target, slo-freshness-budget, slo-deliverability-target, audit-retention-days -->

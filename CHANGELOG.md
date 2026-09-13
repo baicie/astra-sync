@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Phase 60 (ADR-107): attach the durable Connection Test operation ID as a
+  canonical `request_id` exemplar on `connection_test_total` and enable
+  OpenMetrics negotiation on the production Connection Test Executor
+  `/metrics` handler.
+
 - Phase 59 (ADR-106): assign one Console BFF request ID at the HTTP boundary,
   reuse it for downstream gRPC metadata and auth flow, and attach it as a
   canonical `request_id` exemplar to Console request and HTML render metrics.

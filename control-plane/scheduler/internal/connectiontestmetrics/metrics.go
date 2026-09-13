@@ -13,6 +13,7 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -101,17 +102,37 @@ func DefaultRecorder() *Recorder {
 // through normalize.NormalizeTenant; outcome routes through
 // normalize.NormalizeOutcome with the documented
 // `success | rejected | failure` allowlist and OutcomeFailure as
-// the default value for non-allowlisted inputs. Calls with a
-// nil receiver are silently dropped so callers can pass a
-// Recorder only at the boundary sites that own it.
-func (r *Recorder) Observe(tenantID, outcome string) {
+// the default value for non-allowlisted inputs. requestID is attached as an
+// exemplar only when it is a canonical lowercase UUID. Calls with a nil
+// receiver are silently dropped so callers can pass a Recorder only at the
+// boundary sites that own it.
+func (r *Recorder) Observe(tenantID, outcome, requestID string) {
 	if r == nil || r.ConnectionTestTotal == nil {
 		return
 	}
-	r.ConnectionTestTotal.WithLabelValues(
-		normalize.NormalizeTenant(tenantID),
-		normalize.NormalizeOutcome(outcome, outcomeAllowlist, OutcomeFailure),
-	).Inc()
+	increment(
+		r.ConnectionTestTotal.WithLabelValues(
+			normalize.NormalizeTenant(tenantID),
+			normalize.NormalizeOutcome(outcome, outcomeAllowlist, OutcomeFailure),
+		),
+		requestExemplar(requestID),
+	)
+}
+
+func increment(counter prometheus.Counter, exemplar prometheus.Labels) {
+	if adder, ok := counter.(prometheus.ExemplarAdder); ok && exemplar != nil {
+		adder.AddWithExemplar(1, exemplar)
+		return
+	}
+	counter.Inc()
+}
+
+func requestExemplar(requestID string) prometheus.Labels {
+	parsed, err := uuid.Parse(requestID)
+	if err != nil || parsed.String() != requestID {
+		return nil
+	}
+	return prometheus.Labels{"request_id": requestID}
 }
 
 // Handler returns the Prometheus HTTP handler that scrapes the global
@@ -120,7 +141,7 @@ func (r *Recorder) Observe(tenantID, outcome string) {
 // entry point stable so any existing import (including the legacy
 // metrics_test.go) continues to scrape the same series.
 func Handler() http.Handler {
-	return promhttp.Handler()
+	return HandlerFor(prometheus.DefaultGatherer)
 }
 
 // HandlerFor returns a Prometheus HTTP handler that scrapes the

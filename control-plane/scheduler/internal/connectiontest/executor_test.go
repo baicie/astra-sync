@@ -5,12 +5,16 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"net/netip"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 
 	"io.astrasync/control-plane/connection"
@@ -118,7 +122,8 @@ func TestExecutorRecordsAuthoritativeConnectionTestOutcome(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			repository, tenantID, operationID := seedExecutorTest(t)
-			recorder, err := connectiontestmetrics.NewRecorder(prometheus.NewRegistry())
+			registry := prometheus.NewRegistry()
+			recorder, err := connectiontestmetrics.NewRecorder(registry)
 			if err != nil {
 				t.Fatalf("create recorder: %v", err)
 			}
@@ -136,6 +141,10 @@ func TestExecutorRecordsAuthoritativeConnectionTestOutcome(t *testing.T) {
 				recorder.ConnectionTestTotal.WithLabelValues(tenantID, test.outcome),
 			); got != 1 {
 				t.Fatalf("%s connection test samples = %v, want 1", test.outcome, got)
+			}
+			body := scrapeExecutorOpenMetrics(t, registry)
+			if count := strings.Count(body, `request_id="`+operationID+`"`); count != 1 {
+				t.Fatalf("request_id exemplar count = %d, want 1: %s", count, body)
 			}
 			result, err := repository.GetTest(context.Background(), tenantID, operationID)
 			if err != nil || result.OperationID != operationID {
@@ -299,4 +308,16 @@ func executorIdentity(label string, now time.Time) connection.MutationIdentity {
 func executorDigest(value string) string {
 	sum := sha256.Sum256([]byte(value))
 	return fmt.Sprintf("sha256:%x", sum)
+}
+
+func scrapeExecutorOpenMetrics(t *testing.T, gatherer prometheus.Gatherer) string {
+	t.Helper()
+	request := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	request.Header.Set("Accept", "application/openmetrics-text")
+	response := httptest.NewRecorder()
+	promhttp.HandlerFor(gatherer, promhttp.HandlerOpts{EnableOpenMetrics: true}).ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("scrape status = %d, want 200", response.Code)
+	}
+	return response.Body.String()
 }

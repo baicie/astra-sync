@@ -21,7 +21,9 @@ authorized audit queries. Those call sites update three families and attach a
 canonical UUID `request_id` through `AddWithExemplar` or
 `ObserveWithExemplar`. The API Server handler enables OpenMetrics content
 negotiation, which is required to transmit those exemplars. F10 activates
-`connection_test_total` after the executor durably completes a claimed test;
+`connection_test_total` after the executor durably completes a claimed test.
+Phase 60 (ADR-107) attaches the durable operation ID as the request exemplar
+and enables OpenMetrics negotiation on the executor's production handler;
 F11 activates `console_request_total` and
 `console_render_duration_seconds`. F12 activates
 `apiserver_trusted_proxy_hsts_total` when the API Server emits HSTS for a
@@ -47,7 +49,7 @@ The table separates descriptor availability from sampled runtime data.
 | `apiserver_trusted_proxy_hsts_total` | api-server | F4 descriptor + Recorder method (slice 43.1) | emitted by F12 trusted-proxy HSTS middleware; the observer now funnels the pre-auth tenant through `normalize` (slice 43.1) |
 | `scheduler_*` listed below | scheduler | F4 descriptor + `/metrics` | assignment, lease-takeover, and reconcile-duration samples emitted by the Scheduler |
 | `astrasync_multi_region_promotion_*`, `astrasync_multi_region_event_*`, `astrasync_multi_region_recovery_*` | control-plane replication | recorder registration; API Server exposition is embedding-owned | promotion, event-delivery, and recovery samples emitted when a recorder is injected; Phase 10 verifies the API Server scrape path |
-| `connection_test_total` | connection-test-executor | F4 descriptor + `/metrics` | emitted by F10 after durable test completion |
+| `connection_test_total` | connection-test-executor | F4 descriptor + `/metrics` | emitted by F10 after durable test completion; Phase 60 (ADR-107) attaches the durable operation-ID exemplar |
 | `console_*` listed below | console | F4 descriptor + `/metrics` | Console BFF request and render samples emitted by F11 |
 | `auth_*` listed below | auth library | descriptor package + `authmetrics.Recorder` | `auth_sign_in_total` is **emitted** by Console BFF `Manager.CompleteLogin` (slice 43.1.5, 2026-09-08); `auth_session_revoke_total` is **emitted** by admin CLI `revoke-session` (Phase 22 slice 48, ADR-065) |
 | `controller_job_controller_reconcile_duration_seconds` | controller | controller-runtime `/metrics` | emitted by F13 with a fixed `_unknown` tenant scope; slice 43.3 deletes the package-local normalize helpers in favour of `observability/normalize` |
@@ -147,7 +149,8 @@ histogram and to the audit-query histogram only when the value is a canonical
 lowercase UUID. Phase 57 (ADR-104) extends the same contract to API Server and
 auth-library sign-in and session-revoke counters. Phase 58 (ADR-105) adds
 per-tick Scheduler exemplars, and Phase 59 (ADR-106) adds Console BFF
-request-boundary exemplars. Other values still produce the bounded metric
+request-boundary exemplars. Phase 60 (ADR-107) adds the durable Connection
+Test operation-ID exemplar. Other values still produce the bounded metric
 sample but no exemplar. `request_id` is never a normal time-series label.
 Histogram metrics emit `le` buckets; the dashboard recipes compose P50, P95,
 and P99 from them.
@@ -197,7 +200,7 @@ wires the Console BFF request path.
 
 | Metric | Type | Labels | Description |
 |---|---|---|---|
-| `connection_test_total` | counter | `tenant_id`, `outcome` | Completed Connection Test Executor operations. `outcome` is `success`, `rejected` for an egress-policy denial, or `failure` for timeout, cancellation, credential, transport, or handshake failure. The sample is recorded only after the durable completion succeeds. Phase 19 slice 45.1 (ADR-061) wires a Recorder that routes both labels through `io.astrasync/control-plane/observability/normalize`; the `outcome` allowlist is the documented `success\|rejected\|failure` and the default value is `failure`. |
+| `connection_test_total` | counter | `tenant_id`, `outcome` | Completed Connection Test Executor operations. `outcome` is `success`, `rejected` for an egress-policy denial, or `failure` for timeout, cancellation, credential, transport, or handshake failure. The sample is recorded only after the durable completion succeeds. Phase 19 slice 45.1 (ADR-061) wires a Recorder that routes both labels through `io.astrasync/control-plane/observability/normalize`; the `outcome` allowlist is the documented `success\|rejected\|failure` and the default value is `failure`. Phase 60 (ADR-107) attaches the durable operation ID as a canonical `request_id` exemplar. |
 | `console_request_total` | counter | `tenant_id`, `outcome`, `handler` | Console request outcomes by stable handler name. F11 records `success` for 2xx/3xx responses, `rejected` for 4xx responses, and `failure` for 5xx responses. The tenant comes from the server-written scope response header and falls back to `_unknown`. Phase 59 (ADR-106) attaches the request-boundary canonical `request_id` exemplar. |
 | `console_render_duration_seconds` | histogram | `handler` | HTML response duration for the Console's fixed `static` handler. Phase 59 (ADR-106) attaches the request-boundary canonical `request_id` exemplar. |
 
@@ -303,8 +306,9 @@ Phase 56 (ADR-103) implements the Java data-plane `request_id` exemplar
 contract documented in ADR-047 §126, and Phase 57 (ADR-104) completes the
 API Server and auth-library sign-in/session-revoke counters. Phase 58
 (ADR-105) adds Scheduler tick exemplars, and Phase 59 (ADR-106) adds Console
-BFF request boundary exemplars. Other metric owners remain responsible for
-adding their own exemplars.
+BFF request boundary exemplars. Phase 60 (ADR-107) adds Connection Test
+operation-ID exemplars. Other metric owners remain responsible for adding
+their own exemplars.
 
 ### Slice 43.0 — umbrella infrastructure
 

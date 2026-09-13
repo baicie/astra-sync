@@ -194,7 +194,7 @@ func (e *Executor) execute(ctx context.Context, work connection.TestWork) error 
 	if err != nil {
 		return fmt.Errorf("complete Connection test %s: %w", work.Operation.OperationID, err)
 	}
-	e.metrics.Observe(work.Operation.TenantID, connectionTestOutcome(completion))
+	e.metrics.Observe(work.Operation.TenantID, connectionTestOutcome(completion), work.Operation.OperationID)
 	return nil
 }
 

@@ -14,7 +14,10 @@ import (
 	"io.astrasync/control-plane/scheduler/internal/connectiontestmetrics"
 )
 
-const canonicalTenantUUID = "0190f7c4-6c8d-7a01-9d2b-1ecabdff0011"
+const (
+	canonicalTenantUUID  = "0190f7c4-6c8d-7a01-9d2b-1ecabdff0011"
+	canonicalRequestUUID = "d724ad9a-30a2-4dab-9704-2b01ea1f67e1"
+)
 
 // TestRecorderRoutesThroughNormalize exercises the slice-45.1
 // migration: connection_test_total labels must route through
@@ -60,7 +63,7 @@ func TestRecorderRoutesThroughNormalize(t *testing.T) {
 			if err != nil {
 				t.Fatalf("new recorder: %v", err)
 			}
-			recorder.Observe(testCase.tenantID, testCase.outcome)
+			recorder.Observe(testCase.tenantID, testCase.outcome, "")
 			body := scrapeOpenMetrics(t, registry)
 			sample := `connection_test_total{outcome="` + testCase.wantOut +
 				`",tenant_id="` + testCase.wantTenant + `"} 1`
@@ -99,7 +102,7 @@ func TestRecorderScrapeIsBoundedAcrossDistinctInputs(t *testing.T) {
 		{tenant: "BOB@acme.example", outcome: connectiontestmetrics.OutcomeRejected},
 	}
 	for _, call := range distinct {
-		recorder.Observe(call.tenant, call.outcome)
+		recorder.Observe(call.tenant, call.outcome, "")
 	}
 
 	body := scrapeOpenMetrics(t, registry)
@@ -130,7 +133,40 @@ func TestRecorderScrapeIsBoundedAcrossDistinctInputs(t *testing.T) {
 // before calling Observe.
 func TestRecorderNilReceiverIsSafe(t *testing.T) {
 	var recorder *connectiontestmetrics.Recorder
-	recorder.Observe(canonicalTenantUUID, connectiontestmetrics.OutcomeSuccess)
+	recorder.Observe(canonicalTenantUUID, connectiontestmetrics.OutcomeSuccess, canonicalRequestUUID)
+}
+
+func TestRecorderAttachesCanonicalRequestIDExemplar(t *testing.T) {
+	registry := prometheus.NewRegistry()
+	recorder, err := connectiontestmetrics.NewRecorder(registry)
+	if err != nil {
+		t.Fatalf("new recorder: %v", err)
+	}
+
+	recorder.Observe(canonicalTenantUUID, connectiontestmetrics.OutcomeSuccess, canonicalRequestUUID)
+
+	body := scrapeOpenMetrics(t, registry)
+	if count := strings.Count(body, `request_id="`+canonicalRequestUUID+`"`); count != 1 {
+		t.Fatalf("request_id exemplar count = %d, want 1: %s", count, body)
+	}
+}
+
+func TestRecorderDropsNonCanonicalRequestIDExemplar(t *testing.T) {
+	registry := prometheus.NewRegistry()
+	recorder, err := connectiontestmetrics.NewRecorder(registry)
+	if err != nil {
+		t.Fatalf("new recorder: %v", err)
+	}
+
+	recorder.Observe(canonicalTenantUUID, connectiontestmetrics.OutcomeSuccess, "")
+	recorder.Observe(canonicalTenantUUID, connectiontestmetrics.OutcomeSuccess, "request-1")
+	recorder.Observe(canonicalTenantUUID, connectiontestmetrics.OutcomeSuccess, strings.ToUpper(canonicalRequestUUID))
+	recorder.Observe(canonicalTenantUUID, connectiontestmetrics.OutcomeSuccess, strings.Repeat("a", 129))
+
+	body := scrapeOpenMetrics(t, registry)
+	if strings.Contains(body, "request_id=") {
+		t.Fatalf("non-canonical request ID was exposed as an exemplar: %s", body)
+	}
 }
 
 // TestNewRecorderRejectsNilRegisterer asserts the sentinel error
@@ -174,10 +210,14 @@ func TestPackageLevelVecRemainsRegistered(t *testing.T) {
 	}
 
 	request := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	request.Header.Set("Accept", "application/openmetrics-text")
 	recorder := httptest.NewRecorder()
 	connectiontestmetrics.Handler().ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("Handler() scrape status = %d, want 200", recorder.Code)
+	}
+	if contentType := recorder.Header().Get("Content-Type"); !strings.HasPrefix(contentType, "application/openmetrics-text") {
+		t.Fatalf("Handler() Content-Type = %q, want OpenMetrics", contentType)
 	}
 	if !strings.Contains(recorder.Body.String(), "connection_test_total") {
 		t.Fatalf("legacy Handler() body missing connection_test_total: %s", recorder.Body.String())
@@ -196,7 +236,7 @@ func TestHandlerForGathererExposesRecorderMetrics(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new recorder: %v", err)
 	}
-	recorder.Observe(canonicalTenantUUID, connectiontestmetrics.OutcomeSuccess)
+	recorder.Observe(canonicalTenantUUID, connectiontestmetrics.OutcomeSuccess, "")
 
 	request := httptest.NewRequest(http.MethodGet, "/metrics", nil)
 	request.Header.Set("Accept", "application/openmetrics-text")
