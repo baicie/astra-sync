@@ -31,7 +31,9 @@ Executor, and auth admin CLI use module-local `slog` JSON loggers.
 Prometheus descriptors and dedicated `/metrics` listeners are wired for
 the long-running Go executables. F7 instruments the API Server authentication
 interceptor and authorized audit-query path, and negotiates OpenMetrics so a
-canonical UUID `request_id` can be emitted as a bounded exemplar. F8 adds a
+canonical UUID `request_id` can be emitted as a bounded exemplar. Phase 57
+(ADR-104) completes exemplar coverage for API Server and auth-library sign-in
+and session-revoke counters. F8 adds a
 Micrometer-backed Java data-plane registry: `CheckpointBatchCoordinator` emits
 batch/checkpoint samples, `InProcessBatchWorker` emits record-count samples,
 and the Worker-local spillable exchange emits

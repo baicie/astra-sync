@@ -15,6 +15,47 @@ import (
 )
 
 const canonicalTenantUUID = "0190f7c4-6c8d-7a01-9d2b-1ecabdff0011"
+const canonicalRequestUUID = "d724ad9a-30a2-4dab-9704-2b01ea1f67e1"
+
+func TestRecorderAttachesCanonicalRequestIDExemplars(t *testing.T) {
+	registry := prometheus.NewRegistry()
+	recorder, err := authmetrics.NewRecorder(registry)
+	if err != nil {
+		t.Fatalf("new recorder: %v", err)
+	}
+
+	recorder.ObserveSignIn(canonicalTenantUUID, "success", canonicalRequestUUID)
+	recorder.ObserveSessionRevoke(canonicalTenantUUID, canonicalRequestUUID)
+
+	body := scrapeOpenMetrics(t, registry)
+	if count := strings.Count(body, `request_id="`+canonicalRequestUUID+`"`); count != 2 {
+		t.Fatalf("request_id exemplar count = %d, want 2: %s", count, body)
+	}
+	for _, sample := range []string{
+		`auth_sign_in_total{outcome="success",tenant_id="` + canonicalTenantUUID + `"} 1`,
+		`auth_session_revoke_total{tenant_id="` + canonicalTenantUUID + `"} 1`,
+	} {
+		if !strings.Contains(body, sample) {
+			t.Fatalf("OpenMetrics body missing %q: %s", sample, body)
+		}
+	}
+}
+
+func TestRecorderDropsNonCanonicalRequestIDExemplars(t *testing.T) {
+	registry := prometheus.NewRegistry()
+	recorder, err := authmetrics.NewRecorder(registry)
+	if err != nil {
+		t.Fatalf("new recorder: %v", err)
+	}
+
+	recorder.ObserveSignIn(canonicalTenantUUID, "success", "req-success")
+	recorder.ObserveSessionRevoke(canonicalTenantUUID, "req-success")
+
+	body := scrapeOpenMetrics(t, registry)
+	if strings.Contains(body, "request_id=") {
+		t.Fatalf("non-canonical request ID was exposed as an exemplar: %s", body)
+	}
+}
 
 // TestRecorderSignInRoutesThroughNormalize exercises the new
 // Recorder.ObserveSignIn entry point on a table that covers the

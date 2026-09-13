@@ -55,6 +55,10 @@ metric families. A Coordinator execution request ID is propagated to the
 Worker, attached to successful and failed data-plane observations, and
 exposed only through the OpenMetrics response.
 
+Phase 57 (ADR-104) adds the same exemplar to API Server and auth-library
+sign-in and session-revoke counters. The API Server session-revoke path uses
+one request ID for the audit event and every per-tenant metric observation.
+
 ## Manual lookup procedure
 
 An operator with no Prometheus exemplar support can join the three
@@ -116,9 +120,11 @@ and the metrics.
 
 F1–F5 deliver logging, descriptor, exposition, and Helm foundations. F7 adds
 API Server authentication and audit-query exemplars. Phase 56 (ADR-103) adds
-request-ID exemplars to all seven Java data-plane families. Exemplar coverage
-for the remaining control-plane call sites remains incomplete. The landed
-work is recorded in [`changelog.md`](changelog.md).
+request-ID exemplars to all seven Java data-plane families. Phase 57
+(ADR-104) completes API Server and auth-library sign-in/session-revoke
+exemplars. Exemplar coverage for the remaining control-plane call sites
+remains incomplete. The landed work is recorded in
+[`changelog.md`](changelog.md).
 
 ## Inline placeholders for the populated handbook
 

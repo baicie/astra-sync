@@ -16,6 +16,7 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -155,33 +156,37 @@ func (e *RecorderError) Wrap(cause error) *RecorderError {
 // ObserveSignIn records one auth-library sign-in flow. tenantID and
 // outcome route through normalize so the slice 43.2 label contract is
 // identical to every other tenant-deriving Recorder in the control
-// plane (ADR-058 §3). requestID is recorded verbatim — the auth flow
-// surface does not yet have a documented allowlist for request IDs, so
-// the recorder does not normalize. Calls with a nil receiver are
+// plane (ADR-058 §3). requestID is attached as an exemplar only when it
+// is a canonical lowercase UUID. Calls with a nil receiver are
 // silently dropped so callers can pass a Recorder only at the
 // boundary sites that own it.
 func (r *Recorder) ObserveSignIn(tenantID, outcome, requestID string) {
 	if r == nil || r.SignInTotal == nil {
 		return
 	}
-	r.SignInTotal.WithLabelValues(
-		normalize.NormalizeTenant(tenantID),
-		normalize.NormalizeOutcome(outcome, authOutcomeAllowlist, "failure"),
-	).Inc()
+	increment(
+		r.SignInTotal.WithLabelValues(
+			normalize.NormalizeTenant(tenantID),
+			normalize.NormalizeOutcome(outcome, authOutcomeAllowlist, "failure"),
+		),
+		requestExemplar(requestID),
+	)
 }
 
 // ObserveSessionRevoke records one auth-library session revocation.
 // The admin CLI `revoke-session` operation is the documented
 // slice-43.2 call site (ADR-058 §2). tenantID routes through
-// normalize; the auth revoke metric has no outcome label. Calls with
-// a nil receiver are silently dropped.
+// normalize; the auth revoke metric has no outcome label. requestID is
+// attached as an exemplar only when it is a canonical lowercase UUID.
+// Calls with a nil receiver are silently dropped.
 func (r *Recorder) ObserveSessionRevoke(tenantID, requestID string) {
 	if r == nil || r.SessionRevokeTotal == nil {
 		return
 	}
-	r.SessionRevokeTotal.WithLabelValues(
-		normalize.NormalizeTenant(tenantID),
-	).Inc()
+	increment(
+		r.SessionRevokeTotal.WithLabelValues(normalize.NormalizeTenant(tenantID)),
+		requestExemplar(requestID),
+	)
 }
 
 // Handler returns the Prometheus HTTP handler that scrapes the global
@@ -201,4 +206,20 @@ func Handler() http.Handler {
 // Handler().
 func HandlerFor(gatherer prometheus.Gatherer) http.Handler {
 	return promhttp.HandlerFor(gatherer, promhttp.HandlerOpts{EnableOpenMetrics: true})
+}
+
+func increment(counter prometheus.Counter, exemplar prometheus.Labels) {
+	if adder, ok := counter.(prometheus.ExemplarAdder); ok && exemplar != nil {
+		adder.AddWithExemplar(1, exemplar)
+		return
+	}
+	counter.Inc()
+}
+
+func requestExemplar(requestID string) prometheus.Labels {
+	parsed, err := uuid.Parse(requestID)
+	if err != nil || parsed.String() != requestID {
+		return nil
+	}
+	return prometheus.Labels{"request_id": requestID}
 }

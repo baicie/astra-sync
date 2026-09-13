@@ -141,11 +141,7 @@ func (r *Recorder) ObserveAuthRequest(tenantID, outcome, requestID string, durat
 	}
 	exemplar := requestExemplar(requestID)
 	counter := r.authRequestTotal.WithLabelValues(tenantID, outcome)
-	if adder, ok := counter.(prometheus.ExemplarAdder); ok && exemplar != nil {
-		adder.AddWithExemplar(1, exemplar)
-	} else {
-		counter.Inc()
-	}
+	increment(counter, exemplar)
 	observe(r.authRequestDuration.WithLabelValues(tenantID, outcome), duration, exemplar)
 }
 
@@ -173,20 +169,27 @@ func (r *Recorder) ObserveSignIn(tenantID, outcome, requestID string) {
 	}
 	normalizedTenant := normalize.NormalizeTenant(tenantID)
 	normalizedOutcome := normalize.NormalizeOutcome(outcome, signInOutcomeAllowlist, "failure")
-	r.signInTotal.WithLabelValues(normalizedTenant, normalizedOutcome).Inc()
+	increment(
+		r.signInTotal.WithLabelValues(normalizedTenant, normalizedOutcome),
+		requestExemplar(requestID),
+	)
 }
 
 // ObserveSessionRevoke records one session revocation. actorID is treated
 // as a worker-id-shaped label: trimmed, length-bounded at 128 bytes, and
 // collapsed to "_unknown" on overflow so two runaway callers cannot
-// collide on a truncated label.
-func (r *Recorder) ObserveSessionRevoke(tenantID, actorID string) {
+// collide on a truncated label. requestID is attached only when it is a
+// canonical UUID.
+func (r *Recorder) ObserveSessionRevoke(tenantID, actorID, requestID string) {
 	if r == nil {
 		return
 	}
 	normalizedTenant := normalize.NormalizeTenant(tenantID)
 	normalizedActor := normalize.NormalizeWorkerID(actorID)
-	r.sessionRevokeTotal.WithLabelValues(normalizedTenant, normalizedActor).Inc()
+	increment(
+		r.sessionRevokeTotal.WithLabelValues(normalizedTenant, normalizedActor),
+		requestExemplar(requestID),
+	)
 }
 
 // ObserveTrustedProxyHSTS records one HSTS response served by the
@@ -212,6 +215,14 @@ func observe(observer prometheus.Observer, duration time.Duration, exemplar prom
 		return
 	}
 	observer.Observe(seconds)
+}
+
+func increment(counter prometheus.Counter, exemplar prometheus.Labels) {
+	if adder, ok := counter.(prometheus.ExemplarAdder); ok && exemplar != nil {
+		adder.AddWithExemplar(1, exemplar)
+		return
+	}
+	counter.Inc()
 }
 
 func requestExemplar(requestID string) prometheus.Labels {

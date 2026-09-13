@@ -113,6 +113,7 @@ This directory contains the Architecture Decision Records (ADRs) for AstraSync.
 | [ADR-101](adr-101-data-plane-worker-id-log-field.md) | Data-Plane Worker Identity in Logs (`worker_id` correlation field) | Accepted | 2026-09-14 |
 | [ADR-102](adr-102-data-plane-request-id-propagation.md) | Data-Plane Request ID Propagation (`request_id` protocol and log correlation) | Accepted | 2026-09-14 |
 | [ADR-103](adr-103-java-data-plane-request-id-exemplars.md) | Java Data-Plane Request ID Exemplars (bounded OpenMetrics correlation) | Accepted | 2026-09-14 |
+| [ADR-104](adr-104-auth-metric-request-id-exemplars.md) | Auth Metric Request ID Exemplars (sign-in and session-revoke correlation) | Accepted | 2026-09-14 |
 
 ## Template
 

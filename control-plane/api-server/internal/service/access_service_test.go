@@ -3,6 +3,8 @@ package service_test
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
@@ -22,6 +24,7 @@ import (
 const (
 	accessTenantID    = "11111111-1111-1111-8111-111111111111"
 	accessPrincipalID = "22222222-2222-4222-8222-222222222222"
+	accessRequestID   = "d724ad9a-30a2-4dab-9704-2b01ea1f67e1"
 )
 
 func TestAccessServiceListMembersAuthorizesAndPaginates(t *testing.T) {
@@ -430,7 +433,7 @@ func TestAccessServiceRevokeConsoleSessionEmitsPerTenant(t *testing.T) {
 	}
 	serviceUnderTest, err := service.NewAccessService(repository, auth.DevelopmentAuthorizer{},
 		service.WithAccessClock(func() time.Time { return now }),
-		service.WithAccessUIDSource(func() string { return "uid-revoke" }),
+		service.WithAccessUIDSource(func() string { return accessRequestID }),
 		service.WithAccessRevokeRecorder(recorder),
 	)
 	if err != nil {
@@ -481,6 +484,16 @@ func TestAccessServiceRevokeConsoleSessionEmitsPerTenant(t *testing.T) {
 	}
 	if observed != 2 {
 		t.Fatalf("expected 2 per-tenant observations, got %d", observed)
+	}
+	if repository.auditWrites[0].RequestID != accessRequestID {
+		t.Fatalf("audit request_id = %q, want %q", repository.auditWrites[0].RequestID, accessRequestID)
+	}
+	scrapeRequest := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	scrapeRequest.Header.Set("Accept", "application/openmetrics-text")
+	scrapeRecorder := httptest.NewRecorder()
+	metrics.HandlerFor(registry).ServeHTTP(scrapeRecorder, scrapeRequest)
+	if count := strings.Count(scrapeRecorder.Body.String(), `request_id="`+accessRequestID+`"`); count != 2 {
+		t.Fatalf("request_id exemplar count = %d, want 2: %s", count, scrapeRecorder.Body.String())
 	}
 }
 
