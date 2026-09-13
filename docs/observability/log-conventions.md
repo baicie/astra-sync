@@ -214,8 +214,9 @@ logs. Phase 52 (ADR-101) adds `worker_id` to remote dispatch and Worker task
 logs. Phase 55 (ADR-102) adds `request_id` to Coordinator execution, remote
 dispatch, Worker task, stage, outcome, and checkpoint logs. Phase 56 (ADR-103)
 attaches canonical `request_id` exemplars to the Java data-plane metrics in
-OpenMetrics responses; logger tests only verify that supplied structured
-fields are preserved.
+OpenMetrics responses. Phase 58 (ADR-105) adds a per-tick `request_id` to
+Scheduler reconciliation failure logs; logger tests only verify that supplied
+structured fields are preserved.
 
 The implementation commits are recorded in
 [`changelog.md`](changelog.md).

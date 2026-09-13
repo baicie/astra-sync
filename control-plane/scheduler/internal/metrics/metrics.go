@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -123,6 +124,16 @@ func NewRecorder(registerer prometheus.Registerer) (*Recorder, error) {
 	return recorder, nil
 }
 
+// DefaultRecorder returns a recorder backed by the process-global
+// metric families exposed by Handler.
+func DefaultRecorder() *Recorder {
+	return &Recorder{
+		AssignmentTotal:    JobAssignmentTotal,
+		LeaseTakeoverTotal: LeaseTakeoverTotal,
+		ReconcileDuration:  JobReconcileDuration,
+	}
+}
+
 // ErrNilRegisterer is returned by NewRecorder when the caller passes a
 // nil prometheus.Registerer. The error exposes a sentinel value so
 // callers can detect the misuse without string-matching on a wrapped
@@ -186,51 +197,60 @@ func (e *RecorderError) Wrap(cause error) *RecorderError {
 // tenant_id, worker_id, and outcome labels all route through
 // normalize so the slice-44 contract is identical to every other
 // tenant-deriving Recorder in the control plane (ADR-058 §3).
-// requestID is recorded verbatim — the Scheduler dispatch surface
-// does not yet have a documented allowlist for request IDs, so the
-// recorder does not normalize. Calls with a nil receiver are
+// requestID is attached as an exemplar only when it is a canonical
+// lowercase UUID. Calls with a nil receiver are
 // silently dropped so callers can pass a Recorder only at the
 // boundary sites that own it.
 func (r *Recorder) ObserveAssignment(tenantID, workerID, outcome, requestID string) {
 	if r == nil || r.AssignmentTotal == nil {
 		return
 	}
-	r.AssignmentTotal.WithLabelValues(
-		normalize.NormalizeTenant(tenantID),
-		normalize.NormalizeWorkerID(workerID),
-		normalize.NormalizeOutcome(outcome, assignmentOutcomeAllowlist, "failure"),
-	).Inc()
+	increment(
+		r.AssignmentTotal.WithLabelValues(
+			normalize.NormalizeTenant(tenantID),
+			normalize.NormalizeWorkerID(workerID),
+			normalize.NormalizeOutcome(outcome, assignmentOutcomeAllowlist, "failure"),
+		),
+		requestExemplar(requestID),
+	)
 }
 
 // ObserveLeaseTakeover records one Scheduler lease takeover outcome.
 // tenant_id routes through normalize; outcome routes through
 // normalize with the documented allowlist `success` (non-success
-// values collapse to `_unknown` per the catalog contract). Calls
-// with a nil receiver are silently dropped.
+// values collapse to `_unknown` per the catalog contract). requestID
+// is attached as an exemplar only when it is a canonical lowercase
+// UUID. Calls with a nil receiver are silently dropped.
 func (r *Recorder) ObserveLeaseTakeover(tenantID, outcome, requestID string) {
 	if r == nil || r.LeaseTakeoverTotal == nil {
 		return
 	}
-	r.LeaseTakeoverTotal.WithLabelValues(
-		normalize.NormalizeTenant(tenantID),
-		normalize.NormalizeOutcome(outcome, leaseTakeoverOutcomeAllowlist, "_unknown"),
-	).Inc()
+	increment(
+		r.LeaseTakeoverTotal.WithLabelValues(
+			normalize.NormalizeTenant(tenantID),
+			normalize.NormalizeOutcome(outcome, leaseTakeoverOutcomeAllowlist, "_unknown"),
+		),
+		requestExemplar(requestID),
+	)
 }
 
 // ObserveReconcile records one Scheduler reconcile iteration. The
 // histogram observes the supplied duration verbatim (the duration
 // is a sample, not a label); tenant_id routes through normalize.
-// Calls with a nil receiver are silently dropped.
-func (r *Recorder) ObserveReconcile(tenantID string, duration time.Duration) {
+// requestID is attached as an exemplar only when it is a canonical
+// lowercase UUID. Calls with a nil receiver are silently dropped.
+func (r *Recorder) ObserveReconcile(tenantID, requestID string, duration time.Duration) {
 	if r == nil || r.ReconcileDuration == nil {
 		return
 	}
 	if duration < 0 {
 		duration = 0
 	}
-	r.ReconcileDuration.WithLabelValues(
-		normalize.NormalizeTenant(tenantID),
-	).Observe(duration.Seconds())
+	observe(
+		r.ReconcileDuration.WithLabelValues(normalize.NormalizeTenant(tenantID)),
+		duration.Seconds(),
+		requestExemplar(requestID),
+	)
 }
 
 // Handler returns the Prometheus HTTP handler that scrapes the global
@@ -250,4 +270,28 @@ func Handler() http.Handler {
 // Handler().
 func HandlerFor(gatherer prometheus.Gatherer) http.Handler {
 	return promhttp.HandlerFor(gatherer, promhttp.HandlerOpts{EnableOpenMetrics: true})
+}
+
+func increment(counter prometheus.Counter, exemplar prometheus.Labels) {
+	if adder, ok := counter.(prometheus.ExemplarAdder); ok && exemplar != nil {
+		adder.AddWithExemplar(1, exemplar)
+		return
+	}
+	counter.Inc()
+}
+
+func observe(observer prometheus.Observer, value float64, exemplar prometheus.Labels) {
+	if exemplarObserver, ok := observer.(prometheus.ExemplarObserver); ok && exemplar != nil {
+		exemplarObserver.ObserveWithExemplar(value, exemplar)
+		return
+	}
+	observer.Observe(value)
+}
+
+func requestExemplar(requestID string) prometheus.Labels {
+	parsed, err := uuid.Parse(requestID)
+	if err != nil || parsed.String() != requestID {
+		return nil
+	}
+	return prometheus.Labels{"request_id": requestID}
 }

@@ -16,6 +16,41 @@ import (
 )
 
 const canonicalTenantUUID = "0190f7c4-6c8d-7a01-9d2b-1ecabdff0011"
+const canonicalRequestUUID = "d724ad9a-30a2-4dab-9704-2b01ea1f67e1"
+
+func TestRecorderAttachesCanonicalRequestIDExemplars(t *testing.T) {
+	registry := prometheus.NewRegistry()
+	recorder, err := metrics.NewRecorder(registry)
+	if err != nil {
+		t.Fatalf("new recorder: %v", err)
+	}
+
+	recorder.ObserveAssignment(canonicalTenantUUID, "worker-a", "success", canonicalRequestUUID)
+	recorder.ObserveLeaseTakeover(canonicalTenantUUID, "success", canonicalRequestUUID)
+	recorder.ObserveReconcile(canonicalTenantUUID, canonicalRequestUUID, 50*time.Millisecond)
+
+	body := scrapeOpenMetrics(t, registry)
+	if count := strings.Count(body, `request_id="`+canonicalRequestUUID+`"`); count != 3 {
+		t.Fatalf("request_id exemplar count = %d, want 3: %s", count, body)
+	}
+}
+
+func TestRecorderDropsNonCanonicalRequestIDExemplars(t *testing.T) {
+	registry := prometheus.NewRegistry()
+	recorder, err := metrics.NewRecorder(registry)
+	if err != nil {
+		t.Fatalf("new recorder: %v", err)
+	}
+
+	recorder.ObserveAssignment(canonicalTenantUUID, "worker-a", "success", "req-success")
+	recorder.ObserveLeaseTakeover(canonicalTenantUUID, "success", "req-success")
+	recorder.ObserveReconcile(canonicalTenantUUID, "req-success", 50*time.Millisecond)
+
+	body := scrapeOpenMetrics(t, registry)
+	if strings.Contains(body, "request_id=") {
+		t.Fatalf("non-canonical request ID was exposed as an exemplar: %s", body)
+	}
+}
 
 // TestRecorderAssignmentRoutesThroughNormalize exercises the new
 // Recorder.ObserveAssignment entry point on a table that covers the
@@ -137,7 +172,7 @@ func TestRecorderReconcileRoutesThroughNormalize(t *testing.T) {
 			if err != nil {
 				t.Fatalf("new recorder: %v", err)
 			}
-			recorder.ObserveReconcile(testCase.tenantID, testCase.duration)
+			recorder.ObserveReconcile(testCase.tenantID, canonicalRequestUUID, testCase.duration)
 			body := scrapeOpenMetrics(t, registry)
 			sample := `scheduler_job_reconcile_duration_seconds_count{tenant_id="` + testCase.wantTenant + `"} 1`
 			if !strings.Contains(body, sample) {
@@ -182,7 +217,7 @@ func TestRecorderScrapeIsBoundedAcrossDistinctInputs(t *testing.T) {
 	}
 	for _, call := range distinct {
 		if call.reconcile {
-			recorder.ObserveReconcile(call.tenant, call.duration)
+			recorder.ObserveReconcile(call.tenant, canonicalRequestUUID, call.duration)
 		}
 		if call.revokeOnly {
 			recorder.ObserveLeaseTakeover(call.tenant, call.outcome, "request-id")
@@ -233,7 +268,7 @@ func TestRecorderNilReceiverIsSafe(t *testing.T) {
 	var recorder *metrics.Recorder
 	recorder.ObserveAssignment(canonicalTenantUUID, "worker-a", "success", "request-id")
 	recorder.ObserveLeaseTakeover(canonicalTenantUUID, "success", "request-id")
-	recorder.ObserveReconcile(canonicalTenantUUID, 50*time.Millisecond)
+	recorder.ObserveReconcile(canonicalTenantUUID, canonicalRequestUUID, 50*time.Millisecond)
 }
 
 // TestNewRecorderRejectsNilRegisterer asserts the sentinel error path.

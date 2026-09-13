@@ -58,6 +58,8 @@ exposed only through the OpenMetrics response.
 Phase 57 (ADR-104) adds the same exemplar to API Server and auth-library
 sign-in and session-revoke counters. The API Server session-revoke path uses
 one request ID for the audit event and every per-tenant metric observation.
+Phase 58 (ADR-105) adds a per-tick request ID to Scheduler assignment,
+lease-takeover, reconcile-duration samples, and reconciliation failure logs.
 
 ## Manual lookup procedure
 
@@ -122,8 +124,9 @@ F1–F5 deliver logging, descriptor, exposition, and Helm foundations. F7 adds
 API Server authentication and audit-query exemplars. Phase 56 (ADR-103) adds
 request-ID exemplars to all seven Java data-plane families. Phase 57
 (ADR-104) completes API Server and auth-library sign-in/session-revoke
-exemplars. Exemplar coverage for the remaining control-plane call sites
-remains incomplete. The landed work is recorded in
+exemplars. Phase 58 (ADR-105) adds Scheduler tick exemplars. Exemplar coverage
+for the remaining control-plane call sites remains incomplete. The landed
+work is recorded in
 [`changelog.md`](changelog.md).
 
 ## Inline placeholders for the populated handbook

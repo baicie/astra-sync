@@ -8,6 +8,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
+
 	"io.astrasync/control-plane/job"
 	"io.astrasync/control-plane/scheduler/internal/dispatch"
 	"io.astrasync/control-plane/scheduler/internal/metrics"
@@ -63,6 +65,8 @@ type Reconciler struct {
 	dispatches       dispatch.Store
 	jobs             JobRepository
 	dispatcher       ExecutionDispatcher
+	metricRecorder   *metrics.Recorder
+	requestIDSource  func() string
 	ownerID          string
 	maximumActive    int
 	leaseDuration    time.Duration
@@ -82,6 +86,28 @@ type Config struct {
 	OperationTimeout time.Duration
 }
 
+// Option customizes a Scheduler Reconciler.
+type Option func(*Reconciler)
+
+// WithMetricsRecorder injects the Scheduler metric recorder. A nil
+// recorder leaves the process-global Recorder in place.
+func WithMetricsRecorder(recorder *metrics.Recorder) Option {
+	return func(reconciler *Reconciler) {
+		if recorder != nil {
+			reconciler.metricRecorder = recorder
+		}
+	}
+}
+
+// WithUIDSource injects the request-ID generator used at each Tick.
+func WithUIDSource(source func() string) Option {
+	return func(reconciler *Reconciler) {
+		if source != nil {
+			reconciler.requestIDSource = source
+		}
+	}
+}
+
 func New(
 	config Config,
 	dispatches dispatch.Store,
@@ -89,6 +115,7 @@ func New(
 	dispatcher ExecutionDispatcher,
 	clock func() time.Time,
 	logger *slog.Logger,
+	options ...Option,
 ) (*Reconciler, error) {
 	if config.OwnerID == "" {
 		return nil, fmt.Errorf("scheduler owner ID must not be blank")
@@ -109,10 +136,12 @@ func New(
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Reconciler{
+	reconciler := &Reconciler{
 		dispatches:       dispatches,
 		jobs:             jobs,
 		dispatcher:       dispatcher,
+		metricRecorder:   metrics.DefaultRecorder(),
+		requestIDSource:  uuid.NewString,
 		ownerID:          config.OwnerID,
 		maximumActive:    config.MaximumActive,
 		leaseDuration:    config.LeaseDuration,
@@ -121,13 +150,17 @@ func New(
 		operationTimeout: config.OperationTimeout,
 		clock:            clock,
 		logger:           logger,
-	}, nil
+	}
+	for _, option := range options {
+		if option != nil {
+			option(reconciler)
+		}
+	}
+	return reconciler, nil
 }
 
 func (r *Reconciler) Run(ctx context.Context) error {
-	if err := r.Tick(ctx); err != nil && !errors.Is(err, context.Canceled) {
-		r.logger.Error("scheduler reconciliation failed", "error", err)
-	}
+	r.runTick(ctx)
 	ticker := time.NewTicker(r.reconcileEvery)
 	defer ticker.Stop()
 	for {
@@ -135,14 +168,23 @@ func (r *Reconciler) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			return nil
 		case <-ticker.C:
-			if err := r.Tick(ctx); err != nil && !errors.Is(err, context.Canceled) {
-				r.logger.Error("scheduler reconciliation failed", "error", err)
-			}
+			r.runTick(ctx)
 		}
 	}
 }
 
 func (r *Reconciler) Tick(ctx context.Context) error {
+	return r.tick(ctx, r.requestIDSource())
+}
+
+func (r *Reconciler) runTick(ctx context.Context) {
+	requestID := r.requestIDSource()
+	if err := r.tick(ctx, requestID); err != nil && !errors.Is(err, context.Canceled) {
+		r.logger.Error("scheduler reconciliation failed", "request_id", requestID, "error", err)
+	}
+}
+
+func (r *Reconciler) tick(ctx context.Context, requestID string) error {
 	claimContext, cancelClaim := context.WithTimeout(ctx, r.operationTimeout)
 	defer cancelClaim()
 	records, err := r.dispatches.Claim(
@@ -152,7 +194,7 @@ func (r *Reconciler) Tick(ctx context.Context) error {
 	}
 	for _, record := range records {
 		if record.LeaseTakenOver {
-			metrics.LeaseTakeoverTotal.WithLabelValues("_unknown", "success").Inc()
+			r.metricRecorder.ObserveLeaseTakeover("_unknown", "success", requestID)
 		}
 	}
 	var wait sync.WaitGroup
@@ -163,10 +205,10 @@ func (r *Reconciler) Tick(ctx context.Context) error {
 		go func() {
 			defer wait.Done()
 			startedAt := r.clock().UTC()
-			defer r.recordReconcileDuration(startedAt)
+			defer r.recordReconcileDuration(requestID, startedAt)
 			operationContext, cancel := context.WithTimeout(ctx, r.operationTimeout)
 			defer cancel()
-			if reconcileErr := r.reconcile(operationContext, record); reconcileErr != nil {
+			if reconcileErr := r.reconcile(operationContext, record, requestID); reconcileErr != nil {
 				errorsChannel <- fmt.Errorf(
 					"reconcile %s/%s epoch %d: %w",
 					record.Key.Namespace,
@@ -196,7 +238,7 @@ func (r *Reconciler) Tick(ctx context.Context) error {
 	return errors.Join(failures...)
 }
 
-func (r *Reconciler) reconcile(ctx context.Context, record dispatch.Record) error {
+func (r *Reconciler) reconcile(ctx context.Context, record dispatch.Record, requestID string) error {
 	current, err := r.jobs.Get(ctx, record.Key)
 	if err != nil {
 		return r.recordTransientError(ctx, record, err)
@@ -257,10 +299,10 @@ func (r *Reconciler) reconcile(ctx context.Context, record dispatch.Record) erro
 		if claimedExecution {
 			var permanent *PermanentError
 			if errors.As(err, &permanent) {
-				r.recordAssignment("rejected")
+				r.recordAssignment("rejected", requestID)
 				return r.failPermanently(ctx, record, "DispatchRejected", permanent.Error())
 			}
-			r.recordAssignment("failure")
+			r.recordAssignment("failure", requestID)
 		}
 		if r.heartbeatExpired(record) {
 			return r.failHeartbeat(ctx, record, err.Error())
@@ -268,7 +310,7 @@ func (r *Reconciler) reconcile(ctx context.Context, record dispatch.Record) erro
 		return r.recordTransientError(ctx, record, err)
 	}
 	if claimedExecution {
-		r.recordAssignment("success")
+		r.recordAssignment("success", requestID)
 	}
 	switch observation.State {
 	case ObservationPending:
@@ -301,16 +343,16 @@ func (r *Reconciler) reconcile(ctx context.Context, record dispatch.Record) erro
 	}
 }
 
-func (r *Reconciler) recordAssignment(outcome string) {
-	metrics.JobAssignmentTotal.WithLabelValues("_unknown", "_unknown", outcome).Inc()
+func (r *Reconciler) recordAssignment(outcome, requestID string) {
+	r.metricRecorder.ObserveAssignment("_unknown", "_unknown", outcome, requestID)
 }
 
-func (r *Reconciler) recordReconcileDuration(startedAt time.Time) {
-	elapsed := r.clock().UTC().Sub(startedAt).Seconds()
+func (r *Reconciler) recordReconcileDuration(requestID string, startedAt time.Time) {
+	elapsed := r.clock().UTC().Sub(startedAt)
 	if elapsed < 0 {
 		elapsed = 0
 	}
-	metrics.JobReconcileDuration.WithLabelValues("_unknown").Observe(elapsed)
+	r.metricRecorder.ObserveReconcile("_unknown", requestID, elapsed)
 }
 
 func (r *Reconciler) heartbeatExpired(record dispatch.Record) bool {
