@@ -100,6 +100,7 @@ This directory contains the Architecture Decision Records (ADRs) for AstraSync.
 | [ADR-088](adr-088-gitops-managed-cluster-prerequisites.md) | GitOps Management of AstraSync Cluster Prerequisites (CRD + admission policy, prune disabled) | Accepted | 2026-09-13 |
 | [ADR-089](adr-089-controller-manager-metrics-integration.md) | Controller Manager Metrics Integration Test (real manager lifecycle via envtest) | Accepted | 2026-09-13 |
 | [ADR-090](adr-090-postgres-envtest-finalizer-integration.md) | PostgreSQL and Envtest Finalizer Integration (cross-store cleanup) | Accepted | 2026-09-13 |
+| [ADR-091](adr-091-repository-epoch-fencing.md) | Repository-Level Epoch Fencing (atomic rejection of stale writers) | Accepted | 2026-09-13 |
 
 ## Template
 

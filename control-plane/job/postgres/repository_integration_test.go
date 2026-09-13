@@ -101,6 +101,74 @@ func TestRepositoryPersistsLifecycleAcrossConnections(t *testing.T) {
 	}
 }
 
+func TestRepositoryFencesStaleEpochWriter(t *testing.T) {
+	dataSourceName := startPostgresContainer(t)
+	ctx := context.Background()
+	repository, err := jobpostgres.Open(ctx, dataSourceName)
+	if err != nil {
+		t.Fatalf("open repository: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := repository.Close(); err != nil {
+			t.Errorf("close repository: %v", err)
+		}
+	})
+	if err := repository.Migrate(ctx); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	namespace := "it-stale-epoch-" + uuid.NewString()
+	created := integrationJob(t, namespace)
+	stored, err := repository.Create(ctx, created)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	initializing, changed, err := stored.RequestStart(stored.UpdatedAt.Add(time.Minute))
+	if err != nil || !changed {
+		t.Fatalf("request start: changed=%v err=%v", changed, err)
+	}
+	stored, err = repository.Update(ctx, initializing, stored.Version)
+	if err != nil {
+		t.Fatalf("persist initializing: %v", err)
+	}
+	running, changed, err := stored.Advance(stored.Status.Epoch, job.StateRunning, nil, stored.UpdatedAt.Add(time.Minute))
+	if err != nil || !changed {
+		t.Fatalf("advance running: changed=%v err=%v", changed, err)
+	}
+	stored, err = repository.Update(ctx, running, stored.Version)
+	if err != nil {
+		t.Fatalf("persist running: %v", err)
+	}
+	staleWriter := stored
+	finished, changed, err := stored.Advance(stored.Status.Epoch, job.StateFinished, nil, stored.UpdatedAt.Add(time.Minute))
+	if err != nil || !changed {
+		t.Fatalf("advance finished: changed=%v err=%v", changed, err)
+	}
+	stored, err = repository.Update(ctx, finished, stored.Version)
+	if err != nil {
+		t.Fatalf("persist finished: %v", err)
+	}
+	restarted, changed, err := stored.RequestStart(stored.UpdatedAt.Add(time.Minute))
+	if err != nil || !changed {
+		t.Fatalf("restart: changed=%v err=%v", changed, err)
+	}
+	current, err := repository.Update(ctx, restarted, stored.Version)
+	if err != nil {
+		t.Fatalf("persist restart: %v", err)
+	}
+
+	if _, err := repository.Update(ctx, staleWriter, current.Version); !errors.Is(err, job.ErrStaleEpoch) {
+		t.Fatalf("stale writer update error = %v, want ErrStaleEpoch", err)
+	}
+	recovered, err := repository.Get(ctx, created.Key)
+	if err != nil {
+		t.Fatalf("get after stale write: %v", err)
+	}
+	if recovered.Status.Epoch != 2 || recovered.Status.State != job.StateInitializing || recovered.Version != current.Version {
+		t.Fatalf("stale writer changed durable state: %+v", recovered)
+	}
+}
+
 func integrationJob(t *testing.T, namespace string) job.Job {
 	t.Helper()
 	spec := job.Spec{

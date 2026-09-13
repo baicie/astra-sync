@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Phase 41 (ADR-091): enforce epoch monotonicity at the Job repository update
+  boundary. Memory and PostgreSQL repositories now reject stale writers that
+  present the current version with an older epoch. PostgreSQL applies the
+  check inside the conditional `UPDATE`, and integration coverage verifies
+  that a stale snapshot cannot overwrite a restarted epoch.
+
 - Phase 40 (ADR-090): add a combined PostgreSQL and envtest integration test
   for the Controller finalizer lifecycle. The test runs a real
   controller-runtime manager against `job.postgres.Repository`, verifies that

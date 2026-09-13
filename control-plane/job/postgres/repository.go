@@ -202,6 +202,7 @@ func (r *Repository) Update(ctx context.Context, candidate job.Job, expectedVers
                 version = version + 1,
                 updated_at = $3
           WHERE namespace = $4 AND name = $5 AND version = $6 AND uid = $7::uuid
+            AND (status->>'epoch')::bigint <= $8
           RETURNING namespace, name, uid::text, version, spec, status, created_at, updated_at`,
 		spec,
 		status,
@@ -210,14 +211,41 @@ func (r *Repository) Update(ctx context.Context, candidate job.Job, expectedVers
 		candidate.Key.Name,
 		expectedVersion,
 		candidate.UID,
+		candidate.Status.Epoch,
 	))
 	if errors.Is(err, sql.ErrNoRows) {
-		return job.Job{}, r.conflictOrNotFound(ctx, candidate.Key)
+		return job.Job{}, r.updateFailure(ctx, candidate, expectedVersion)
 	}
 	if err != nil {
 		return job.Job{}, fmt.Errorf("update job: %w", err)
 	}
 	return stored, nil
+}
+
+func (r *Repository) updateFailure(ctx context.Context, candidate job.Job, expectedVersion int64) error {
+	current, err := scanJob(r.db.QueryRowContext(
+		ctx,
+		`SELECT namespace, name, uid::text, version, spec, status, created_at, updated_at
+           FROM astrasync_control_jobs
+          WHERE namespace = $1 AND name = $2`,
+		candidate.Key.Namespace,
+		candidate.Key.Name,
+	))
+	if errors.Is(err, sql.ErrNoRows) {
+		return job.ErrNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("resolve job update failure: %w", err)
+	}
+	if current.Version != expectedVersion ||
+		current.UID != candidate.UID ||
+		!current.CreatedAt.Equal(candidate.CreatedAt) {
+		return job.ErrConflict
+	}
+	if err := job.ValidateEpochMonotonicity(current, candidate); err != nil {
+		return err
+	}
+	return job.ErrConflict
 }
 
 func (r *Repository) Delete(ctx context.Context, key job.Key, expectedVersion int64) error {
