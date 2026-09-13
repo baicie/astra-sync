@@ -5,8 +5,8 @@ root after packaging the CLI:
 
 ```powershell
 mvn.cmd -pl cli -am package -DskipTests
-java -jar cli/target/astrasync-cli-0.1.0-SNAPSHOT-all.jar run examples/phase0/csv/job.yaml
-java -jar cli/target/astrasync-cli-0.1.0-SNAPSHOT-all.jar run --metrics json examples/phase0/csv/job.yaml
+java -jar cli/target/astrasync-cli-0.8.0-all.jar run examples/phase0/csv/job.yaml
+java -jar cli/target/astrasync-cli-0.8.0-all.jar run --metrics json examples/phase0/csv/job.yaml
 ```
 
 The CSV example is self-contained. It creates `examples/phase0/csv/output.csv` with create-new

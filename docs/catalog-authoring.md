@@ -139,7 +139,7 @@ CATALOG_OUTPUT=/tmp/my-catalog.pb make catalog-export
 |----------|---------|-------------|
 | `CATALOG_BUILD_VERSION` | `$(git rev-parse --short HEAD)` | Build identifier embedded in the catalog |
 | `CATALOG_EXECUTION_PROFILE` | `standard` | Execution profile (affects descriptor set) |
-| `CATALOG_OUTPUT` | `target/connector-inventory.pb` | Output file path |
+| `CATALOG_OUTPUT` | `deployment/catalog/connector-inventory.pb` | Output file path |
 
 ## Inspecting the Catalog
 
