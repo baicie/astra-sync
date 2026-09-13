@@ -216,6 +216,15 @@ public final class WorkerServer implements AutoCloseable {
     private void executeCheckpoint(
             int protocolVersion, ExecuteCheckpointTaskRequest request, InputStream input, OutputStream output)
             throws IOException {
+        try (DataPlaneLogContext ignored = DataPlaneLogContext.open(
+                request.getTenantId(), request.getJobId(), request.getExecutionEpoch(), workerId, "checkpoint", null)) {
+            executeCheckpointWithContext(protocolVersion, request, input, output);
+        }
+    }
+
+    private void executeCheckpointWithContext(
+            int protocolVersion, ExecuteCheckpointTaskRequest request, InputStream input, OutputStream output)
+            throws IOException {
         if (protocolVersion != WorkerProtocol.CHECKPOINT_VERSION
                 || !workerId.equals(request.getWorkerId())
                 || request.getJobId().isBlank()
@@ -226,6 +235,7 @@ public final class WorkerServer implements AutoCloseable {
                 || request.getMaxInFlightBatches() <= 0
                 || request.getSplitFingerprint().isBlank()
                 || !request.getTaskId().equals(request.getSplit().getSplitId())) {
+            LOG.warn("worker rejected invalid checkpoint task request");
             WorkerProtocolCodec.writeResponse(
                     output,
                     WorkerProtocolMapper.checkpointError(
@@ -235,6 +245,7 @@ public final class WorkerServer implements AutoCloseable {
         try {
             checkpointEpochFence.activate(request.getJobId(), request.getExecutionEpoch());
         } catch (EpochFencedException exception) {
+            LOG.warn("worker rejected fenced checkpoint epoch {}", request.getExecutionEpoch());
             WorkerProtocolCodec.writeResponse(
                     output,
                     WorkerProtocolMapper.checkpointError(
@@ -244,6 +255,7 @@ public final class WorkerServer implements AutoCloseable {
 
         FutureTask<WorkerResponse> task = new FutureTask<>(() -> executeCheckpointTask(request, input, output));
         if (activeTasks.putIfAbsent(request.getTaskId(), task) != null) {
+            LOG.warn("worker rejected duplicate active checkpoint task");
             WorkerProtocolCodec.writeResponse(
                     output,
                     WorkerProtocolMapper.checkpointError(
@@ -254,6 +266,7 @@ public final class WorkerServer implements AutoCloseable {
             taskExecutor.execute(task);
         } catch (RejectedExecutionException exception) {
             activeTasks.remove(request.getTaskId(), task);
+            LOG.warn("worker rejected checkpoint task due to capacity");
             WorkerProtocolCodec.writeResponse(
                     output,
                     WorkerProtocolMapper.checkpointError(
@@ -264,16 +277,23 @@ public final class WorkerServer implements AutoCloseable {
             WorkerProtocolCodec.writeResponse(output, task.get());
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
+            LOG.warn("worker checkpoint task wait interrupted");
             WorkerProtocolCodec.writeResponse(
                     output,
                     WorkerProtocolMapper.checkpointError(
                             ErrorCode.TASK_CANCELLED, request.getTaskId(), "task wait interrupted"));
         } catch (CancellationException exception) {
+            LOG.warn("worker checkpoint task was cancelled");
             WorkerProtocolCodec.writeResponse(
                     output,
                     WorkerProtocolMapper.checkpointError(
                             ErrorCode.TASK_CANCELLED, request.getTaskId(), "task was cancelled"));
         } catch (ExecutionException exception) {
+            LOG.warn(
+                    "worker checkpoint task failed with {}",
+                    exception.getCause() == null
+                            ? exception.getClass().getSimpleName()
+                            : exception.getCause().getClass().getSimpleName());
             WorkerProtocolCodec.writeResponse(
                     output,
                     WorkerProtocolMapper.checkpointTaskFailure(

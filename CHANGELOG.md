@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Phase 54: add structured checkpoint admission logs. Invalid requests, fenced
+  epochs, duplicate tasks, capacity rejection, cancellation, and failures now
+  carry bounded Worker/job/tenant/epoch context.
+
 - Phase 53: add structured Worker admission and cancellation logs. Protocol
   errors, invalid requests, duplicate tasks, capacity rejections, and
   cancellations now carry the bounded Worker ID and available task identity.
