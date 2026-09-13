@@ -94,10 +94,10 @@ jobs:
 
       - name: Check deployment connector inventory
         env:
-          CATALOG_BUILD_VERSION: ${{ github.sha }}
+          CATALOG_BUILD_VERSION: 0.8.0
         run: |
           mkdir -p target/catalog-check
-          java -jar cli/target/astrasync-cli-0.1.0-SNAPSHOT-all.jar \
+          java -jar cli/target/astrasync-cli-0.8.0-all.jar \
             catalog-export target/catalog-check/connector-inventory.pb \
             --compiler-build $CATALOG_BUILD_VERSION \
             --execution-profile standard

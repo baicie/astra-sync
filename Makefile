@@ -135,11 +135,10 @@ check-mtls: vet-go
 	(cd control-plane/api-server && go test -count=1 -run 'MTLS|LoadConfig' ./cmd/server/...); \
 	(cd console && go test -count=1 -run 'MTLS|LoadConfig' ./cmd/console/...)
 
-# Phase 15 Slice 41: catalog-check uses a dynamic build version (git SHA) and
-# falls back to ``scripts/diff-catalog.py`` diagnostics when the committed and
-# freshly-exported inventories diverge, instead of the previous bare
-# "files differ" message.
-CATALOG_BUILD_VERSION ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
+# Keep the catalog build id aligned with the compiler image. A per-commit SHA
+# would make the committed protobuf change on every commit even when the
+# connector descriptors and compiler inputs are unchanged.
+CATALOG_BUILD_VERSION ?= 0.8.0
 CATALOG_EXECUTION_PROFILE ?= standard
 CATALOG_OUTPUT ?= deployment/catalog/connector-inventory.pb
 
