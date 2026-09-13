@@ -19,6 +19,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	utilyaml "k8s.io/apimachinery/pkg/util/yaml"
+	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 
@@ -31,7 +32,18 @@ const (
 	tenantID         = "0190f7c4-6c8d-7a01-9d2b-1ecabdff0011"
 )
 
+type envtestHarness struct {
+	client client.Client
+	config *rest.Config
+	scheme *k8sruntime.Scheme
+}
+
 func startEnvtest(t *testing.T) client.Client {
+	t.Helper()
+	return startEnvtestHarness(t).client
+}
+
+func startEnvtestHarness(t *testing.T) envtestHarness {
 	t.Helper()
 
 	if os.Getenv("KUBEBUILDER_ASSETS") == "" {
@@ -79,7 +91,7 @@ func startEnvtest(t *testing.T) client.Client {
 	}
 	installAdmissionPolicy(t, k8sClient)
 
-	return k8sClient
+	return envtestHarness{client: k8sClient, config: config, scheme: scheme}
 }
 
 func repositoryRoot(t *testing.T) string {

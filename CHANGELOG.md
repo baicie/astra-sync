@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Phase 39 (ADR-089): extend the controller envtest harness to expose the REST
+  config and scheme, then add a real controller-runtime manager integration
+  test. The test registers `SyncJobReconciler` through `SetupWithManager`,
+  waits for cache synchronization, creates a tenant-labelled `SyncJob`, and
+  verifies durable Job convergence, status/finalizer projection, and
+  `controller_job_controller_reconcile_duration_seconds` emission from an
+  isolated Prometheus registry.
+
 - Phase 36 (ADR-085): controller integration tests now use
   controller-runtime envtest against the generated SyncJob CRD. The
   new `internal/controller` integration suite validates structural CRD
