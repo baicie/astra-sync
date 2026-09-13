@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Phase 43 (ADR-093): wire the existing Java data-plane metrics server into
+  `CoordinatorApplication`. Setting `METRICS_LISTEN_ADDRESS` now exposes
+  Coordinator metrics on `/metrics` for the duration of a batch run and
+  closes the listener after completion or failure, matching the Worker
+  executable contract.
+
 - Phase 42 (ADR-092): derive `setup-envtest` and Kubernetes envtest binary
   versions from `control-plane/controller/go.mod` instead of hard-coding them
   in the integration workflow. The resolver maps Kubernetes module

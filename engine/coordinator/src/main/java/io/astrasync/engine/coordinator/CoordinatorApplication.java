@@ -10,6 +10,8 @@ import io.astrasync.engine.jobspec.JobSpecParser;
 import io.astrasync.engine.network.RemoteBatchWorker;
 import io.astrasync.engine.network.RemoteTaskFactory;
 import io.astrasync.engine.network.WorkerClient;
+import io.astrasync.engine.observability.DataPlaneMetrics;
+import io.astrasync.engine.observability.DataPlaneMetricsServer;
 import io.astrasync.engine.plan.CompiledJobPlan;
 import io.astrasync.engine.plan.ConnectorRegistry;
 import io.astrasync.engine.plan.JobCompiler;
@@ -17,12 +19,14 @@ import io.astrasync.engine.runtime.AdaptiveBatchPolicy;
 import io.astrasync.engine.runtime.AdaptiveParallelismPolicy;
 import io.astrasync.engine.runtime.BatchWorker;
 import io.astrasync.engine.runtime.RuntimeCredentialLoader;
+import io.micrometer.prometheusmetrics.PrometheusMeterRegistry;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -33,8 +37,16 @@ public final class CoordinatorApplication {
     private CoordinatorApplication() {}
 
     public static void main(String[] args) {
+        RuntimeException failure = null;
+        Optional<DataPlaneMetricsServer> metricsServer = Optional.empty();
         try {
             Map<String, String> environment = System.getenv();
+            metricsServer = startMetricsServer(environment);
+            if (metricsServer.isPresent()) {
+                LOG.info(
+                        "metrics endpoint listening on port {}",
+                        metricsServer.orElseThrow().port());
+            }
             ResumableRunResult result = run(CoordinatorConfiguration.fromEnvironment(environment), environment);
             if (result.executionEpoch() == 0) {
                 System.out.printf(
@@ -56,12 +68,27 @@ public final class CoordinatorApplication {
         } catch (RuntimeException exception) {
             logFailure(exception);
             System.err.println("FAILED to start or execute Coordinator: " + message(exception));
+            failure = exception;
+        } finally {
+            metricsServer.ifPresent(DataPlaneMetricsServer::close);
+        }
+        if (failure != null) {
             System.exit(1);
         }
     }
 
     static void logFailure(RuntimeException exception) {
         LOG.error("coordinator failed to start or execute", exception);
+    }
+
+    static Optional<DataPlaneMetricsServer> startMetricsServer(Map<String, String> environment) {
+        return startMetricsServer(environment, DataPlaneMetrics.processRegistry());
+    }
+
+    static Optional<DataPlaneMetricsServer> startMetricsServer(
+            Map<String, String> environment, PrometheusMeterRegistry registry) {
+        Map<String, String> checked = Map.copyOf(Objects.requireNonNull(environment, "environment must not be null"));
+        return DataPlaneMetricsServer.start(checked.getOrDefault("METRICS_LISTEN_ADDRESS", ""), registry);
     }
 
     @SuppressWarnings("try")

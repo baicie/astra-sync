@@ -9,13 +9,20 @@ import io.astrasync.connector.api.sink.BatchSink;
 import io.astrasync.connector.api.source.BatchSource;
 import io.astrasync.engine.checkpoint.FileSplitProgressStore;
 import io.astrasync.engine.checkpoint.SplitPlanMismatchException;
+import io.astrasync.engine.observability.DataPlaneMetrics;
 import io.astrasync.engine.runtime.BatchTask;
 import io.astrasync.engine.runtime.BatchTaskException;
 import io.astrasync.engine.runtime.BatchTaskFactory;
 import io.astrasync.engine.worker.JdbcWorkerTaskFactoryProvider;
 import io.astrasync.engine.worker.WorkerConfiguration;
 import io.astrasync.engine.worker.WorkerService;
+import io.micrometer.prometheusmetrics.PrometheusConfig;
+import io.micrometer.prometheusmetrics.PrometheusMeterRegistry;
 import java.io.IOException;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -40,6 +47,30 @@ class CoordinatorApplicationTest {
 
     @TempDir
     Path tempDirectory;
+
+    @Test
+    void startsMetricsEndpointOnlyWhenExplicitlyConfigured() throws IOException, InterruptedException {
+        PrometheusMeterRegistry registry = new PrometheusMeterRegistry(PrometheusConfig.DEFAULT);
+        String jobId = "1f36d9c6-77a2-4e83-8c7d-dc59b9b94a52";
+        new DataPlaneMetrics(registry).recordRecordsRead(jobId, 3);
+
+        assertThat(CoordinatorApplication.startMetricsServer(Map.of(), registry))
+                .isEmpty();
+
+        try (var server = CoordinatorApplication.startMetricsServer(
+                        Map.of("METRICS_LISTEN_ADDRESS", "127.0.0.1:0"), registry)
+                .orElseThrow()) {
+            HttpResponse<String> response = HttpClient.newHttpClient()
+                    .send(
+                            HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + server.port() + "/metrics"))
+                                    .GET()
+                                    .build(),
+                            HttpResponse.BodyHandlers.ofString());
+
+            assertThat(response.statusCode()).isEqualTo(200);
+            assertThat(response.body()).contains("worker_records_read_total");
+        }
+    }
 
     @Test
     void runsJdbcFullLoadAcrossTwoTcpWorkers() throws Exception {
