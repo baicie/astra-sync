@@ -2,7 +2,10 @@
 
 ## Status
 
-Active (ADR-076 Proposed; chain test fixture under construction)
+Active (ADR-076 Accepted — §2 superseded by ADR-080; ADR-079
+Accepted — superseded on public-surface by ADR-080; ADR-080
+Accepted. The cross-module chain test fixture ships with five
+green cases, see §Acceptance criteria.)
 
 ## Goal
 
@@ -151,25 +154,41 @@ surface:
 
 ## Acceptance criteria
 
-- [ ] `tests/cross-module/chain-tenant-id/go.mod` resolves
+- [x] `tests/cross-module/chain-tenant-id/go.mod` resolves
       under `go mod tidy` against the current `console` and
       `api-server` modules.
-- [ ] All five cases pass on
+- [x] All five cases pass on
       `go test ./tests/cross-module/chain-tenant-id/... -count=1`.
-- [ ] The cross-module CI job `cross-module-chain-tenant-id` runs
-      on PRs that touch the relevant paths and on push to
-      `main` / `develop`.
-- [ ] No new direct dependency in `console/go.mod` or
-      `control-plane/api-server/go.mod`.
-- [ ] No new helm chart change.
-- [ ] `CHANGELOG.md` "Unreleased / Added" entry:
+- [x] The cross-module CI job `cross-module-chain-tenant-id`
+      runs on PRs that touch the relevant paths and on push to
+      `main` / `develop` (file:
+      `.github/workflows/cross-module-chain-tenant-id.yml`).
+- [x] No new direct dependency in `console/go.mod` or
+      `control-plane/api-server/go.mod` beyond the already
+      public `gen/go/v1` packages and the public
+      `console/console.go` façade (ADR-080 §1).
+- [x] No new helm chart change.
+- [x] `CHANGELOG.md` "Unreleased / Added" entry (see
       "Cross-module chain test fixture for tenant-id envelope
-      (Phase 31, ADR-076). Five cases pin the BFF egress →
-      API Server interceptor → mutation repository →
-      `astrasync_control_jobs.tenant_id` column chain."
-- [ ] `docs/adr/adr-076-phase31-cross-module-chain-test.md`
+      (Phase 31, ADR-076 / ADR-080)").
+- [x] `docs/adr/adr-076-phase31-cross-module-chain-test.md`
       Accepted.
-- [ ] `docs/adr/README.md` index updated to add ADR-076.
+- [x] `docs/adr/adr-079-phase31-implementation-corrections.md`
+      Accepted.
+- [x] `docs/adr/adr-080-phase31-cross-module-public-surface.md`
+      Accepted — supersedes ADR-076 §2 and ADR-079 §1 / §4.
+- [x] `docs/adr/README.md` index updated to add ADR-076,
+      ADR-079 and ADR-080 rows.
+
+## Notes on scope
+
+The fixture reflects ADR-080 §1: the cross-module test exercises
+the **join** between the BFF and the api-server's public gRPC
+surface, not the api-server interceptor itself (which is pinned
+by `control-plane/api-server/internal/authn/interceptor_test.go`
+on Layer 1 of the layered test surface). The five cases were
+recast from "interceptor rejects" to "BFF ingress contract" per
+ADR-080 §4.
 
 ## Follow-ups (out of scope for Phase 31)
 

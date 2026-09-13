@@ -250,7 +250,7 @@ console:
 compilerValidation:
   enabled: true
   replicaCount: 2
-  compilerBuild: 0.1.0-SNAPSHOT
+  compilerBuild: 0.8.0
   maxConcurrency: 32
   service:
     port: 50052

@@ -8,6 +8,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Phase 36 (ADR-085): controller integration tests now use
+  controller-runtime envtest against the generated SyncJob CRD. The
+  new `internal/controller` integration suite validates structural CRD
+  admission, status subresource isolation, `resourceVersion` conflicts, and
+  finalizer blocking in the standalone `control-plane/controller`
+  module. The shared integration workflow installs pinned
+  `setup-envtest v0.24.1`, exports `KUBEBUILDER_ASSETS`, and runs the
+  controller suite from the correct module root. Envtest also proved
+  that ADR-071's metadata-label CEL rule was not installable; ADR-086
+  removes the invalid rule and tracks admission enforcement separately.
+
+- Phase 37 (ADR-087): add a Kubernetes `ValidatingAdmissionPolicy` and
+  binding for SyncJob `astrasync.io/tenant-id` admission. The policy
+  denies `CREATE` and `UPDATE` requests with missing or non-canonical
+  tenant labels. Controller envtest coverage now installs the policy
+  and verifies its deny and accept paths.
+
+- Phase 38 (ADR-088): make the SyncJob CRD and tenant-label admission
+  policy declarative ArgoCD prerequisites. A dedicated Kustomize bundle
+  and single-cluster/multi-cluster Applications install the
+  cluster-scoped resources with prune disabled and self-heal enabled.
+
 - Phase 29 (ADR-074): the API Server now consumes
   `x-astra-tenant-id` incoming gRPC metadata on every mutating
   RPC. The authn interceptor (Phase 29 §3) extracts the
@@ -58,6 +80,77 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`controller_job_state_total{tenant_id}` emission from the
   label) continues to be pinned by
   `control-plane/controller/internal/controller/syncjob_emission_test.go`
+
+- Phase 31 (ADR-076 / ADR-079 / ADR-080): the cross-module chain
+  test fixture for the tenant-id envelope ships at
+  `tests/cross-module/chain-tenant-id/` with its own
+  `go.mod` (replace-directive against `console` and
+  `control-plane/api-server`). Five cases drive the
+  `console` BFF via the public `console.NewWithDevelopmentSession`
+  façade (ADR-080 §1) against a test fake implementing
+  `bffbackend.Backend`, asserting on (a) the BFF egress
+  `x-astra-tenant-id` (ADR-072 / ADR-074 §3), (b) the
+  BFF ingress contract — malformed / mismatched
+  `X-Astra-Tenant-ID` is rejected before reaching the
+  api-server, and (c) the migration file
+  `003_jobs_tenant_id.sql` declares the `tenant_id UUID` column
+  and its index. ADR-080 documents the Go `internal/` rule
+  that prevented the originally planned direct import of
+  the api-server interceptor; the cross-module fixture
+  consequently drives the public surface only, and the
+  interceptor boundary is covered by Layer 1
+  (`control-plane/api-server/internal/authn/interceptor_test.go`).
+  A new CI workflow
+  `.github/workflows/cross-module-chain-tenant-id.yml`
+  runs the fixture on PRs that touch `console/`,
+  `control-plane/api-server/`, `control-plane/job/`,
+  `docs/phase31/`, or `tests/cross-module/chain-tenant-id/`.
+  Phase 31 is test-only: no production code, no schema
+  migration, no metric, no RBAC, no helm change.
+
+- Phase 32 (ADR-081): tenant-id label-translation Layer-1 test
+  ships at
+  `console/internal/syncjobcr/manager_label_translation_test.go`
+  with one happy-path case (canonical UUID is written verbatim
+  into `metadata.labels["astrasync.io/tenant-id"]`) and one
+  table-driven rejection case covering five non-canonical UUID
+  forms (uppercase, brace, `urn:uuid:` prefix, whitespace
+  padding, empty). All six cases pass on
+  `go test ./console/internal/syncjobcr/... -count=1`.
+  `realDualWriter.create` gains a single
+  `IsCanonicalTenantID` guard (4 lines) so the rejection cases
+  short-circuit locally and emit `controller_syncjob_console_dual_write_total{outcome="invalid"}`
+  without contacting the K8s API server. The BFF ingress
+  canonical-UUID check (Phase 28-A / Phase 29) and the K8s CEL
+  `XValidation` rule on `astrasync.io/tenant-id` (ADR-071 §2)
+  remain the upstream and downstream lines of defence. The
+  `update`-path guard is deferred to Phase 33 (ADR-081
+  §Follow-ups). Phase 32 is test-only plus the minimum
+  production-code change required to make the rejection cases
+  short-circuit locally.
+
+- Phase 33 (ADR-082): tenant-id label-translation Layer-1 test
+  is extended to the update mutation. Three new cases ship at
+  `console/internal/syncjobcr/manager_label_translation_test.go`:
+  `TestLabelTranslationUpdatePreservesCanonicalUUID` (happy
+  path on update — the PUT body's
+  `metadata.labels["astrasync.io/tenant-id"]` is verbatim and
+  replaces the stale label from the existing CR),
+  `TestLabelTranslationUpdateRejectsNonCanonicalTenantIDs`
+  (table-driven, five non-canonical UUID forms short-circuit
+  to `OutcomeInvalid` with zero server hits), and
+  `TestLabelTranslationUpdateGuardShortCircuitsBeforeGET`
+  (the guard fires before the discovery GET — neither GET nor
+  PUT reaches the API server on malformed input).
+  `realDualWriter.update` gains a single
+  `IsCanonicalTenantID` guard (4 lines) mirroring the create-
+  path guard. The Phase 32 metric diagnostic split
+  (`invalid` = writer refused; `admission_rejected` = apiserver
+  refused at CEL validation) is now symmetric across create
+  and update. All twelve label-translation cases pass on
+  `go test ./console/internal/syncjobcr/... -count=1`. Phase 33
+  is test-only plus the minimum production-code change
+  required to make the rejection cases short-circuit locally.
   (ADR-066 §3, ADR-069 §Slice 51.1). Phase 30 ships only test code;
   no production code, no new metric, no new dependency, no helm
   resource change.
@@ -149,6 +242,83 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   tests, and the migration case becomes a SQL parse +
   documentation test. ADR-080 supersedes ADR-076 §2 and
   ADR-079 §1 / §4 by reference.
+
+- Phase 34: tenant-id binding for the controller
+  reconcile-level metric. The
+  `controller_job_controller_reconcile_duration_seconds{tenant_id}`
+  series was historically a single degenerate bucket bound
+  to the hard-coded `"_unknown"` label, because the
+  `Reconcile` defer in
+  `control-plane/controller/internal/controller/syncjob_controller.go`
+  ignored the SyncJob CR's `astrasync.io/tenant-id` label.
+  Phase 34 derives the label from
+  `resource.Labels["astrasync.io/tenant-id"]` after the K8s
+  `Get` succeeds, routing it through
+  `observability/normalize.NormalizeTenant` (the same
+  allowlist every other tenant-deriving Recorder in the
+  control plane uses, ADR-058 §3). The pre-`Get` placeholder
+  stays at `_unknown` so a `Get` failure is still
+  attributed to the unknown bucket rather than leaking a
+  stale value. Five new Layer-1 cases in
+  `reconcile_tenant_id_metric_test.go` cover canonical UUID,
+  missing label, non-canonical UUID, `_platform` self-scope,
+  and empty string. The historical
+  `TestReconcileObservesSuccessAndFailureOutcomes` is
+  refreshed to assert against the canonical tenant
+  (the resource is fetched before the Jobs-nil guard fires,
+  so the failure outcome is also bound to the canonical
+  tenant). All tests pass on
+  `go test ./control-plane/controller/... -count=1`
+  (10.0s). The change unblocks the envtest-backed
+  controller reconcile regression (ADR-082 §Follow-ups) —
+  the unit-tested contract is now the metric binding the
+  dashboard recipes expect, so envtest only needs to verify
+  the Get → finalizer-add → ProjectStatus flow without
+  re-pinning label semantics. Phase 34 is test-only plus
+  the minimum production-code change required to make the
+  metric bind the right tenant.
+
+- Phase 35 (ADR-084): migrates the two pre-existing PostgreSQL
+  integration tests under `control-plane/job/postgres/` from
+  an external PostgreSQL (`ASTRASYNC_TEST_POSTGRES_URL`) to a
+  hermetic testcontainers-go instance. Four artefacts ship:
+  `//go:build integration` build tag on both
+  `repository_integration_test.go` and
+  `mutation_integration_test.go` (fixing the missing build-tag
+  compliance violation from testing.mdc §2), removal of the
+  `t.Skip` short-circuits (fixing the `t.Skip` on invariant
+  tests violation from testing.mdc §8), a shared helper
+  (`postgres_testcontainer_helper_test.go`) that boots
+  `postgres:16-alpine` and applies `*.sql` migrations, and a
+  new CI lane (`.github/workflows/control-plane-integration.yml`)
+  that runs `go test -tags=integration` on PRs touching the
+  persistence layer. The helper is a single `startPostgresContainer(t)`
+  function exported from `package postgres_test`; both integration
+  tests call it in place of the removed `t.Skip` guard.
+  `github.com/testcontainers/testcontainers-go v0.35.0` and the
+  postgres module are added to `control-plane/go.mod` (the root
+  module that owns `control-plane/job/`). ADR-083 (shared
+  helper module + three new consumer tests) is superseded by
+  ADR-084 (migration of existing tests only); ADR-083 §Decision
+  assumed the SQL-level coverage did not exist, but
+  `mutation_integration_test.go` already covered the cross-module
+  atomic-job-mutation path with a real PostgreSQL. Phase 35 is
+  test-only plus CI and dependency changes; no production code.
+
+### Fixed
+
+- Align every Maven child module parent version with the root
+  `0.8.0` reactor version. The repository could not resolve its
+  parent POMs after the release version bump.
+- Fix the CLI descriptor output to map protobuf enums to names
+  before passing them to `String.join`, restoring Java compilation.
+- Make `make catalog-export` write the deployment catalog by
+  default and honor `CATALOG_OUTPUT`, matching the documented
+  re-bake workflow.
+- Keep PostgreSQL testcontainer migration ownership in the
+  integration tests and apply cross-module schemas in dependency
+  order, fixing the CI failure caused by running job mutations
+  before auth and connection schemas.
 
 <!-- Add new Phase content above this line. -->
 

@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Accepted (superseded §2 by ADR-080)
 
 ## Context
 

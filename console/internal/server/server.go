@@ -25,6 +25,7 @@ import (
 
 	"io.astrasync/console/internal/authflow"
 	"io.astrasync/console/internal/syncjobcr"
+	"io.astrasync/console/pkg/bffbackend"
 	consolemetrics "io.astrasync/console/observability"
 	jobv1 "io.astrasync/control-plane/api-server/gen/go/v1"
 	"io.astrasync/control-plane/auth"
@@ -57,7 +58,7 @@ type RequestMetrics interface {
 }
 
 type Config struct {
-	Backend      any
+	Backend      bffbackend.Backend
 	Sessions     SessionManager
 	Namespace    string
 	PublicOrigin string

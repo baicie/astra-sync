@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Accepted (superseded by ADR-080 on the public-surface question)
 
 ## Context
 
