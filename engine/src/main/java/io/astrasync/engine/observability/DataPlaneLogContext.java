@@ -7,6 +7,8 @@ import org.slf4j.MDC;
 
 /** Scoped structured logging context for Java data-plane execution paths. */
 public final class DataPlaneLogContext implements AutoCloseable {
+    private static final String REQUEST_ID = "request_id";
+    private static final String UNKNOWN_REQUEST_ID = "_unknown";
     private static final String TENANT_ID = "tenant_id";
     private static final String JOB_ID = "job_id";
     private static final String EPOCH = "epoch";
@@ -44,7 +46,20 @@ public final class DataPlaneLogContext implements AutoCloseable {
     /** Opens a worker-scoped context with optional stage and outcome fields. */
     public static DataPlaneLogContext open(
             String tenantId, String jobId, Long executionEpoch, String workerId, String stage, String outcome) {
+        return open(null, tenantId, jobId, executionEpoch, workerId, stage, outcome);
+    }
+
+    /** Opens a request-scoped context with optional worker, stage, and outcome fields. */
+    public static DataPlaneLogContext open(
+            String requestId,
+            String tenantId,
+            String jobId,
+            Long executionEpoch,
+            String workerId,
+            String stage,
+            String outcome) {
         Map<String, String> values = new HashMap<>();
+        values.put(REQUEST_ID, UNKNOWN_REQUEST_ID.equals(requestId) ? null : requestId);
         values.put(TENANT_ID, tenantId);
         values.put(JOB_ID, jobId);
         values.put(WORKER_ID, workerId);

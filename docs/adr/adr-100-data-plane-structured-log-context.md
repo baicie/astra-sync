@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Accepted — request identity carrier added by ADR-102.
 
 ## Context
 
@@ -28,8 +28,8 @@ Add `DataPlaneLogContext` as the shared Java MDC scope helper:
 6. Log Worker task start and completion/failure with tenant/job identity.
 7. Set `stage=read` for the source thread, `stage=write` for the sink thread,
    and `stage=checkpoint` for checkpoint execution.
-8. Keep `request_id` propagation separate; no request identifier exists in the
-   Worker task contract.
+8. Set `request_id` only when a trusted, non-unknown Coordinator execution or
+   Worker request value is available. ADR-102 adds the Worker protocol carrier.
 
 The context contains identity and lifecycle metadata only. It must not contain
 credentials, connector options, SQL text, or free-form user input.
@@ -44,6 +44,8 @@ credentials, connector options, SQL text, or free-form user input.
   Worker task it invokes.
 - ADR-101 adds `worker_id` to the same nested context for multi-Worker
   correlation.
+- ADR-102 adds `request_id` to the same context and carries it through normal
+  and checkpoint Worker requests.
 - Failure paths emit a structured warning before the original exception
   propagates.
 - No metric, protocol, deployment, or dependency change is required.

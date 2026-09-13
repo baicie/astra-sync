@@ -3,6 +3,10 @@ package io.astrasync.engine.coordinator;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.LoggerContext;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.astrasync.connector.api.data.RowBatch;
 import io.astrasync.connector.api.sink.BatchSink;
@@ -40,6 +44,7 @@ import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.slf4j.LoggerFactory;
 
 class CoordinatorApplicationTest {
     private static final String JOB_ID = "distributed-jdbc";
@@ -71,6 +76,45 @@ class CoordinatorApplicationTest {
             assertThat(response.statusCode()).isEqualTo(200);
             assertThat(response.body()).contains("worker_records_read_total");
         }
+    }
+
+    @Test
+    void usesOneRequestIdForCoordinatorExecutionLogs() throws Exception {
+        String url = jdbcUrl();
+        initializeDatabase(url);
+        Path jobSpec = writeJob(url);
+        String tenantId = UUID.randomUUID().toString();
+        Logger logger = (Logger) LoggerFactory.getLogger(CoordinatorApplication.class);
+        LoggerContext logbackContext = (LoggerContext) LoggerFactory.getILoggerFactory();
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.setContext(logbackContext);
+        appender.start();
+        logger.addAppender(appender);
+
+        try (WorkerService worker0 = worker("worker-0", jdbcTaskFactory(jobSpec));
+                WorkerService worker1 = worker("worker-1", jdbcTaskFactory(jobSpec))) {
+            worker0.start();
+            worker1.start();
+            CoordinatorApplication.run(configuration(
+                    jobSpec, tempDirectory.resolve("request-id-progress"), endpoints(worker0, worker1), tenantId));
+        } finally {
+            logger.detachAppender(appender);
+        }
+
+        List<ILoggingEvent> executionEvents = appender.list.stream()
+                .filter(event -> event.getFormattedMessage().equals("coordinator execution started")
+                        || event.getFormattedMessage().equals("coordinator execution completed"))
+                .toList();
+        assertThat(executionEvents).hasSize(2);
+        String requestId = executionEvents.get(0).getMDCPropertyMap().get("request_id");
+        assertThat(requestId).isNotBlank();
+        assertThat(UUID.fromString(requestId).toString()).isEqualTo(requestId);
+        assertThat(executionEvents).allSatisfy(event -> {
+            assertThat(event.getMDCPropertyMap())
+                    .containsEntry("request_id", requestId)
+                    .containsEntry("tenant_id", tenantId)
+                    .containsEntry("job_id", JOB_ID);
+        });
     }
 
     @Test

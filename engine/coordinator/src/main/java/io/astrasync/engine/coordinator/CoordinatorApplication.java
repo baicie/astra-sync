@@ -28,6 +28,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -110,19 +111,21 @@ public final class CoordinatorApplication {
         CompiledJobPlan plan = new JobCompiler(registry).compileCheckpointed(jobSpec);
         requireJdbcPlan(plan);
         String jobId = jobSpec.metadata().name();
-        try (DataPlaneLogContext ignored =
-                DataPlaneLogContext.open(checked.tenantId(), jobId, checked.executionEpoch())) {
+        String requestId = UUID.randomUUID().toString();
+        try (DataPlaneLogContext ignored = DataPlaneLogContext.open(
+                requestId, checked.tenantId(), jobId, checked.executionEpoch(), null, null, null)) {
             LOG.info("coordinator execution started");
-            ResumableRunResult result = runPlan(checked, plan, jobId);
-            try (DataPlaneLogContext outcome =
-                    DataPlaneLogContext.open(checked.tenantId(), jobId, checked.executionEpoch(), null, "success")) {
+            ResumableRunResult result = runPlan(checked, plan, jobId, requestId);
+            try (DataPlaneLogContext outcome = DataPlaneLogContext.open(
+                    requestId, checked.tenantId(), jobId, checked.executionEpoch(), null, null, "success")) {
                 LOG.info("coordinator execution completed");
             }
             return result;
         }
     }
 
-    private static ResumableRunResult runPlan(CoordinatorConfiguration checked, CompiledJobPlan plan, String jobId) {
+    private static ResumableRunResult runPlan(
+            CoordinatorConfiguration checked, CompiledJobPlan plan, String jobId, String requestId) {
         SplitSource splitSource =
                 new JdbcRangeSplitSource(ConnectorConfiguration.of(plan.source().options()));
         List<BatchWorker> workers = checked.workers().stream()
@@ -146,7 +149,8 @@ public final class CoordinatorApplication {
                         plan.adaptiveBatch().adjustmentCooldownSamples()),
                 plan.spill(),
                 jobId,
-                checked.tenantId());
+                checked.tenantId(),
+                requestId);
         AdaptiveParallelismPolicy parallelismPolicy = plan.adaptiveParallelism().enabled()
                 ? new AdaptiveParallelismPolicy(
                         plan.adaptiveParallelism().minParallelism(),

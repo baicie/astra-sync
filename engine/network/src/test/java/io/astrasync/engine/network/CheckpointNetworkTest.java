@@ -30,6 +30,7 @@ import org.junit.jupiter.api.Test;
 
 class CheckpointNetworkTest {
     private static final String TENANT_ID = "7f36d9c6-77a2-4e83-8c7d-dc59b9b94a58";
+    private static final String REQUEST_ID = "8f36d9c6-77a2-4e83-8c7d-dc59b9b94a59";
 
     @Test
     void workerBlocksAtEachCommittedBatchUntilCoordinatorAcknowledgesIt() {
@@ -61,7 +62,7 @@ class CheckpointNetworkTest {
 
             WorkerResult result = remote.executeCheckpoint(
                     context,
-                    task("split-0").withIdentity("orders", TENANT_ID),
+                    task("split-0").withIdentity("orders", TENANT_ID, REQUEST_ID),
                     progress -> sequences.add(progress.checkpointSequence()));
 
             assertThat(result.metrics())
@@ -72,6 +73,7 @@ class CheckpointNetworkTest {
                     .isEqualTo(2));
             assertThat(worker.lastTask.jobId()).isEqualTo("orders");
             assertThat(worker.lastTask.tenantId()).isEqualTo(TENANT_ID);
+            assertThat(worker.lastTask.requestId()).isEqualTo(REQUEST_ID);
         }
     }
 
