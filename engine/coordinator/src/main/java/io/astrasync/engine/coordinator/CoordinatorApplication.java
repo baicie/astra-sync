@@ -10,6 +10,7 @@ import io.astrasync.engine.jobspec.JobSpecParser;
 import io.astrasync.engine.network.RemoteBatchWorker;
 import io.astrasync.engine.network.RemoteTaskFactory;
 import io.astrasync.engine.network.WorkerClient;
+import io.astrasync.engine.observability.DataPlaneLogContext;
 import io.astrasync.engine.observability.DataPlaneMetrics;
 import io.astrasync.engine.observability.DataPlaneMetricsServer;
 import io.astrasync.engine.plan.CompiledJobPlan;
@@ -108,7 +109,20 @@ public final class CoordinatorApplication {
         JobSpec jobSpec = RuntimeCredentialLoader.load(readJobSpec(checked), registry, environment);
         CompiledJobPlan plan = new JobCompiler(registry).compileCheckpointed(jobSpec);
         requireJdbcPlan(plan);
+        String jobId = jobSpec.metadata().name();
+        try (DataPlaneLogContext ignored =
+                DataPlaneLogContext.open(checked.tenantId(), jobId, checked.executionEpoch())) {
+            LOG.info("coordinator execution started");
+            ResumableRunResult result = runPlan(checked, plan, jobId);
+            try (DataPlaneLogContext outcome =
+                    DataPlaneLogContext.open(checked.tenantId(), jobId, checked.executionEpoch(), null, "success")) {
+                LOG.info("coordinator execution completed");
+            }
+            return result;
+        }
+    }
 
+    private static ResumableRunResult runPlan(CoordinatorConfiguration checked, CompiledJobPlan plan, String jobId) {
         SplitSource splitSource =
                 new JdbcRangeSplitSource(ConnectorConfiguration.of(plan.source().options()));
         List<BatchWorker> workers = checked.workers().stream()
@@ -118,7 +132,6 @@ public final class CoordinatorApplication {
                         checked.maxInFlightTasks()))
                 .map(worker -> (BatchWorker) worker)
                 .toList();
-        String jobId = jobSpec.metadata().name();
         boolean checkpointExecution =
                 plan.deliveryGuarantee() == io.astrasync.engine.jobspec.DeliveryGuarantee.AT_LEAST_ONCE
                         || plan.deliveryGuarantee() == io.astrasync.engine.jobspec.DeliveryGuarantee.EXACTLY_ONCE;

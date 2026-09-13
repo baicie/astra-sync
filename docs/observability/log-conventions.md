@@ -206,9 +206,11 @@ Phase 7 Slice 26 follow-up F2:
 The Go entry-point migration to `slog` is complete as of F3. Existing
 startup, shutdown, and error records in `api-server`, `console`,
 `scheduler`, `connection-test-executor`, and `astra-auth-admin` use JSON
-loggers with `component`. Request-scoped `request_id`, `tenant_id`, and
-`job_id` propagation remains follow-up instrumentation; logger tests only
-verify that supplied structured fields are preserved.
+loggers with `component`. Phase 50 (ADR-100) adds scoped `tenant_id`,
+`job_id`, `epoch`, `stage`, and `outcome` context to Coordinator and Worker
+logs. Request-scoped `request_id` propagation and exemplar correlation remain
+follow-up instrumentation; logger tests only verify that supplied structured
+fields are preserved.
 
 The implementation commits are recorded in
 [`changelog.md`](changelog.md).

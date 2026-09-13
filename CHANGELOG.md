@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Phase 50 (ADR-100): attach scoped `tenant_id`, `job_id`, `epoch`, `stage`,
+  and `outcome` fields to Coordinator and Worker JSON logs. Nested MDC scopes
+  are restored on success and failure; `request_id` propagation remains a
+  separate follow-up.
+
 - Phase 49 (ADR-099): bind a trusted Coordinator process tenant through
   `ASTRASYNC_COORDINATOR_TENANT_ID`, validate it as a canonical lowercase
   UUID, and propagate it to Worker metrics through the Phase 48 protocol
