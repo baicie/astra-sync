@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Accepted — media range precedence refined by ADR-097.
 
 ## Context
 
@@ -37,6 +37,9 @@ each supported specific media type:
    and when no `Accept` header is supplied.
 7. Wildcard media ranges do not opt into OpenMetrics; an explicit OpenMetrics
    media range remains required.
+
+ADR-097 refines Prometheus quality resolution by applying exact, type-wildcard,
+and global-wildcard precedence.
 
 The selected response content type and `Vary: Accept` behavior remain the
 contract defined by ADR-095.

@@ -84,49 +84,86 @@ public final class DataPlaneMetricsServer implements AutoCloseable {
     }
 
     private static String selectContentType(String accept) {
-        double openMetricsQuality = quality(accept, OPENMETRICS_MEDIA_TYPE);
+        double openMetricsQuality = quality(accept, OPENMETRICS_MEDIA_TYPE, true);
         if (openMetricsQuality <= 0) {
             return PROMETHEUS_CONTENT_TYPE;
         }
-        double prometheusQuality = quality(accept, PROMETHEUS_MEDIA_TYPE);
+        double prometheusQuality = quality(accept, PROMETHEUS_MEDIA_TYPE, false);
         return openMetricsQuality > prometheusQuality ? OPENMETRICS_CONTENT_TYPE : PROMETHEUS_CONTENT_TYPE;
     }
 
-    private static double quality(String accept, String mediaType) {
+    private static double quality(String accept, String mediaType, boolean exactMediaTypeOnly) {
         if (accept == null || accept.isBlank()) {
             return 0;
         }
-        double highest = 0;
+        int targetSeparator = mediaType.indexOf('/');
+        if (targetSeparator <= 0 || targetSeparator == mediaType.length() - 1) {
+            return 0;
+        }
+        String targetType = mediaType.substring(0, targetSeparator);
+        String targetSubtype = mediaType.substring(targetSeparator + 1);
+        Double exactQuality = null;
+        Double typeQuality = null;
+        Double wildcardQuality = null;
         for (String candidate : accept.split(",")) {
             String[] parts = candidate.split(";");
-            if (!parts[0].trim().equalsIgnoreCase(mediaType)) {
+            String range = parts[0].trim();
+            int separator = range.indexOf('/');
+            if (separator <= 0 || separator == range.length() - 1) {
                 continue;
             }
-            double candidateQuality = 1;
-            boolean valid = true;
-            for (int index = 1; index < parts.length; index++) {
-                String parameter = parts[index].trim();
-                int separator = parameter.indexOf('=');
-                if (separator <= 0 || !parameter.substring(0, separator).trim().equalsIgnoreCase("q")) {
-                    continue;
-                }
-                try {
-                    candidateQuality = Double.parseDouble(
-                            parameter.substring(separator + 1).trim());
-                    if (!Double.isFinite(candidateQuality) || candidateQuality < 0 || candidateQuality > 1) {
-                        valid = false;
-                        break;
-                    }
-                } catch (NumberFormatException exception) {
-                    valid = false;
-                    break;
-                }
+            String rangeType = range.substring(0, separator);
+            String rangeSubtype = range.substring(separator + 1);
+            boolean exactMatch = rangeType.equalsIgnoreCase(targetType) && rangeSubtype.equalsIgnoreCase(targetSubtype);
+            boolean typeWildcardMatch =
+                    !exactMediaTypeOnly && rangeType.equalsIgnoreCase(targetType) && rangeSubtype.equals("*");
+            boolean wildcardMatch = !exactMediaTypeOnly && rangeType.equals("*") && rangeSubtype.equals("*");
+            if (!exactMatch && !typeWildcardMatch && !wildcardMatch) {
+                continue;
             }
-            if (valid) {
-                highest = Math.max(highest, candidateQuality);
+            Double candidateQuality = parseQuality(parts);
+            if (candidateQuality == null) {
+                continue;
+            }
+            if (exactMatch) {
+                exactQuality = highest(exactQuality, candidateQuality);
+            } else if (typeWildcardMatch) {
+                typeQuality = highest(typeQuality, candidateQuality);
+            } else {
+                wildcardQuality = highest(wildcardQuality, candidateQuality);
             }
         }
-        return highest;
+        if (exactQuality != null) {
+            return exactQuality;
+        }
+        if (typeQuality != null) {
+            return typeQuality;
+        }
+        return wildcardQuality == null ? 0 : wildcardQuality;
+    }
+
+    private static Double parseQuality(String[] parts) {
+        double quality = 1;
+        for (int index = 1; index < parts.length; index++) {
+            String parameter = parts[index].trim();
+            int separator = parameter.indexOf('=');
+            if (separator <= 0 || !parameter.substring(0, separator).trim().equalsIgnoreCase("q")) {
+                continue;
+            }
+            try {
+                quality = Double.parseDouble(parameter.substring(separator + 1).trim());
+                if (!Double.isFinite(quality) || quality < 0 || quality > 1) {
+                    return null;
+                }
+            } catch (NumberFormatException exception) {
+                return null;
+            }
+        }
+        return quality;
+    }
+
+    private static double highest(Double current, double candidate) {
+        return current == null ? candidate : Math.max(current, candidate);
     }
 
     private static InetSocketAddress parseAddress(String value) {

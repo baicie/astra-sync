@@ -56,6 +56,9 @@ The highest valid quality is used when an exact media type appears more than
 once. Invalid quality values make that media range unavailable. Wildcards do
 not select OpenMetrics; the OpenMetrics media type must be explicit.
 
+Wildcard precedence is completed by Phase 47
+([ADR-097](../adr/adr-097-accept-media-range-precedence.md)).
+
 ---
 
 ## Verification

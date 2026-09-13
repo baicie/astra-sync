@@ -4,7 +4,7 @@
 
 Accepted (implements Phase 7 Slice 26 follow-up `26.F8`). Read/write stage
 breakdown completed by ADR-094; OpenMetrics negotiation completed by ADR-095
-and refined by ADR-096.
+and refined by ADR-096 and ADR-097.
 
 ## Context
 
