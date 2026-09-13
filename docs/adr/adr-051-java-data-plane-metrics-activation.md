@@ -94,10 +94,9 @@ The activation implements all seven families reserved by the catalog:
 
 `tenant_id` is supplied by the trusted Worker request and normalized by the
 metric recorder. Empty values from older clients and non-canonical values
-collapse to `_unknown`. The current Coordinator executable has no trusted
-tenant source in `JobSpec`, so it sends `_unknown` until a separate
-tenant-binding slice supplies one. ADR-036 continues to govern tenant
-identifiers in the control plane.
+collapse to `_unknown`. The Coordinator executable obtains its trusted tenant
+binding from `ASTRASYNC_COORDINATOR_TENANT_ID` as defined by ADR-099. ADR-036
+continues to govern tenant identifiers in the control plane.
 
 `job_id` is derived from one of:
 
@@ -182,10 +181,10 @@ semantics.
   and record-count samples. `coordinator_spill_bytes_total` measures only
   encoded payload bytes that were durably written and enqueued. It does not
   count failed writes, filesystem metadata, capacity release, or cleanup.
-- The Worker protocol now carries optional `tenant_id` and `job_id`
-  attribution fields. The current Coordinator still supplies `_unknown`
-  tenant until a trusted tenant-binding source is added; the metric recorder
-  rejects non-canonical identifiers.
+- The Worker protocol carries optional `tenant_id` and `job_id` attribution
+  fields, and the Coordinator supplies the validated process tenant binding
+  from ADR-099 when configured. The metric recorder rejects non-canonical
+  identifiers.
 - Operators continue to opt in to scrape by exporting
   `METRICS_LISTEN_ADDRESS`; no Helm or Docker change is required for
   the default-disabled contract.

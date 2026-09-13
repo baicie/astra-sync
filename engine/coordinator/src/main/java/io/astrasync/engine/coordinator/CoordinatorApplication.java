@@ -17,7 +17,6 @@ import io.astrasync.engine.plan.ConnectorRegistry;
 import io.astrasync.engine.plan.JobCompiler;
 import io.astrasync.engine.runtime.AdaptiveBatchPolicy;
 import io.astrasync.engine.runtime.AdaptiveParallelismPolicy;
-import io.astrasync.engine.runtime.BatchTask;
 import io.astrasync.engine.runtime.BatchWorker;
 import io.astrasync.engine.runtime.RuntimeCredentialLoader;
 import io.micrometer.prometheusmetrics.PrometheusMeterRegistry;
@@ -134,7 +133,7 @@ public final class CoordinatorApplication {
                         plan.adaptiveBatch().adjustmentCooldownSamples()),
                 plan.spill(),
                 jobId,
-                BatchTask.UNKNOWN_TENANT_ID);
+                checked.tenantId());
         AdaptiveParallelismPolicy parallelismPolicy = plan.adaptiveParallelism().enabled()
                 ? new AdaptiveParallelismPolicy(
                         plan.adaptiveParallelism().minParallelism(),

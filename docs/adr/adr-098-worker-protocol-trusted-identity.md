@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Accepted — Coordinator tenant source added by ADR-099.
 
 ## Context
 
@@ -44,10 +44,9 @@ and do not replace the existing Worker, task, epoch, or split validation.
   Coordinator supplies them.
 - Existing Coordinators remain compatible because omitted protobuf fields
   decode as empty strings and normalize to `_unknown`.
-- The current Java Coordinator has a trusted job name source from `JobSpec`
-  metadata but no trusted tenant source in `JobSpec`; it therefore continues
-  to send `_unknown` for tenant until a separate trusted tenant-binding slice
-  supplies one.
+- The Java Coordinator obtains its trusted tenant binding from the process
+  configuration defined by ADR-099. Local runs without that binding continue
+  to send `_unknown`.
 - The protocol remains version-compatible and no generated Go contract changes
   are required.
 - No metric family, label name, deployment value, or storage backend changes.

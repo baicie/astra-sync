@@ -108,6 +108,7 @@ This directory contains the Architecture Decision Records (ADRs) for AstraSync.
 | [ADR-096](adr-096-quality-weighted-openmetrics-negotiation.md) | Quality-Weighted OpenMetrics Content Negotiation (`q` preference and deterministic fallback) | Accepted | 2026-09-13 |
 | [ADR-097](adr-097-accept-media-range-precedence.md) | Accept Media Range Precedence (exact, type wildcard, global wildcard) | Accepted | 2026-09-13 |
 | [ADR-098](adr-098-worker-protocol-trusted-identity.md) | Worker Protocol Trusted Identity Propagation (`job_id` / `tenant_id` metric attribution) | Accepted | 2026-09-13 |
+| [ADR-099](adr-099-coordinator-trusted-tenant-binding.md) | Coordinator Trusted Tenant Binding (`ASTRASYNC_COORDINATOR_TENANT_ID`) | Accepted | 2026-09-13 |
 
 ## Template
 

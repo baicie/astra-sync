@@ -10,6 +10,9 @@ trusted identity to Java data-plane metrics.
 
 ADR: [ADR-098](../adr/adr-098-worker-protocol-trusted-identity.md)
 
+The Coordinator-side trusted tenant binding is supplied by Phase 49
+([ADR-099](../adr/adr-099-coordinator-trusted-tenant-binding.md)).
+
 ---
 
 ## Goal

@@ -35,6 +35,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 import org.junit.jupiter.api.Test;
@@ -79,14 +80,15 @@ class CoordinatorApplicationTest {
         Path jobSpec = writeJob(url);
         List<String> assignments = new CopyOnWriteArrayList<>();
         BatchTaskFactory delegate = jdbcTaskFactory(jobSpec);
+        String tenantId = UUID.randomUUID().toString();
 
         try (WorkerService worker0 = worker("worker-0", recording(delegate, "worker-0", assignments));
                 WorkerService worker1 = worker("worker-1", recording(delegate, "worker-1", assignments))) {
             worker0.start();
             worker1.start();
 
-            ResumableRunResult result = CoordinatorApplication.run(
-                    configuration(jobSpec, tempDirectory.resolve("full-load-progress"), endpoints(worker0, worker1)));
+            ResumableRunResult result = CoordinatorApplication.run(configuration(
+                    jobSpec, tempDirectory.resolve("full-load-progress"), endpoints(worker0, worker1), tenantId));
 
             assertThat(result.resumedSplitCount()).isZero();
             assertThat(result.executedSplitCount()).isEqualTo(2);
@@ -96,6 +98,12 @@ class CoordinatorApplicationTest {
             assertThat(result.metrics().writtenCount()).isEqualTo(4);
             assertThat(assignments).containsExactlyInAnyOrder("worker-0:" + FIRST_SPLIT, "worker-1:" + SECOND_SPLIT);
             assertThat(readTarget(url)).containsExactly("1:Ada", "2:Lin", "3:Kai", "4:May");
+            assertThat(DataPlaneMetrics.processRegistry()
+                            .get("worker.records.read")
+                            .tag("tenant_id", tenantId)
+                            .counter()
+                            .count())
+                    .isEqualTo(4);
         }
     }
 
@@ -194,6 +202,12 @@ class CoordinatorApplicationTest {
     private static CoordinatorConfiguration configuration(
             Path jobSpec, Path progressDirectory, List<WorkerEndpoint> endpoints) {
         return new CoordinatorConfiguration(jobSpec, progressDirectory, endpoints, Duration.ofSeconds(15), 1, 1);
+    }
+
+    private static CoordinatorConfiguration configuration(
+            Path jobSpec, Path progressDirectory, List<WorkerEndpoint> endpoints, String tenantId) {
+        return new CoordinatorConfiguration(
+                jobSpec, progressDirectory, endpoints, Duration.ofSeconds(15), 1, 1, 0, Optional.empty(), tenantId);
     }
 
     private Path writeJob(String url) throws IOException {

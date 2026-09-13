@@ -38,6 +38,7 @@ class CoordinatorConfigurationTest {
         assertThat(configuration.maxInFlightBatches()).isEqualTo(1);
         assertThat(configuration.executionEpoch()).isZero();
         assertThat(configuration.heartbeat()).isEmpty();
+        assertThat(configuration.tenantId()).isEqualTo("_unknown");
     }
 
     @Test
@@ -71,6 +72,17 @@ class CoordinatorConfigurationTest {
         assertThat(configuration.maxInFlightTasks()).isEqualTo(2);
         assertThat(configuration.maxInFlightBatches()).isEqualTo(4);
         assertThat(configuration.executionEpoch()).isEqualTo(17);
+    }
+
+    @Test
+    void parsesTrustedTenantIdentity() {
+        Map<String, String> environment = requiredEnvironment();
+        String tenantId = UUID.randomUUID().toString();
+        environment.put("ASTRASYNC_COORDINATOR_TENANT_ID", tenantId);
+
+        CoordinatorConfiguration configuration = CoordinatorConfiguration.fromEnvironment(environment);
+
+        assertThat(configuration.tenantId()).isEqualTo(tenantId);
     }
 
     @Test
@@ -139,6 +151,13 @@ class CoordinatorConfigurationTest {
         assertThatThrownBy(() -> CoordinatorConfiguration.fromEnvironment(invalidHeartbeatToken))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("heartbeat token must be a UUID");
+
+        Map<String, String> invalidTenant = requiredEnvironment();
+        invalidTenant.put(
+                "ASTRASYNC_COORDINATOR_TENANT_ID", UUID.randomUUID().toString().toUpperCase());
+        assertThatThrownBy(() -> CoordinatorConfiguration.fromEnvironment(invalidTenant))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("tenantId must be a canonical lowercase UUID");
     }
 
     private Map<String, String> requiredEnvironment() {

@@ -1,5 +1,6 @@
 package io.astrasync.engine.coordinator;
 
+import io.astrasync.engine.runtime.BatchTask;
 import java.net.URI;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -10,6 +11,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 
 /** Validated process configuration for the operational Coordinator entry point. */
 public record CoordinatorConfiguration(
@@ -20,7 +22,8 @@ public record CoordinatorConfiguration(
         int maxInFlightTasks,
         int maxInFlightBatches,
         long executionEpoch,
-        Optional<ExecutionHeartbeatConfiguration> heartbeat) {
+        Optional<ExecutionHeartbeatConfiguration> heartbeat,
+        String tenantId) {
     public static final int DEFAULT_WORKER_TIMEOUT_MILLIS = 30_000;
     public static final int DEFAULT_MAX_IN_FLIGHT_TASKS = 1;
     public static final int DEFAULT_MAX_IN_FLIGHT_BATCHES = 1;
@@ -40,7 +43,8 @@ public record CoordinatorConfiguration(
                 maxInFlightTasks,
                 maxInFlightBatches,
                 0,
-                Optional.empty());
+                Optional.empty(),
+                BatchTask.UNKNOWN_TENANT_ID);
     }
 
     public CoordinatorConfiguration(
@@ -59,7 +63,29 @@ public record CoordinatorConfiguration(
                 maxInFlightTasks,
                 maxInFlightBatches,
                 executionEpoch,
-                Optional.empty());
+                Optional.empty(),
+                BatchTask.UNKNOWN_TENANT_ID);
+    }
+
+    public CoordinatorConfiguration(
+            Path jobSpecPath,
+            Path progressDirectory,
+            List<WorkerEndpoint> workers,
+            Duration workerTimeout,
+            int maxInFlightTasks,
+            int maxInFlightBatches,
+            long executionEpoch,
+            Optional<ExecutionHeartbeatConfiguration> heartbeat) {
+        this(
+                jobSpecPath,
+                progressDirectory,
+                workers,
+                workerTimeout,
+                maxInFlightTasks,
+                maxInFlightBatches,
+                executionEpoch,
+                heartbeat,
+                BatchTask.UNKNOWN_TENANT_ID);
     }
 
     public CoordinatorConfiguration {
@@ -94,6 +120,7 @@ public record CoordinatorConfiguration(
             throw new IllegalArgumentException("executionEpoch must not be negative");
         }
         heartbeat = Objects.requireNonNull(heartbeat, "heartbeat must not be null");
+        tenantId = normalizeTenantId(tenantId);
     }
 
     public static CoordinatorConfiguration fromEnvironment(Map<String, String> environment) {
@@ -107,7 +134,8 @@ public record CoordinatorConfiguration(
                 integer(environment, "ASTRASYNC_COORDINATOR_MAX_IN_FLIGHT_TASKS", DEFAULT_MAX_IN_FLIGHT_TASKS),
                 integer(environment, "ASTRASYNC_COORDINATOR_MAX_IN_FLIGHT_BATCHES", DEFAULT_MAX_IN_FLIGHT_BATCHES),
                 optionalPositiveLong(environment, "ASTRASYNC_COORDINATOR_EXECUTION_EPOCH"),
-                heartbeat(environment));
+                heartbeat(environment),
+                optionalTenantId(environment));
     }
 
     private static Optional<ExecutionHeartbeatConfiguration> heartbeat(Map<String, String> environment) {
@@ -169,6 +197,27 @@ public record CoordinatorConfiguration(
             return parsed;
         } catch (NumberFormatException exception) {
             throw new IllegalArgumentException("environment variable " + name + " must be an integer", exception);
+        }
+    }
+
+    private static String optionalTenantId(Map<String, String> environment) {
+        String value = environment.get("ASTRASYNC_COORDINATOR_TENANT_ID");
+        return value == null || value.isBlank() ? BatchTask.UNKNOWN_TENANT_ID : value;
+    }
+
+    private static String normalizeTenantId(String value) {
+        Objects.requireNonNull(value, "tenantId must not be null");
+        if (BatchTask.UNKNOWN_TENANT_ID.equals(value)) {
+            return value;
+        }
+        try {
+            UUID parsed = UUID.fromString(value);
+            if (!parsed.toString().equals(value)) {
+                throw new IllegalArgumentException("tenantId must be a canonical lowercase UUID");
+            }
+            return value;
+        } catch (IllegalArgumentException exception) {
+            throw new IllegalArgumentException("tenantId must be a canonical lowercase UUID", exception);
         }
     }
 
