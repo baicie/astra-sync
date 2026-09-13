@@ -3,6 +3,10 @@ package io.astrasync.engine.network;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.LoggerContext;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import io.astrasync.connector.api.data.RowBatch;
 import io.astrasync.connector.api.sink.BatchSink;
 import io.astrasync.connector.api.source.BatchSource;
@@ -34,6 +38,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 
 class WorkerNetworkTest {
     private static final Duration TIMEOUT = Duration.ofSeconds(5);
@@ -58,6 +63,30 @@ class WorkerNetworkTest {
                 assertThat(materialized.tenantId()).isEqualTo(TENANT_ID);
             });
         }
+    }
+
+    @Test
+    void logsRemoteTaskWithTrustedIdentity() {
+        RecordingWorker worker = new RecordingWorker("worker-a");
+        Logger logger = (Logger) LoggerFactory.getLogger(RemoteBatchWorker.class);
+        LoggerContext context = (LoggerContext) LoggerFactory.getILoggerFactory();
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.setContext(context);
+        appender.start();
+        logger.addAppender(appender);
+
+        try (WorkerServer server = server(worker, 1, 1, 4)) {
+            server.start();
+            remote(server, 2).execute(task("split-1").withIdentity(JOB_ID, TENANT_ID));
+        } finally {
+            logger.detachAppender(appender);
+        }
+
+        assertThat(appender.list).isNotEmpty();
+        assertThat(appender.list).allSatisfy(event -> {
+            assertThat(event.getMDCPropertyMap()).containsEntry("tenant_id", TENANT_ID);
+            assertThat(event.getMDCPropertyMap()).containsEntry("job_id", JOB_ID);
+        });
     }
 
     @Test
