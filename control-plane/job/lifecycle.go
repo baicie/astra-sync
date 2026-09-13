@@ -31,6 +31,20 @@ func (j Job) Deletable() error {
 	return nil
 }
 
+// ValidateEpochMonotonicity rejects updates that would move a Job backwards
+// to an older execution epoch.
+func ValidateEpochMonotonicity(current, candidate Job) error {
+	if candidate.Status.Epoch < current.Status.Epoch {
+		return fmt.Errorf(
+			"%w: current=%d supplied=%d",
+			ErrStaleEpoch,
+			current.Status.Epoch,
+			candidate.Status.Epoch,
+		)
+	}
+	return nil
+}
+
 func (j Job) RequestStart(now time.Time) (Job, bool, error) {
 	next := j.Clone()
 	if next.Status.Desired == DesiredRunning &&

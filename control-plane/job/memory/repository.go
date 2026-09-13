@@ -85,6 +85,9 @@ func (r *Repository) Update(_ context.Context, candidate job.Job, expectedVersio
 	if current.UID != candidate.UID || !current.CreatedAt.Equal(candidate.CreatedAt) {
 		return job.Job{}, job.ErrConflict
 	}
+	if err := job.ValidateEpochMonotonicity(current, candidate); err != nil {
+		return job.Job{}, err
+	}
 	candidate.Version = current.Version + 1
 	r.jobs[candidate.Key] = candidate.Clone()
 	return candidate.Clone(), nil

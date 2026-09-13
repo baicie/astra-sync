@@ -77,6 +77,61 @@ func TestRepositoryListsStablePagesWithinNamespace(t *testing.T) {
 	}
 }
 
+func TestRepositoryRejectsStaleEpochWriter(t *testing.T) {
+	ctx := context.Background()
+	repository := memory.New()
+	created := testJob(t, "stale-epoch")
+
+	stored, err := repository.Create(ctx, created)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	initializing, changed, err := stored.RequestStart(stored.UpdatedAt.Add(time.Minute))
+	if err != nil || !changed {
+		t.Fatalf("request start: changed=%v err=%v", changed, err)
+	}
+	stored, err = repository.Update(ctx, initializing, stored.Version)
+	if err != nil {
+		t.Fatalf("persist initializing: %v", err)
+	}
+	running, changed, err := stored.Advance(stored.Status.Epoch, job.StateRunning, nil, stored.UpdatedAt.Add(time.Minute))
+	if err != nil || !changed {
+		t.Fatalf("advance running: changed=%v err=%v", changed, err)
+	}
+	stored, err = repository.Update(ctx, running, stored.Version)
+	if err != nil {
+		t.Fatalf("persist running: %v", err)
+	}
+	staleWriter := stored
+	finished, changed, err := stored.Advance(stored.Status.Epoch, job.StateFinished, nil, stored.UpdatedAt.Add(time.Minute))
+	if err != nil || !changed {
+		t.Fatalf("advance finished: changed=%v err=%v", changed, err)
+	}
+	stored, err = repository.Update(ctx, finished, stored.Version)
+	if err != nil {
+		t.Fatalf("persist finished: %v", err)
+	}
+	restarted, changed, err := stored.RequestStart(stored.UpdatedAt.Add(time.Minute))
+	if err != nil || !changed {
+		t.Fatalf("restart: changed=%v err=%v", changed, err)
+	}
+	current, err := repository.Update(ctx, restarted, stored.Version)
+	if err != nil {
+		t.Fatalf("persist restart: %v", err)
+	}
+
+	if _, err := repository.Update(ctx, staleWriter, current.Version); !errors.Is(err, job.ErrStaleEpoch) {
+		t.Fatalf("stale writer update error = %v, want ErrStaleEpoch", err)
+	}
+	recovered, err := repository.Get(ctx, created.Key)
+	if err != nil {
+		t.Fatalf("get after stale write: %v", err)
+	}
+	if recovered.Status.Epoch != 2 || recovered.Status.State != job.StateInitializing || recovered.Version != current.Version {
+		t.Fatalf("stale writer changed durable state: %+v", recovered)
+	}
+}
+
 func TestRepositoryRejectsInvalidPage(t *testing.T) {
 	if _, err := memory.New().List(context.Background(), "default", job.Page{}); err == nil {
 		t.Fatal("expected invalid page failure")

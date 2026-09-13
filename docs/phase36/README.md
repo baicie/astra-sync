@@ -183,7 +183,8 @@ the module's source, `go.mod`, and `go.sum`.
 
 1. **PostgreSQL + envtest:** completed in Phase 40 with
    `postgres_finalizer_integration_test.go`.
-2. **Epoch fencing:** simulate a stale writer and assert ADR-006 behavior.
+2. **Epoch fencing:** completed in Phase 41 with repository-level monotonic
+   epoch enforcement and stale-writer regression tests.
 3. **Controller metrics:** completed in Phase 39 with
    `manager_metrics_integration_test.go`.
 4. **Version automation:** keep `setup-envtest` and Kubernetes binaries aligned
