@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Phase 40 (ADR-090): add a combined PostgreSQL and envtest integration test
+  for the Controller finalizer lifecycle. The test runs a real
+  controller-runtime manager against `job.postgres.Repository`, verifies that
+  deleting an active SyncJob moves the durable Job to `CANCELING` while
+  retaining the Kubernetes finalizer, and then verifies that a terminal
+  `CANCELED` Job is deleted from PostgreSQL before the CR is released.
+
 - Phase 39 (ADR-089): extend the controller envtest harness to expose the REST
   config and scheme, then add a real controller-runtime manager integration
   test. The test registers `SyncJobReconciler` through `SetupWithManager`,
