@@ -14,7 +14,34 @@ public record BatchTask(
         int maxInFlightBatches,
         boolean exactlyOnce,
         AdaptiveBatchPolicy batchPolicy,
-        SpillPolicy spillPolicy) {
+        SpillPolicy spillPolicy,
+        String jobId,
+        String tenantId) {
+    public static final String UNKNOWN_JOB_ID = "_unknown";
+    public static final String UNKNOWN_TENANT_ID = "_unknown";
+
+    public BatchTask(
+            SourceSplit split,
+            BatchSource source,
+            BatchSink sink,
+            int maxBatchRecords,
+            int maxInFlightBatches,
+            boolean exactlyOnce,
+            AdaptiveBatchPolicy batchPolicy,
+            SpillPolicy spillPolicy) {
+        this(
+                split,
+                source,
+                sink,
+                maxBatchRecords,
+                maxInFlightBatches,
+                exactlyOnce,
+                batchPolicy,
+                spillPolicy,
+                UNKNOWN_JOB_ID,
+                UNKNOWN_TENANT_ID);
+    }
+
     public BatchTask(
             SourceSplit split, BatchSource source, BatchSink sink, int maxBatchRecords, int maxInFlightBatches) {
         this(split, source, sink, maxBatchRecords, maxInFlightBatches, false);
@@ -72,9 +99,30 @@ public record BatchTask(
         if (batchPolicy.minBatchRecords() > maxBatchRecords || batchPolicy.initialBatchRecords() > maxBatchRecords) {
             throw new IllegalArgumentException("batch policy bounds must not exceed maxBatchRecords");
         }
+        jobId = normalizeIdentity(jobId, UNKNOWN_JOB_ID);
+        tenantId = normalizeIdentity(tenantId, UNKNOWN_TENANT_ID);
     }
 
     public String taskId() {
         return split.splitId();
+    }
+
+    /** Returns a copy with the trusted execution identity applied without changing task resources. */
+    public BatchTask withIdentity(String jobId, String tenantId) {
+        return new BatchTask(
+                split,
+                source,
+                sink,
+                maxBatchRecords,
+                maxInFlightBatches,
+                exactlyOnce,
+                batchPolicy,
+                spillPolicy,
+                jobId,
+                tenantId);
+    }
+
+    private static String normalizeIdentity(String value, String fallback) {
+        return value == null || value.isBlank() ? fallback : value;
     }
 }

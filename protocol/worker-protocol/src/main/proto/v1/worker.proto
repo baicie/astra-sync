@@ -25,6 +25,16 @@ message ExecuteTaskRequest {
   int32 max_in_flight_batches = 5;
   AdaptiveBatchSettings adaptive_batch = 6;
   SpillSettings spill = 7;
+  // Trusted job identity for task-local metrics.
+  //
+  // Empty values are accepted from older Coordinators and normalize to the
+  // bounded unknown identity at the Worker metric boundary.
+  string job_id = 8;
+  // Trusted tenant identity for task-local metrics.
+  //
+  // Empty values are accepted from older Coordinators and normalize to the
+  // bounded unknown identity at the Worker metric boundary.
+  string tenant_id = 9;
 }
 
 message CancelTaskRequest {
@@ -47,6 +57,11 @@ message ExecuteCheckpointTaskRequest {
   bool exactly_once = 11;
   AdaptiveBatchSettings adaptive_batch = 12;
   SpillSettings spill = 13;
+  // Trusted tenant identity for task-local metrics.
+  //
+  // Empty values are accepted from older Coordinators and normalize to the
+  // bounded unknown identity at the Worker metric boundary.
+  string tenant_id = 14;
 }
 
 message AdaptiveBatchSettings {

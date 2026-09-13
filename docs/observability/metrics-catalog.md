@@ -205,8 +205,10 @@ but is sampled by the Worker-local spillable exchange after a payload is
 successfully written and enqueued. The Worker exposes the shared process
 registry at `/metrics` only when `METRICS_LISTEN_ADDRESS` is non-empty;
 Coordinator remains a one-shot process and does not bind a listener. The
-non-checkpoint spill path has no trusted job or tenant identity, so its labels
-are `tenant_id="_unknown"` and `job_id="_unknown"`.
+Worker request now carries optional `job_id` and `tenant_id` attribution
+fields. Missing or non-canonical identifiers normalize to `_unknown`; the
+current Coordinator sends `_unknown` tenant until a trusted tenant-binding
+source is added.
 
 | Metric | Type | Labels | Description |
 |---|---|---|---|

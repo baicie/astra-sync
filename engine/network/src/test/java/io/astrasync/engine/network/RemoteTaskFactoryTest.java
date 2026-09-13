@@ -15,6 +15,9 @@ import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 class RemoteTaskFactoryTest {
+    private static final String JOB_ID = "5f36d9c6-77a2-4e83-8c7d-dc59b9b94a56";
+    private static final String TENANT_ID = "6f36d9c6-77a2-4e83-8c7d-dc59b9b94a57";
+
     @Test
     void createsDescriptorOnlyTasksWithConfiguredLimits() {
         SourceSplit split = split();
@@ -88,6 +91,20 @@ class RemoteTaskFactoryTest {
         assertThat(request.getExecuteTask().getSpill().getMaxFiles()).isEqualTo(3);
         assertThat(WorkerProtocolMapper.matchesSpill(request.getExecuteTask().getSpill(), task.spillPolicy()))
                 .isTrue();
+    }
+
+    @Test
+    void carriesTrustedIdentityThroughTheWorkerRequest() {
+        BatchTask task = new RemoteTaskFactory(
+                        32, 3, false, AdaptiveBatchPolicy.fixed(32), SpillSpec.disabled(), JOB_ID, TENANT_ID)
+                .create(split());
+
+        WorkerRequest request = WorkerProtocolMapper.executeRequest("worker-a", task);
+
+        assertThat(task.jobId()).isEqualTo(JOB_ID);
+        assertThat(task.tenantId()).isEqualTo(TENANT_ID);
+        assertThat(request.getExecuteTask().getJobId()).isEqualTo(JOB_ID);
+        assertThat(request.getExecuteTask().getTenantId()).isEqualTo(TENANT_ID);
     }
 
     private static SourceSplit split() {

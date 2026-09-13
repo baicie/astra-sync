@@ -17,6 +17,8 @@ public final class RemoteTaskFactory implements BatchTaskFactory {
     private final boolean exactlyOnce;
     private final AdaptiveBatchPolicy batchPolicy;
     private final SpillSpec spillSpec;
+    private final String jobId;
+    private final String tenantId;
 
     public RemoteTaskFactory(int maxBatchRecords, int maxInFlightBatches) {
         this(maxBatchRecords, maxInFlightBatches, false);
@@ -28,12 +30,21 @@ public final class RemoteTaskFactory implements BatchTaskFactory {
                 maxInFlightBatches,
                 exactlyOnce,
                 AdaptiveBatchPolicy.fixed(maxBatchRecords),
-                SpillSpec.disabled());
+                SpillSpec.disabled(),
+                BatchTask.UNKNOWN_JOB_ID,
+                BatchTask.UNKNOWN_TENANT_ID);
     }
 
     public RemoteTaskFactory(
             int maxBatchRecords, int maxInFlightBatches, boolean exactlyOnce, AdaptiveBatchPolicy batchPolicy) {
-        this(maxBatchRecords, maxInFlightBatches, exactlyOnce, batchPolicy, SpillSpec.disabled());
+        this(
+                maxBatchRecords,
+                maxInFlightBatches,
+                exactlyOnce,
+                batchPolicy,
+                SpillSpec.disabled(),
+                BatchTask.UNKNOWN_JOB_ID,
+                BatchTask.UNKNOWN_TENANT_ID);
     }
 
     public RemoteTaskFactory(
@@ -42,6 +53,24 @@ public final class RemoteTaskFactory implements BatchTaskFactory {
             boolean exactlyOnce,
             AdaptiveBatchPolicy batchPolicy,
             SpillSpec spillSpec) {
+        this(
+                maxBatchRecords,
+                maxInFlightBatches,
+                exactlyOnce,
+                batchPolicy,
+                spillSpec,
+                BatchTask.UNKNOWN_JOB_ID,
+                BatchTask.UNKNOWN_TENANT_ID);
+    }
+
+    public RemoteTaskFactory(
+            int maxBatchRecords,
+            int maxInFlightBatches,
+            boolean exactlyOnce,
+            AdaptiveBatchPolicy batchPolicy,
+            SpillSpec spillSpec,
+            String jobId,
+            String tenantId) {
         if (maxBatchRecords <= 0) {
             throw new IllegalArgumentException("maxBatchRecords must be positive");
         }
@@ -53,6 +82,8 @@ public final class RemoteTaskFactory implements BatchTaskFactory {
         this.exactlyOnce = exactlyOnce;
         this.batchPolicy = Objects.requireNonNull(batchPolicy, "batchPolicy must not be null");
         this.spillSpec = Objects.requireNonNull(spillSpec, "spillSpec must not be null");
+        this.jobId = Objects.requireNonNull(jobId, "jobId must not be null");
+        this.tenantId = Objects.requireNonNull(tenantId, "tenantId must not be null");
         if (batchPolicy.minBatchRecords() > maxBatchRecords || batchPolicy.initialBatchRecords() > maxBatchRecords) {
             throw new IllegalArgumentException("batch policy bounds must not exceed maxBatchRecords");
         }
@@ -69,7 +100,9 @@ public final class RemoteTaskFactory implements BatchTaskFactory {
                 maxInFlightBatches,
                 exactlyOnce,
                 batchPolicy,
-                io.astrasync.engine.runtime.SpillPolicy.descriptor(spillSpec));
+                io.astrasync.engine.runtime.SpillPolicy.descriptor(spillSpec),
+                jobId,
+                tenantId);
     }
 
     private static final class DescriptorSource implements BatchSource {

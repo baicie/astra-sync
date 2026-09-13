@@ -59,7 +59,9 @@ public final class InProcessBatchWorker implements BatchWorker, CheckpointBatchW
         Objects.requireNonNull(task, "task must not be null");
         long startedNanos = System.nanoTime();
         BatchExchange exchange = new BatchExchange(
-                task.maxInFlightBatches(), task.spillPolicy(), bytes -> metrics.recordSpillBytes("_unknown", bytes));
+                task.maxInFlightBatches(),
+                task.spillPolicy(),
+                bytes -> metrics.recordSpillBytes(task.tenantId(), task.jobId(), bytes));
         AdaptiveBatchController batchController =
                 new AdaptiveBatchController(task.batchPolicy(), task.maxBatchRecords());
         ExecutorService executor = Executors.newFixedThreadPool(2, new WorkerThreadFactory(workerId, task.taskId()));
@@ -150,13 +152,16 @@ public final class InProcessBatchWorker implements BatchWorker, CheckpointBatchW
                 RowBatch batch =
                         Objects.requireNonNull(source.readBatch(requestedBatchRecords), "source returned null batch");
                 this.metrics.recordBatchDuration(
-                        context.jobId(), "read", Math.max(0, System.nanoTime() - sourceReadStartedNanos));
+                        task.tenantId(),
+                        context.jobId(),
+                        "read",
+                        Math.max(0, System.nanoTime() - sourceReadStartedNanos));
                 if (batch.size() > requestedBatchRecords) {
                     throw new IllegalStateException(
                             "source returned " + batch.size() + " records, limit is " + requestedBatchRecords);
                 }
                 metrics.observe(batch);
-                this.metrics.recordRecordsRead(context.jobId(), batch.size());
+                this.metrics.recordRecordsRead(task.tenantId(), context.jobId(), batch.size());
                 if (!batch.rows().isEmpty()) {
                     context.assertCurrent();
                     sink.assertEpoch(context.executionEpoch());
@@ -174,7 +179,10 @@ public final class InProcessBatchWorker implements BatchWorker, CheckpointBatchW
                         sink.writeBatch(batch);
                     }
                     this.metrics.recordBatchDuration(
-                            context.jobId(), "write", Math.max(0, System.nanoTime() - sinkWriteStartedNanos));
+                            task.tenantId(),
+                            context.jobId(),
+                            "write",
+                            Math.max(0, System.nanoTime() - sinkWriteStartedNanos));
                     batchController.observe(new AdaptiveBatchSample(
                             batch.size(),
                             Math.max(0, System.nanoTime() - sinkWriteStartedNanos),
@@ -199,7 +207,7 @@ public final class InProcessBatchWorker implements BatchWorker, CheckpointBatchW
                             token,
                             BatchDigests.sha256(batch)));
                     metrics.writtenCount += batch.size();
-                    this.metrics.recordRecordsWritten(context.jobId(), batch.size());
+                    this.metrics.recordRecordsWritten(task.tenantId(), context.jobId(), batch.size());
                 }
                 endOfInput = batch.endOfInput();
             }
@@ -267,13 +275,16 @@ public final class InProcessBatchWorker implements BatchWorker, CheckpointBatchW
                     batch = Objects.requireNonNull(
                             source.readBatch(requestedBatchRecords), "source returned null batch");
                     this.metrics.recordBatchDuration(
-                            "_unknown", "read", Math.max(0, System.nanoTime() - sourceReadStartedNanos));
+                            task.tenantId(),
+                            task.jobId(),
+                            "read",
+                            Math.max(0, System.nanoTime() - sourceReadStartedNanos));
                     if (batch.size() > requestedBatchRecords) {
                         throw new IllegalStateException(
                                 "source returned " + batch.size() + " records, limit is " + requestedBatchRecords);
                     }
                     metrics.observe(batch);
-                    this.metrics.recordRecordsRead("_unknown", batch.size());
+                    this.metrics.recordRecordsRead(task.tenantId(), task.jobId(), batch.size());
                     int queueDepthBeforePublish = exchange.size();
                     long queueWaitNanos = exchange.publishMeasured(batch);
                     batchController.observe(new AdaptiveBatchSample(
@@ -326,9 +337,12 @@ public final class InProcessBatchWorker implements BatchWorker, CheckpointBatchW
                         long sinkWriteStartedNanos = System.nanoTime();
                         sink.writeBatch(batch);
                         this.metrics.recordBatchDuration(
-                                "_unknown", "write", Math.max(0, System.nanoTime() - sinkWriteStartedNanos));
+                                task.tenantId(),
+                                task.jobId(),
+                                "write",
+                                Math.max(0, System.nanoTime() - sinkWriteStartedNanos));
                         metrics.writtenCount += batch.size();
-                        this.metrics.recordRecordsWritten("_unknown", batch.size());
+                        this.metrics.recordRecordsWritten(task.tenantId(), task.jobId(), batch.size());
                         batchController.observe(new AdaptiveBatchSample(
                                 batch.size(),
                                 Math.max(0, System.nanoTime() - sinkWriteStartedNanos),
@@ -349,7 +363,7 @@ public final class InProcessBatchWorker implements BatchWorker, CheckpointBatchW
                                     startedNanos);
                     directFailure = !(exception instanceof ExchangeFailureException);
                     if (!(exception instanceof ExchangeFailureException)) {
-                        this.metrics.recordRecordsRejected("_unknown", "SINK_WRITE", 1);
+                        this.metrics.recordRecordsRejected(task.tenantId(), task.jobId(), "SINK_WRITE", 1);
                     }
                     exchange.fail(failure);
                 }

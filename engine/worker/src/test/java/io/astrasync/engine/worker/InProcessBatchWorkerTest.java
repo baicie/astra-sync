@@ -82,6 +82,39 @@ class InProcessBatchWorkerTest {
     }
 
     @Test
+    void recordsTrustedIdentityForNonCheckpointExecution() {
+        String jobId = UUID.randomUUID().toString();
+        String tenantId = UUID.randomUUID().toString();
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        LifecycleSource source =
+                new LifecycleSource(RowBatch.data(List.of(Row.of("id", 1))), RowBatch.last(List.of(Row.of("id", 2))));
+        LifecycleSink sink = new LifecycleSink(new ArrayList<>());
+        BatchTask task = new BatchTask(split("split-1"), source, sink, 1, 1).withIdentity(jobId, tenantId);
+
+        new InProcessBatchWorker("worker-a", new DataPlaneMetrics(registry)).execute(task);
+
+        assertThat(registry.get("worker.records.read")
+                        .tag("tenant_id", tenantId)
+                        .tag("job_id", jobId)
+                        .counter()
+                        .count())
+                .isEqualTo(2);
+        assertThat(registry.get("worker.records.written")
+                        .tag("tenant_id", tenantId)
+                        .tag("job_id", jobId)
+                        .counter()
+                        .count())
+                .isEqualTo(2);
+        assertThat(registry.get("coordinator.batch.duration")
+                        .tag("tenant_id", tenantId)
+                        .tag("job_id", jobId)
+                        .tag("stage", "read")
+                        .timer()
+                        .count())
+                .isEqualTo(2);
+    }
+
+    @Test
     void sinkFailureStopsSourceAndReportsStructuredPartialMetrics() {
         LifecycleSource source =
                 new LifecycleSource(RowBatch.data(List.of(Row.of("id", 1))), RowBatch.last(List.of(Row.of("id", 2))));
@@ -166,6 +199,7 @@ class InProcessBatchWorkerTest {
     @Test
     void recordsCheckpointCountsWithTheTrustedJobIdentifier() {
         String jobId = UUID.randomUUID().toString();
+        String tenantId = UUID.randomUUID().toString();
         EpochFence fence = new EpochFence();
         fence.activate(jobId, 1);
         SimpleMeterRegistry registry = new SimpleMeterRegistry();
@@ -175,9 +209,13 @@ class InProcessBatchWorkerTest {
                 new CheckpointExecutionContext(jobId, 1, "split-1", "fingerprint", 0, SplitPosition.unbounded(), fence);
 
         new InProcessBatchWorker("worker-a", new DataPlaneMetrics(registry))
-                .executeCheckpoint(context, new BatchTask(split("split-1"), source, sink, 1, 1, true), ignored -> {});
+                .executeCheckpoint(
+                        context,
+                        new BatchTask(split("split-1"), source, sink, 1, 1, true).withIdentity(jobId, tenantId),
+                        ignored -> {});
 
         assertThat(registry.get("worker.records.read")
+                        .tag("tenant_id", tenantId)
                         .tag("job_id", jobId)
                         .counter()
                         .count())
