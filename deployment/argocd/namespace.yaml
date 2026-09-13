@@ -44,7 +44,7 @@ rules:
     verbs: ["get", "patch", "update"]
   # Restrict to astrasync-* resources only
   - apiGroups: [""]
-    resources: ["configmaps", "secrets"]
+    resources: ["configmaps"]
     resourceNames: ["astrasync-*"]
     verbs: ["get", "list", "watch"]
   - apiGroups: [""]
