@@ -284,10 +284,10 @@ six Phase 17 backlog items are **emitted** as of Phase 25 (2026-09-08):
 The backlog table above is frozen; future metrics activation follows the
 same slice pattern documented in ADR-058.
 
-OpenMetrics content negotiation (ADR-051 §130) remains a separate
-deferred decision; the `request_id` exemplar contract documented in
-ADR-047 §126 still requires that negotiation before exemplars can
-transmit. Phase 17 does not unblock that deferral.
+OpenMetrics content negotiation is enabled by ADR-095. The `request_id`
+exemplar contract documented in ADR-047 §126 remains a separate
+instrumentation decision; no exemplar is emitted by the negotiation change
+alone.
 
 ### Slice 43.0 — umbrella infrastructure
 
