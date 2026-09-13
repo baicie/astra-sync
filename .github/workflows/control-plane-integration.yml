@@ -1,6 +1,6 @@
 name: control-plane-integration
 
-# Phase 35 (ADR-084) + Phase 36 (ADR-085) + Phase 37 (ADR-087) + Phase 39 (ADR-089).
+# Phase 35 (ADR-084) + Phase 36 (ADR-085) + Phase 37 (ADR-087) + Phase 39 (ADR-089) + Phase 40 (ADR-090).
 # Runs integration tests for:
 #   - PostgreSQL (control-plane/job/postgres/) using testcontainers-go
 #   - Controller (control-plane/controller/) using envtest
@@ -43,6 +43,20 @@ jobs:
     name: integration tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: astrasync
+          POSTGRES_USER: astra
+          POSTGRES_PASSWORD: astra
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U astra -d astrasync"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -96,6 +110,7 @@ jobs:
         # Phase 36 (ADR-085 §3): envtest-based controller reconcile tests.
         env:
           GOPROXY: https://goproxy.cn,direct
+          ASTRASYNC_TEST_POSTGRES_URL: postgres://astra:astra@127.0.0.1:5432/astrasync?sslmode=disable
         run: |
           set -euo pipefail
           cd control-plane/controller
@@ -125,8 +140,9 @@ jobs:
             control-plane/job/postgres/repository_integration_test.go \
             control-plane/job/postgres/mutation_integration_test.go \
             control-plane/job/postgres/postgres_testcontainer_helper_test.go
-          # Phase 36 + Phase 39 integration tests
+          # Phase 36 + Phase 39 + Phase 40 integration tests
           grep -q "^//go:build integration$" \
             control-plane/controller/internal/controller/envtest_helper_test.go \
             control-plane/controller/internal/controller/syncjob_controller_integration_test.go \
-            control-plane/controller/internal/controller/manager_metrics_integration_test.go
+            control-plane/controller/internal/controller/manager_metrics_integration_test.go \
+            control-plane/controller/internal/controller/postgres_finalizer_integration_test.go
