@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Phase 53: add structured Worker admission and cancellation logs. Protocol
+  errors, invalid requests, duplicate tasks, capacity rejections, and
+  cancellations now carry the bounded Worker ID and available task identity.
+
 - Phase 52 (ADR-101): add `worker_id` to Worker execution and Coordinator-side
   remote dispatch logs. Multi-Worker jobs can now correlate logs and metrics
   with the same bounded Worker identity without a protocol change.

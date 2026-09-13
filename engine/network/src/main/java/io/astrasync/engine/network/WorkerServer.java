@@ -1,6 +1,7 @@
 package io.astrasync.engine.network;
 
 import io.astrasync.connector.api.source.SourceSplit;
+import io.astrasync.engine.observability.DataPlaneLogContext;
 import io.astrasync.engine.runtime.BatchTask;
 import io.astrasync.engine.runtime.BatchTaskException;
 import io.astrasync.engine.runtime.BatchTaskFactory;
@@ -35,9 +36,13 @@ import java.util.concurrent.SynchronousQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /** A bounded, versioned Worker endpoint for remote task execution and cancellation. */
 public final class WorkerServer implements AutoCloseable {
+    private static final Logger LOG = LoggerFactory.getLogger(WorkerServer.class);
+
     private final String workerId;
     private final int requestedPort;
     private final BatchTaskFactory taskFactory;
@@ -188,6 +193,9 @@ public final class WorkerServer implements AutoCloseable {
 
     private WorkerResponse dispatch(WorkerRequest request) {
         if (request.getProtocolVersion() != WorkerProtocol.CURRENT_VERSION) {
+            try (DataPlaneLogContext ignored = DataPlaneLogContext.open(null, null, null, workerId, null, null)) {
+                LOG.warn("worker rejected unsupported protocol version {}", request.getProtocolVersion());
+            }
             return WorkerProtocolMapper.error(
                     ErrorCode.PROTOCOL_VERSION_MISMATCH,
                     null,
@@ -359,22 +367,32 @@ public final class WorkerServer implements AutoCloseable {
     }
 
     private WorkerResponse execute(ExecuteTaskRequest request) {
+        try (DataPlaneLogContext ignored =
+                DataPlaneLogContext.open(request.getTenantId(), request.getJobId(), null, workerId, null, null)) {
+            return executeWithContext(request);
+        }
+    }
+
+    private WorkerResponse executeWithContext(ExecuteTaskRequest request) {
         if (!workerId.equals(request.getWorkerId())
                 || request.getTaskId().isBlank()
                 || !request.hasSplit()
                 || request.getMaxBatchRecords() <= 0
                 || request.getMaxInFlightBatches() <= 0
                 || !request.getTaskId().equals(request.getSplit().getSplitId())) {
+            LOG.warn("worker rejected invalid task request");
             return WorkerProtocolMapper.error(ErrorCode.INVALID_REQUEST, request.getTaskId(), "invalid task request");
         }
         FutureTask<WorkerResponse> task = new FutureTask<>(() -> executeTask(request));
         if (activeTasks.putIfAbsent(request.getTaskId(), task) != null) {
+            LOG.warn("worker rejected duplicate active task");
             return WorkerProtocolMapper.error(ErrorCode.TASK_REJECTED, request.getTaskId(), "task is already active");
         }
         try {
             taskExecutor.execute(task);
         } catch (RejectedExecutionException exception) {
             activeTasks.remove(request.getTaskId(), task);
+            LOG.warn("worker rejected task due to capacity");
             return WorkerProtocolMapper.error(
                     ErrorCode.RESOURCE_EXHAUSTED, request.getTaskId(), "Worker task capacity is full");
         }
@@ -427,16 +445,21 @@ public final class WorkerServer implements AutoCloseable {
     }
 
     private WorkerResponse cancel(String requestedWorkerId, String taskId) {
-        if (!workerId.equals(requestedWorkerId) || taskId.isBlank()) {
-            return WorkerProtocolMapper.error(ErrorCode.INVALID_REQUEST, taskId, "invalid cancel request");
+        try (DataPlaneLogContext ignored = DataPlaneLogContext.open(null, null, null, workerId, null, null)) {
+            if (!workerId.equals(requestedWorkerId) || taskId.isBlank()) {
+                LOG.warn("worker rejected invalid cancel request");
+                return WorkerProtocolMapper.error(ErrorCode.INVALID_REQUEST, taskId, "invalid cancel request");
+            }
+            FutureTask<WorkerResponse> task = activeTasks.get(taskId);
+            if (task == null) {
+                LOG.warn("worker rejected cancel for inactive task");
+                return WorkerProtocolMapper.error(ErrorCode.TASK_NOT_FOUND, taskId, "task is not active");
+            }
+            boolean cancelled = task.cancel(true);
+            LOG.info("worker cancellation requested");
+            return WorkerProtocolMapper.cancelled(
+                    taskId, cancelled, cancelled ? "task cancellation requested" : "task already completed");
         }
-        FutureTask<WorkerResponse> task = activeTasks.get(taskId);
-        if (task == null) {
-            return WorkerProtocolMapper.error(ErrorCode.TASK_NOT_FOUND, taskId, "task is not active");
-        }
-        boolean cancelled = task.cancel(true);
-        return WorkerProtocolMapper.cancelled(
-                taskId, cancelled, cancelled ? "task cancellation requested" : "task already completed");
     }
 
     private static Thread daemonThread(Runnable runnable, String prefix) {

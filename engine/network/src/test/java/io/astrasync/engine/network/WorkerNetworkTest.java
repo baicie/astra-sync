@@ -191,6 +191,40 @@ class WorkerNetworkTest {
     }
 
     @Test
+    void logsAdmissionRejectionsWithWorkerIdentity() throws Exception {
+        RecordingWorker worker = new RecordingWorker("worker-a");
+        Logger logger = (Logger) LoggerFactory.getLogger(WorkerServer.class);
+        LoggerContext context = (LoggerContext) LoggerFactory.getILoggerFactory();
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.setContext(context);
+        appender.start();
+        logger.addAppender(appender);
+
+        try (WorkerServer server = server(worker, 1, 1, 4)) {
+            server.start();
+            WorkerRequest request = WorkerRequest.newBuilder()
+                    .setProtocolVersion(WorkerProtocol.CURRENT_VERSION)
+                    .setExecuteTask(ExecuteTaskRequest.newBuilder()
+                            .setWorkerId("worker-a")
+                            .build())
+                    .build();
+
+            try (Socket socket = new Socket("127.0.0.1", server.port())) {
+                WorkerProtocolCodec.writeRequest(socket.getOutputStream(), request);
+                WorkerResponse response = WorkerProtocolCodec.readResponse(socket.getInputStream());
+                assertThat(response.hasError()).isTrue();
+            }
+        } finally {
+            logger.detachAppender(appender);
+        }
+
+        assertThat(appender.list).anySatisfy(event -> {
+            assertThat(event.getLevel()).isEqualTo(ch.qos.logback.classic.Level.WARN);
+            assertThat(event.getMDCPropertyMap()).containsEntry("worker_id", "worker-a");
+        });
+    }
+
+    @Test
     void framedCodecRejectsOversizedAndTruncatedFrames() throws Exception {
         WorkerRequest request = WorkerRequest.newBuilder()
                 .setProtocolVersion(WorkerProtocol.CURRENT_VERSION)
