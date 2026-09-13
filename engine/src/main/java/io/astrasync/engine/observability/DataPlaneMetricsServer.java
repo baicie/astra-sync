@@ -16,6 +16,8 @@ import java.util.concurrent.TimeUnit;
 /** Exposes a Prometheus scrape endpoint only when explicitly configured. */
 public final class DataPlaneMetricsServer implements AutoCloseable {
     private static final Duration STOP_DELAY = Duration.ofSeconds(5);
+    private static final String PROMETHEUS_CONTENT_TYPE = "text/plain; version=0.0.4; charset=utf-8";
+    private static final String OPENMETRICS_CONTENT_TYPE = "application/openmetrics-text; version=1.0.0; charset=utf-8";
 
     private final HttpServer server;
     private final ExecutorService executor;
@@ -70,11 +72,46 @@ public final class DataPlaneMetricsServer implements AutoCloseable {
             exchange.close();
             return;
         }
-        byte[] body = registry.scrape().getBytes(StandardCharsets.UTF_8);
-        exchange.getResponseHeaders().set("Content-Type", "text/plain; version=0.0.4; charset=utf-8");
+        String contentType = acceptsOpenMetrics(exchange.getRequestHeaders().getFirst("Accept"))
+                ? OPENMETRICS_CONTENT_TYPE
+                : PROMETHEUS_CONTENT_TYPE;
+        byte[] body = registry.scrape(contentType).getBytes(StandardCharsets.UTF_8);
+        exchange.getResponseHeaders().set("Content-Type", contentType);
+        exchange.getResponseHeaders().set("Vary", "Accept");
         exchange.sendResponseHeaders(200, body.length);
         exchange.getResponseBody().write(body);
         exchange.close();
+    }
+
+    private static boolean acceptsOpenMetrics(String accept) {
+        if (accept == null || accept.isBlank()) {
+            return false;
+        }
+        for (String candidate : accept.split(",")) {
+            String[] parts = candidate.split(";");
+            if (!parts[0].trim().equalsIgnoreCase("application/openmetrics-text")) {
+                continue;
+            }
+            boolean acceptable = true;
+            for (int index = 1; index < parts.length; index++) {
+                String parameter = parts[index].trim();
+                int separator = parameter.indexOf('=');
+                if (separator <= 0 || !parameter.substring(0, separator).trim().equalsIgnoreCase("q")) {
+                    continue;
+                }
+                try {
+                    acceptable = Double.parseDouble(
+                                    parameter.substring(separator + 1).trim())
+                            > 0;
+                } catch (NumberFormatException exception) {
+                    acceptable = false;
+                }
+            }
+            if (acceptable) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static InetSocketAddress parseAddress(String value) {

@@ -104,6 +104,7 @@ This directory contains the Architecture Decision Records (ADRs) for AstraSync.
 | [ADR-092](adr-092-envtest-tool-version-automation.md) | Envtest Tool Version Automation (controller module as source of truth) | Accepted | 2026-09-13 |
 | [ADR-093](adr-093-coordinator-data-plane-metrics-endpoint.md) | Coordinator Data-Plane Metrics Endpoint (opt-in process-local scrape) | Accepted | 2026-09-13 |
 | [ADR-094](adr-094-data-plane-batch-stage-metrics.md) | Data-Plane Batch Stage Metrics (`read` / `write` boundary instrumentation) | Accepted | 2026-09-13 |
+| [ADR-095](adr-095-openmetrics-content-negotiation.md) | Data-Plane OpenMetrics Content Negotiation (`Accept`-driven response format) | Accepted | 2026-09-13 |
 
 ## Template
 

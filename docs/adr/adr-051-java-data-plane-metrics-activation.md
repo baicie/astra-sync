@@ -3,7 +3,7 @@
 ## Status
 
 Accepted (implements Phase 7 Slice 26 follow-up `26.F8`). Read/write stage
-breakdown completed by ADR-094.
+breakdown completed by ADR-094; OpenMetrics negotiation completed by ADR-095.
 
 ## Context
 
@@ -128,8 +128,8 @@ contract.
 
 `DataPlaneMetricsServer` binds an HTTP listener only when
 `METRICS_LISTEN_ADDRESS` is non-empty. The endpoint returns Prometheus text
-format on `/metrics`. OpenMetrics content negotiation is deferred until the
-registry endpoint needs exemplars.
+format on `/metrics`. OpenMetrics content negotiation is provided by ADR-095;
+exemplar emission remains a separate contract.
 
 When the environment variable is empty or absent, the recorder is
 constructed but the server is not started. Existing operational

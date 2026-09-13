@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Phase 45 (ADR-095): negotiate Prometheus text or OpenMetrics on the Java
+  data-plane `/metrics` endpoint through the HTTP `Accept` header. The
+  default remains Prometheus text `0.0.4`, explicit OpenMetrics clients
+  receive version `1.0.0` with `# EOF`, and responses include
+  `Vary: Accept`. Exemplar emission remains separate.
+
 - Phase 44 (ADR-094): record `coordinator_batch_duration_seconds` for the
   Worker `read` and `write` boundaries. Checkpoint execution uses the trusted
   job identifier, non-checkpoint execution uses the bounded unknown
