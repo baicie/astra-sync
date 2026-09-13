@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Phase 46 (ADR-096): honor HTTP quality values when selecting the Java
+  data-plane `/metrics` representation. OpenMetrics wins only when its valid
+  `q` value is higher than the Prometheus text value; invalid or tied values
+  retain the Prometheus text `0.0.4` default.
+
 - Phase 45 (ADR-095): negotiate Prometheus text or OpenMetrics on the Java
   data-plane `/metrics` endpoint through the HTTP `Accept` header. The
   default remains Prometheus text `0.0.4`, explicit OpenMetrics clients

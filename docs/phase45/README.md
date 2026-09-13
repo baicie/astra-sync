@@ -49,6 +49,9 @@ otherwise
 The response includes `Vary: Accept`. An explicit `q=0` for the OpenMetrics
 media type does not select OpenMetrics.
 
+Quality-weighted selection is refined by Phase 46
+([ADR-096](../adr/adr-096-quality-weighted-openmetrics-negotiation.md)).
+
 ---
 
 ## Verification

@@ -16,6 +16,8 @@ import java.util.concurrent.TimeUnit;
 /** Exposes a Prometheus scrape endpoint only when explicitly configured. */
 public final class DataPlaneMetricsServer implements AutoCloseable {
     private static final Duration STOP_DELAY = Duration.ofSeconds(5);
+    private static final String PROMETHEUS_MEDIA_TYPE = "text/plain";
+    private static final String OPENMETRICS_MEDIA_TYPE = "application/openmetrics-text";
     private static final String PROMETHEUS_CONTENT_TYPE = "text/plain; version=0.0.4; charset=utf-8";
     private static final String OPENMETRICS_CONTENT_TYPE = "application/openmetrics-text; version=1.0.0; charset=utf-8";
 
@@ -72,9 +74,7 @@ public final class DataPlaneMetricsServer implements AutoCloseable {
             exchange.close();
             return;
         }
-        String contentType = acceptsOpenMetrics(exchange.getRequestHeaders().getFirst("Accept"))
-                ? OPENMETRICS_CONTENT_TYPE
-                : PROMETHEUS_CONTENT_TYPE;
+        String contentType = selectContentType(exchange.getRequestHeaders().getFirst("Accept"));
         byte[] body = registry.scrape(contentType).getBytes(StandardCharsets.UTF_8);
         exchange.getResponseHeaders().set("Content-Type", contentType);
         exchange.getResponseHeaders().set("Vary", "Accept");
@@ -83,16 +83,27 @@ public final class DataPlaneMetricsServer implements AutoCloseable {
         exchange.close();
     }
 
-    private static boolean acceptsOpenMetrics(String accept) {
-        if (accept == null || accept.isBlank()) {
-            return false;
+    private static String selectContentType(String accept) {
+        double openMetricsQuality = quality(accept, OPENMETRICS_MEDIA_TYPE);
+        if (openMetricsQuality <= 0) {
+            return PROMETHEUS_CONTENT_TYPE;
         }
+        double prometheusQuality = quality(accept, PROMETHEUS_MEDIA_TYPE);
+        return openMetricsQuality > prometheusQuality ? OPENMETRICS_CONTENT_TYPE : PROMETHEUS_CONTENT_TYPE;
+    }
+
+    private static double quality(String accept, String mediaType) {
+        if (accept == null || accept.isBlank()) {
+            return 0;
+        }
+        double highest = 0;
         for (String candidate : accept.split(",")) {
             String[] parts = candidate.split(";");
-            if (!parts[0].trim().equalsIgnoreCase("application/openmetrics-text")) {
+            if (!parts[0].trim().equalsIgnoreCase(mediaType)) {
                 continue;
             }
-            boolean acceptable = true;
+            double candidateQuality = 1;
+            boolean valid = true;
             for (int index = 1; index < parts.length; index++) {
                 String parameter = parts[index].trim();
                 int separator = parameter.indexOf('=');
@@ -100,18 +111,22 @@ public final class DataPlaneMetricsServer implements AutoCloseable {
                     continue;
                 }
                 try {
-                    acceptable = Double.parseDouble(
-                                    parameter.substring(separator + 1).trim())
-                            > 0;
+                    candidateQuality = Double.parseDouble(
+                            parameter.substring(separator + 1).trim());
+                    if (!Double.isFinite(candidateQuality) || candidateQuality < 0 || candidateQuality > 1) {
+                        valid = false;
+                        break;
+                    }
                 } catch (NumberFormatException exception) {
-                    acceptable = false;
+                    valid = false;
+                    break;
                 }
             }
-            if (acceptable) {
-                return true;
+            if (valid) {
+                highest = Math.max(highest, candidateQuality);
             }
         }
-        return false;
+        return highest;
     }
 
     private static InetSocketAddress parseAddress(String value) {

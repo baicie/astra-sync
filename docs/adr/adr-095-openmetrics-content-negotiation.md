@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Accepted — quality weighting refined by ADR-096.
 
 ## Context
 
@@ -28,6 +28,9 @@ Make the existing `DataPlaneMetricsServer` negotiate the response format:
 - the response includes `Vary: Accept`;
 - the registry writer receives the selected content type, so the body includes
   the OpenMetrics `# EOF` terminator.
+
+ADR-096 refines selection when multiple media ranges have different `q`
+values.
 
 No exemplar is emitted in this phase. Negotiation only prepares the transport
 and keeps the exemplar contract governed by ADR-047 and ADR-051.
