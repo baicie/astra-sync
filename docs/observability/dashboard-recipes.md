@@ -26,7 +26,8 @@ Executor outcome samples. F11 activates Console BFF request and render
 samples. F12 activates trusted-proxy HSTS samples. F13 activates Controller
 reconcile-duration samples. Phase 10 verifies the multi-region recipes
 against the API Server shared registry. Remaining unlisted Go recipes are
-descriptor-only.
+descriptor-only. Phase 60 (ADR-107) adds the durable Connection Test operation
+ID as a `connection_test_total` exemplar.
 Operators must check the status here before using a recipe as live SLO
 evidence.
 
@@ -201,6 +202,10 @@ Suggested visualisation: `timeseries` panel with one series per outcome
 egress-policy decision; timeout, credential, transport, and handshake errors
 are included in `failure`.
 
+OpenMetrics samples include the durable operation ID as `request_id`. The
+operator can use that value to inspect the matching
+`astrasync_connection_tests` row for phase, result code, and completion time.
+
 ## Console BFF recipes
 
 ### Console request outcomes (per tenant and handler)
@@ -322,6 +327,8 @@ Phase 58 (ADR-105) adds per-tick Scheduler exemplars for assignment,
 lease-takeover, and reconcile-duration samples. Phase 59 (ADR-106) adds
 request-boundary exemplars to Console request and render samples, using the
 same ID forwarded in downstream gRPC metadata and passed to the auth flow.
+Phase 60 (ADR-107) adds the durable Connection Test operation ID to
+`connection_test_total`.
 
 ## What the recipes do not record
 
@@ -345,7 +352,8 @@ rendering; F12 covers trusted-proxy HSTS responses; F13 covers Controller
 reconcile duration; Phase 56 covers Java data-plane request-ID exemplars;
 Phase 57 covers sign-in and session-revoke exemplars; Phase 10 covers the API
 Server multi-region scrape; Phase 58 covers Scheduler tick correlation
-integration; Phase 59 covers Console BFF request correlation.
+integration; Phase 59 covers Console BFF request correlation; Phase 60 covers
+Connection Test operation correlation.
 
 ## Inline placeholders for the populated handbook
 

@@ -62,7 +62,9 @@ Phase 58 (ADR-105) adds a per-tick request ID to Scheduler assignment,
 lease-takeover, reconcile-duration samples, and reconciliation failure logs.
 Phase 59 (ADR-106) assigns one Console BFF request ID, shares it with
 downstream gRPC metadata and the auth flow, and attaches it to Console request
-and render exemplars.
+and render exemplars. Phase 60 (ADR-107) attaches the durable Connection Test
+operation ID to `connection_test_total`; the same value is the primary key in
+`astrasync_connection_tests`.
 
 ## Manual lookup procedure
 
@@ -82,7 +84,8 @@ control-plane families continue to use the timestamp fallback. Java
 data-plane families can use the Phase 56 exemplar when the same Coordinator
 request ID is present in the logs. Console BFF samples can use the Phase 59
 exemplar to follow the same ID through downstream control-plane metadata and
-the auth flow.
+the auth flow. Connection Test samples can use the Phase 60 exemplar to look
+up the authoritative operation row by `operation_id`.
 
 ## Per-tenant join
 
@@ -131,8 +134,8 @@ request-ID exemplars to all seven Java data-plane families. Phase 57
 (ADR-104) completes API Server and auth-library sign-in/session-revoke
 exemplars. Phase 58 (ADR-105) adds Scheduler tick exemplars. Exemplar coverage
 for the remaining control-plane call sites remains incomplete. Phase 59
-(ADR-106) adds Console BFF request-boundary exemplars. The landed work is
-recorded in
+(ADR-106) adds Console BFF request-boundary exemplars, and Phase 60 (ADR-107)
+adds Connection Test operation-ID exemplars. The landed work is recorded in
 [`changelog.md`](changelog.md).
 
 ## Inline placeholders for the populated handbook
