@@ -9,8 +9,11 @@ Accepted
 Phases 27–29 closed the **discrete halves** of the tenant-id envelope
 contract on three trust boundaries:
 
-- **Kubernetes admission** (ADR-071 / Slice 27-A): the `SyncJob` CRD
-  enforces `astrasync.io/tenant-id` label at admission time.
+- **SyncJob label contract** (ADR-071 / Slice 27-A): the
+  `astrasync.io/tenant-id` label is required from trusted writers.
+  ADR-086 later corrected the original, non-installable admission
+  validation claim, and ADR-087 restored enforcement with a
+  ValidatingAdmissionPolicy.
 - **Console BFF egress** (ADR-072 / Phase 28-A): `x-astra-tenant-id`
   flows on every job mutation.
 - **SyncJob CR creation** (ADR-073 / Phase 28-B): the Console

@@ -1,24 +1,29 @@
 name: control-plane-integration
 
-# Phase 35 (ADR-084). Runs the PostgreSQL integration tests under
-# control-plane/job/postgres/ using testcontainers-go.
+# Phase 35 (ADR-084) + Phase 36 (ADR-085) + Phase 37 (ADR-087).
+# Runs integration tests for:
+#   - PostgreSQL (control-plane/job/postgres/) using testcontainers-go
+#   - Controller (control-plane/controller/) using envtest
 #
-# ADR-084 §4 (CI lane): runs on PRs that touch
-# control-plane/job/postgres/** or this workflow itself.
-# The lane uses testcontainers-go which requires Docker; ubuntu-latest
-# ships Docker out of the box.
+# ADR-084 §4 + ADR-085 §3: runs on PRs that touch
+# control-plane/job/postgres/**, control-plane/controller/**, or this workflow itself.
+# Both testcontainers-go and envtest require infrastructure:
+#   - testcontainers-go requires Docker (ubuntu-latest ships Docker)
+#   - envtest requires kube-apiserver + etcd binaries (setup-envtest)
 #
 # The lane is intentionally separate from the unit-test lane
 # (ci.yml): integration tests are opt-in via -tags=integration
-# and add ~25s to the run. The unit-test lane gates every PR;
-# the integration lane gates only PRs that touch the persistence layer.
+# and add ~40s total to the run. The unit-test lane gates every PR;
+# the integration lane gates only PRs that touch persistence or controller.
 
 on:
   pull_request:
     paths:
       - 'control-plane/job/postgres/**'
+      - 'control-plane/controller/**'
       - 'control-plane/go.mod'
       - 'control-plane/go.sum'
+      - 'deployment/operator/config/**'
       - '.github/workflows/control-plane-integration.yml'
   push:
     branches:
@@ -35,9 +40,9 @@ concurrency:
 
 jobs:
   integration:
-    name: postgres integration
+    name: integration tests
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -54,6 +59,19 @@ jobs:
         with:
           go-version: '1.26.x'
           cache: false
+
+      - name: Setup envtest
+        # Phase 36 (ADR-085 §3): install setup-envtest and download
+        # kube-apiserver + etcd binaries for controller integration tests.
+        # The tools version matches control-plane/controller/go.mod and
+        # 1.36.x matches its k8s.io/apimachinery version.
+        env:
+          GOPROXY: https://goproxy.cn,direct
+        run: |
+          set -euo pipefail
+          go install sigs.k8s.io/controller-runtime/tools/setup-envtest@v0.24.1
+          assets_path="$(setup-envtest use -p path 1.36.x)"
+          echo "KUBEBUILDER_ASSETS=${assets_path}" >> "${GITHUB_ENV}"
 
       - name: Run PostgreSQL integration tests
         env:
@@ -74,18 +92,40 @@ jobs:
             -timeout 300s \
             ./job/postgres/...
 
-      - name: Verify helper file is present
-        # ADR-084 §Decision: the helper lives in
-        # postgres_testcontainer_helper_test.go, shared by all integration
-        # tests in the postgres package.
+      - name: Run controller integration tests
+        # Phase 36 (ADR-085 §3): envtest-based controller reconcile tests.
+        env:
+          GOPROXY: https://goproxy.cn,direct
+        run: |
+          set -euo pipefail
+          cd control-plane/controller
+          go test \
+            -tags=integration \
+            -v \
+            -count=1 \
+            -timeout 300s \
+            ./internal/controller/...
+
+      - name: Verify helper files are present
+        # ADR-084 §Decision: postgres helper in postgres_testcontainer_helper_test.go
+        # ADR-085 §Decision: envtest helper in internal/controller/envtest_helper_test.go
+        # ADR-087 §Decision: admission policy is a cluster-scoped prerequisite.
         run: |
           set -euo pipefail
           test -f control-plane/job/postgres/postgres_testcontainer_helper_test.go
+          test -f control-plane/controller/internal/controller/envtest_helper_test.go
+          test -f deployment/operator/config/admission/syncjob-tenant-id-validating-admission-policy.yaml
+          kubectl kustomize deployment/operator/config > /dev/null
 
-      - name: Verify build tag is present
+      - name: Verify build tags are present
         run: |
           set -euo pipefail
+          # Phase 35 integration tests
           grep -q "^//go:build integration$" \
             control-plane/job/postgres/repository_integration_test.go \
             control-plane/job/postgres/mutation_integration_test.go \
             control-plane/job/postgres/postgres_testcontainer_helper_test.go
+          # Phase 36 integration tests
+          grep -q "^//go:build integration$" \
+            control-plane/controller/internal/controller/envtest_helper_test.go \
+            control-plane/controller/internal/controller/syncjob_controller_integration_test.go

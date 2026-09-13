@@ -155,7 +155,7 @@ therefore not in Phase 33 scope.
 The phase is test-only plus a 4-line guard in
 `realDualWriter.update`. Removing the three new test cases and
 the guard reverts the slice. The BFF ingress canonical-UUID
-check (Phase 28-A / Phase 29) and the K8s API server's CEL
-`XValidation` rule on `astrasync.io/tenant-id` (ADR-071 §2)
-remain the upstream and downstream lines of defence for the
-update path, exactly as they did before Phase 33.
+check (Phase 28-A / Phase 29) remains the upstream line of
+defence for the update path. The previously claimed CRD CEL
+downstream check was not installable; ADR-087 restores that
+downstream protection with a ValidatingAdmissionPolicy.

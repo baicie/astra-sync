@@ -1,0 +1,43 @@
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: astrasync-syncjob-tenant-id
+  labels:
+    app.kubernetes.io/name: astrasync
+    app.kubernetes.io/component: admission-policy
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["sync.astrasync.io"]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["syncjobs"]
+        scope: Namespaced
+  validations:
+    - expression: >-
+        has(object.metadata.labels) &&
+        'astrasync.io/tenant-id' in object.metadata.labels &&
+        object.metadata.labels['astrasync.io/tenant-id'].matches('^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')
+      message: >-
+        astrasync.io/tenant-id label is required and must be a canonical
+        lowercase UUID
+      reason: Invalid
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: astrasync-syncjob-tenant-id
+  labels:
+    app.kubernetes.io/name: astrasync
+    app.kubernetes.io/component: admission-policy
+spec:
+  policyName: astrasync-syncjob-tenant-id
+  validationActions: ["Deny"]
+  matchResources:
+    resourceRules:
+      - apiGroups: ["sync.astrasync.io"]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["syncjobs"]
+        scope: Namespaced

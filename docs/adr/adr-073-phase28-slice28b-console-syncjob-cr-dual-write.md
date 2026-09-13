@@ -81,6 +81,11 @@ at `3 mutation * 5 outcome = 15` series.
 
 ## Context
 
+> **Correction:** ADR-086 subsequently established that the CRD CEL
+> validation described below cannot be installed on Kubernetes. ADR-087
+> restores the admission check with a ValidatingAdmissionPolicy. This ADR
+> must still not be read as evidence of CRD-level CEL enforcement.
+
 ADR-071 / ADR-072 closed two halves of the same gap:
 
 - ADR-071 enforces the `astrasync.io/tenant-id` label on every `SyncJob` CR
