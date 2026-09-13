@@ -133,18 +133,47 @@ func normalizeDualOutcome(value string) string {
 }
 
 // ObserveRequest records one completed Console request. Tenant and label
-// values are normalized here so every call site remains bounded.
-func (r *Recorder) ObserveRequest(tenantID, outcome, handler string, duration time.Duration, rendered bool) {
+// values are normalized here so every call site remains bounded. requestID is
+// attached as an exemplar only when it is a canonical lowercase UUID.
+func (r *Recorder) ObserveRequest(tenantID, outcome, handler, requestID string, duration time.Duration, rendered bool) {
 	if r == nil {
 		return
 	}
 	if duration < 0 {
 		duration = 0
 	}
-	r.requestTotal.WithLabelValues(normalizeTenant(tenantID), normalizeOutcome(outcome), normalizeHandler(handler)).Inc()
+	exemplar := requestExemplar(requestID)
+	increment(
+		r.requestTotal.WithLabelValues(normalizeTenant(tenantID), normalizeOutcome(outcome), normalizeHandler(handler)),
+		exemplar,
+	)
 	if rendered {
-		r.renderDuration.WithLabelValues(normalizeHandler(handler)).Observe(duration.Seconds())
+		observe(r.renderDuration.WithLabelValues(normalizeHandler(handler)), duration.Seconds(), exemplar)
 	}
+}
+
+func increment(counter prometheus.Counter, exemplar prometheus.Labels) {
+	if adder, ok := counter.(prometheus.ExemplarAdder); ok && exemplar != nil {
+		adder.AddWithExemplar(1, exemplar)
+		return
+	}
+	counter.Inc()
+}
+
+func observe(observer prometheus.Observer, value float64, exemplar prometheus.Labels) {
+	if exemplarObserver, ok := observer.(prometheus.ExemplarObserver); ok && exemplar != nil {
+		exemplarObserver.ObserveWithExemplar(value, exemplar)
+		return
+	}
+	observer.Observe(value)
+}
+
+func requestExemplar(requestID string) prometheus.Labels {
+	parsed, err := uuid.Parse(requestID)
+	if err != nil || parsed.String() != requestID {
+		return nil
+	}
+	return prometheus.Labels{"request_id": requestID}
 }
 
 func normalizeTenant(value string) string {
@@ -182,5 +211,5 @@ func Handler() http.Handler {
 
 // HandlerFor returns the Prometheus HTTP handler for the supplied gatherer.
 func HandlerFor(gatherer prometheus.Gatherer) http.Handler {
-	return promhttp.HandlerFor(gatherer, promhttp.HandlerOpts{})
+	return promhttp.HandlerFor(gatherer, promhttp.HandlerOpts{EnableOpenMetrics: true})
 }

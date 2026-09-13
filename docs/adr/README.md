@@ -115,6 +115,7 @@ This directory contains the Architecture Decision Records (ADRs) for AstraSync.
 | [ADR-103](adr-103-java-data-plane-request-id-exemplars.md) | Java Data-Plane Request ID Exemplars (bounded OpenMetrics correlation) | Accepted | 2026-09-14 |
 | [ADR-104](adr-104-auth-metric-request-id-exemplars.md) | Auth Metric Request ID Exemplars (sign-in and session-revoke correlation) | Accepted | 2026-09-14 |
 | [ADR-105](adr-105-scheduler-request-id-exemplars.md) | Scheduler Request ID Exemplars (tick correlation across metrics and logs) | Accepted | 2026-09-14 |
+| [ADR-106](adr-106-console-request-id-exemplars.md) | Console Request ID Exemplars (BFF metrics, downstream gRPC, and auth-flow correlation) | Accepted | 2026-09-14 |
 
 ## Template
 

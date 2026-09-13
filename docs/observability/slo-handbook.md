@@ -257,8 +257,9 @@ Java data-plane, Scheduler, Connection Test Executor, Console, trusted-proxy
 HSTS, and Controller reconcile families. Phase 56 (ADR-103) adds canonical
 request-ID exemplars to the Java data-plane families, and Phase 57 (ADR-104)
 adds them to sign-in and session-revoke counters. Phase 58 (ADR-105) adds
-per-tick Scheduler exemplars. Remaining follow-up work must
-instrument the other Go control-plane descriptors. The completed slices
-are recorded in ADR-047 and the observability changelog.
+per-tick Scheduler exemplars, and Phase 59 (ADR-106) adds Console BFF request
+and render exemplars. Remaining follow-up work must instrument the other Go
+control-plane descriptors. The completed slices are recorded in ADR-047 and
+the observability changelog.
 
 <!-- placeholders: slo-availability-target, slo-freshness-budget, slo-deliverability-target, audit-retention-days -->

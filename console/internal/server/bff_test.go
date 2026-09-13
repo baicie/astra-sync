@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
@@ -69,23 +70,26 @@ type fakeBFFBackend struct {
 	auditRequest  *jobv1.ListAuditEventsRequest
 	updateError   error
 	authorization string
+	requestID     string
 }
 
 type requestObservation struct {
-	tenantID string
-	outcome  string
-	handler  string
-	duration time.Duration
-	rendered bool
+	tenantID  string
+	outcome   string
+	handler   string
+	requestID string
+	duration  time.Duration
+	rendered  bool
 }
 
 type memoryRequestMetrics struct {
 	observations []requestObservation
 }
 
-func (m *memoryRequestMetrics) ObserveRequest(tenantID, outcome, handler string, duration time.Duration, rendered bool) {
+func (m *memoryRequestMetrics) ObserveRequest(tenantID, outcome, handler, requestID string, duration time.Duration, rendered bool) {
 	m.observations = append(m.observations, requestObservation{
-		tenantID: tenantID, outcome: outcome, handler: handler, duration: duration, rendered: rendered,
+		tenantID: tenantID, outcome: outcome, handler: handler, requestID: requestID,
+		duration: duration, rendered: rendered,
 	})
 }
 
@@ -94,6 +98,10 @@ func (f *fakeBFFBackend) capture(ctx context.Context) {
 	values := outgoing.Get("authorization")
 	if len(values) == 1 {
 		f.authorization = values[0]
+	}
+	requestIDs := outgoing.Get("x-request-id")
+	if len(requestIDs) == 1 {
+		f.requestID = requestIDs[0]
 	}
 }
 
@@ -259,6 +267,47 @@ func TestBFFDoesNotTrustIncomingTenantHeaderForUnscopedEndpoint(t *testing.T) {
 	observation := requestMetrics.observations[0]
 	if observation.tenantID != "_unknown" || observation.outcome != "success" || observation.handler != "session" {
 		t.Fatalf("incoming tenant header was trusted: %+v", observation)
+	}
+}
+
+func TestBFFUsesOneRequestIDForMetricsAndBackend(t *testing.T) {
+	const requestID = "d724ad9a-30a2-4dab-9704-2b01ea1f67e1"
+	backend := &fakeBFFBackend{}
+	requestMetrics := &memoryRequestMetrics{}
+	handler := newBFFHandlerWithMetrics(t, backend, requestMetrics)
+
+	response := bffRequest(handler, http.MethodGet, "/api/connectors", "", map[string]string{
+		"X-Astra-Tenant-ID": testTenantID,
+		"X-Request-ID":      requestID,
+	})
+	if response.Code != http.StatusOK {
+		t.Fatalf("authenticated request returned %d: %s", response.Code, response.Body.String())
+	}
+	if backend.requestID != requestID {
+		t.Fatalf("backend request ID = %q, want %q", backend.requestID, requestID)
+	}
+	if len(requestMetrics.observations) != 1 || requestMetrics.observations[0].requestID != requestID {
+		t.Fatalf("metric request ID did not match backend request ID: %+v", requestMetrics.observations)
+	}
+}
+
+func TestBFFGeneratesCanonicalRequestIDWhenHeaderMissing(t *testing.T) {
+	backend := &fakeBFFBackend{}
+	requestMetrics := &memoryRequestMetrics{}
+	handler := newBFFHandlerWithMetrics(t, backend, requestMetrics)
+
+	response := bffRequest(handler, http.MethodGet, "/api/connectors", "", map[string]string{
+		"X-Astra-Tenant-ID": testTenantID,
+	})
+	if response.Code != http.StatusOK {
+		t.Fatalf("authenticated request returned %d: %s", response.Code, response.Body.String())
+	}
+	parsed, err := uuid.Parse(backend.requestID)
+	if err != nil || parsed.String() != backend.requestID {
+		t.Fatalf("generated backend request ID is not canonical: %q", backend.requestID)
+	}
+	if len(requestMetrics.observations) != 1 || requestMetrics.observations[0].requestID != backend.requestID {
+		t.Fatalf("generated metric request ID did not match backend request ID: %+v", requestMetrics.observations)
 	}
 }
 

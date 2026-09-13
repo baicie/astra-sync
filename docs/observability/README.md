@@ -34,7 +34,9 @@ interceptor and authorized audit-query path, and negotiates OpenMetrics so a
 canonical UUID `request_id` can be emitted as a bounded exemplar. Phase 57
 (ADR-104) completes exemplar coverage for API Server and auth-library sign-in
 and session-revoke counters. Phase 58 (ADR-105) adds per-tick Scheduler
-exemplars and request-ID failure logs. F8 adds a
+exemplars and request-ID failure logs. Phase 59 (ADR-106) assigns one Console
+BFF request ID across downstream gRPC metadata, the auth flow, and Console
+request/render exemplars. F8 adds a
 Micrometer-backed Java data-plane registry: `CheckpointBatchCoordinator` emits
 batch/checkpoint samples, `InProcessBatchWorker` emits record-count samples,
 and the Worker-local spillable exchange emits

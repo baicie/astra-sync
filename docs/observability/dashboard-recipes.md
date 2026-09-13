@@ -319,7 +319,9 @@ exemplars to all seven Java data-plane families, so their OpenMetrics samples
 can join directly to Coordinator and Worker log records. Phase 57 (ADR-104)
 adds the same exemplar to sign-in and session-revoke counters.
 Phase 58 (ADR-105) adds per-tick Scheduler exemplars for assignment,
-lease-takeover, and reconcile-duration samples.
+lease-takeover, and reconcile-duration samples. Phase 59 (ADR-106) adds
+request-boundary exemplars to Console request and render samples, using the
+same ID forwarded in downstream gRPC metadata and passed to the auth flow.
 
 ## What the recipes do not record
 
@@ -343,7 +345,7 @@ rendering; F12 covers trusted-proxy HSTS responses; F13 covers Controller
 reconcile duration; Phase 56 covers Java data-plane request-ID exemplars;
 Phase 57 covers sign-in and session-revoke exemplars; Phase 10 covers the API
 Server multi-region scrape; Phase 58 covers Scheduler tick correlation
-integration.
+integration; Phase 59 covers Console BFF request correlation.
 
 ## Inline placeholders for the populated handbook
 

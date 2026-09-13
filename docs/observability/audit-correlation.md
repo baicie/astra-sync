@@ -60,6 +60,9 @@ sign-in and session-revoke counters. The API Server session-revoke path uses
 one request ID for the audit event and every per-tenant metric observation.
 Phase 58 (ADR-105) adds a per-tick request ID to Scheduler assignment,
 lease-takeover, reconcile-duration samples, and reconciliation failure logs.
+Phase 59 (ADR-106) assigns one Console BFF request ID, shares it with
+downstream gRPC metadata and the auth flow, and attaches it to Console request
+and render exemplars.
 
 ## Manual lookup procedure
 
@@ -77,7 +80,9 @@ For the three F7 metric families, step 3 can provide a direct link back to the
 matching request without adding `request_id` as a normal metric label. Other
 control-plane families continue to use the timestamp fallback. Java
 data-plane families can use the Phase 56 exemplar when the same Coordinator
-request ID is present in the logs.
+request ID is present in the logs. Console BFF samples can use the Phase 59
+exemplar to follow the same ID through downstream control-plane metadata and
+the auth flow.
 
 ## Per-tenant join
 
@@ -125,8 +130,9 @@ API Server authentication and audit-query exemplars. Phase 56 (ADR-103) adds
 request-ID exemplars to all seven Java data-plane families. Phase 57
 (ADR-104) completes API Server and auth-library sign-in/session-revoke
 exemplars. Phase 58 (ADR-105) adds Scheduler tick exemplars. Exemplar coverage
-for the remaining control-plane call sites remains incomplete. The landed
-work is recorded in
+for the remaining control-plane call sites remains incomplete. Phase 59
+(ADR-106) adds Console BFF request-boundary exemplars. The landed work is
+recorded in
 [`changelog.md`](changelog.md).
 
 ## Inline placeholders for the populated handbook

@@ -216,7 +216,9 @@ dispatch, Worker task, stage, outcome, and checkpoint logs. Phase 56 (ADR-103)
 attaches canonical `request_id` exemplars to the Java data-plane metrics in
 OpenMetrics responses. Phase 58 (ADR-105) adds a per-tick `request_id` to
 Scheduler reconciliation failure logs; logger tests only verify that supplied
-structured fields are preserved.
+structured fields are preserved. Phase 59 (ADR-106) assigns one Console BFF
+request ID and reuses it in downstream gRPC metadata, the auth-flow context,
+and Console metric exemplars.
 
 The implementation commits are recorded in
 [`changelog.md`](changelog.md).
