@@ -138,12 +138,12 @@ Each Phase 17 slice MUST add:
 
 ### 5. OpenMetrics content negotiation
 
-ADR-051 §130 defers OpenMetrics content negotiation. Phase 17 does NOT
-unblock that deferral; OpenMetrics remains a separate decision. The
-`request_id` exemplar contract documented in ADR-047 §126 still requires
-OpenMetrics negotiation before exemplars can transmit. Until then, all
-new samples in Phase 17 are emitted as bounded time-series without
-exemplars; the catalog records the deferred state explicitly.
+ADR-051 §130 originally deferred OpenMetrics content negotiation and the
+`request_id` exemplar contract documented in ADR-047 §126. Phase 17 did not
+unblock that deferral. ADR-095 later added OpenMetrics negotiation, and
+ADR-103 adds request-ID exemplars to the Java data-plane families. The Phase
+17 samples themselves remain bounded time-series without exemplars unless
+their owning call site is later updated with a trusted request identity.
 
 ### 6. CHANGELOG discipline
 

@@ -22,7 +22,10 @@ import io.astrasync.engine.runtime.CheckpointProgress;
 import io.astrasync.engine.runtime.CheckpointProgressListener;
 import io.astrasync.engine.runtime.WorkerResult;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import io.micrometer.prometheusmetrics.PrometheusConfig;
+import io.micrometer.prometheusmetrics.PrometheusMeterRegistry;
 import java.util.Optional;
+import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
 class CheckpointBatchCoordinatorMetricsTest {
@@ -56,6 +59,28 @@ class CheckpointBatchCoordinatorMetricsTest {
                         .timer()
                         .count())
                 .isEqualTo(1);
+    }
+
+    @Test
+    void recordsRequestIdExemplarsForCheckpointExecution() {
+        String tenantId = UUID.randomUUID().toString();
+        String requestId = UUID.randomUUID().toString();
+        PrometheusMeterRegistry registry = new PrometheusMeterRegistry(PrometheusConfig.DEFAULT);
+        CheckpointBatchCoordinator coordinator = new CheckpointBatchCoordinator(
+                java.util.List.of(new RecordingWorker()),
+                new InMemoryCheckpointStore(),
+                new DataPlaneMetrics(registry));
+        SourceSplit split = new SourceSplit("split-1", "source", SplitPosition.unbounded(), SplitPosition.unbounded());
+        BatchTaskFactory factory = ignored -> new BatchTask(split, new EmptySource(), new EmptySink(), 25, 1)
+                .withIdentity(JOB_ID, tenantId, requestId);
+
+        coordinator.run(JOB_ID, () -> java.util.List.of(split), factory);
+
+        String body = registry.scrape("application/openmetrics-text; version=1.0.0; charset=utf-8");
+        assertThat(body).contains("coordinator_batch_size_records");
+        assertThat(body).contains("coordinator_batch_duration_seconds");
+        assertThat(body).contains("coordinator_checkpoint_duration_seconds");
+        assertThat(body).contains("request_id=\"" + requestId + "\"");
     }
 
     private static final class RecordingWorker implements BatchWorker, CheckpointBatchWorker {

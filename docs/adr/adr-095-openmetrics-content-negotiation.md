@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted — quality weighting refined by ADR-096.
+Accepted — quality weighting refined by ADR-096; exemplar emission added by
+ADR-103.
 
 ## Context
 

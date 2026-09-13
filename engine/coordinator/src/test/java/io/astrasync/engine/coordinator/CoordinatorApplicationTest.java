@@ -142,12 +142,12 @@ class CoordinatorApplicationTest {
             assertThat(result.metrics().writtenCount()).isEqualTo(4);
             assertThat(assignments).containsExactlyInAnyOrder("worker-0:" + FIRST_SPLIT, "worker-1:" + SECOND_SPLIT);
             assertThat(readTarget(url)).containsExactly("1:Ada", "2:Lin", "3:Kai", "4:May");
-            assertThat(DataPlaneMetrics.processRegistry()
-                            .get("worker.records.read")
-                            .tag("tenant_id", tenantId)
-                            .counter()
-                            .count())
-                    .isEqualTo(4);
+            String metrics = DataPlaneMetrics.processRegistry()
+                    .scrape("application/openmetrics-text; version=1.0.0; charset=utf-8");
+            assertThat(metrics.lines().toList()).anySatisfy(line -> assertThat(line)
+                    .contains("worker_records_read_total")
+                    .contains("tenant_id=\"" + tenantId + "\"")
+                    .contains(" 4.0"));
         }
     }
 

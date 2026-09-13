@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Phase 56 (ADR-103): attach canonical `request_id` exemplars to all seven
+  Java data-plane metric families in OpenMetrics responses. Invalid or
+  missing IDs emit ordinary samples, request IDs remain absent from normal
+  labels, and Prometheus text output is unchanged.
+
 - Phase 55 (ADR-102): propagate one Coordinator execution `request_id` through
   normal and checkpoint Worker requests. Coordinator, remote dispatch, Worker
   task, stage, outcome, and checkpoint logs now share the ID; old requests omit

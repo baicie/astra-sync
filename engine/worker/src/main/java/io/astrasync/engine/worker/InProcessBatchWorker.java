@@ -89,7 +89,7 @@ public final class InProcessBatchWorker implements BatchWorker, CheckpointBatchW
         BatchExchange exchange = new BatchExchange(
                 task.maxInFlightBatches(),
                 task.spillPolicy(),
-                bytes -> metrics.recordSpillBytes(task.tenantId(), task.jobId(), bytes));
+                bytes -> metrics.recordSpillBytes(task.tenantId(), task.jobId(), task.requestId(), bytes));
         AdaptiveBatchController batchController =
                 new AdaptiveBatchController(task.batchPolicy(), task.maxBatchRecords());
         ExecutorService executor = Executors.newFixedThreadPool(2, new WorkerThreadFactory(workerId, task.taskId()));
@@ -233,6 +233,7 @@ public final class InProcessBatchWorker implements BatchWorker, CheckpointBatchW
                 this.metrics.recordBatchDuration(
                         task.tenantId(),
                         context.jobId(),
+                        task.requestId(),
                         "read",
                         Math.max(0, System.nanoTime() - sourceReadStartedNanos));
                 if (batch.size() > requestedBatchRecords) {
@@ -240,7 +241,7 @@ public final class InProcessBatchWorker implements BatchWorker, CheckpointBatchW
                             "source returned " + batch.size() + " records, limit is " + requestedBatchRecords);
                 }
                 metrics.observe(batch);
-                this.metrics.recordRecordsRead(task.tenantId(), context.jobId(), batch.size());
+                this.metrics.recordRecordsRead(task.tenantId(), context.jobId(), task.requestId(), batch.size());
                 if (!batch.rows().isEmpty()) {
                     context.assertCurrent();
                     sink.assertEpoch(context.executionEpoch());
@@ -260,6 +261,7 @@ public final class InProcessBatchWorker implements BatchWorker, CheckpointBatchW
                     this.metrics.recordBatchDuration(
                             task.tenantId(),
                             context.jobId(),
+                            task.requestId(),
                             "write",
                             Math.max(0, System.nanoTime() - sinkWriteStartedNanos));
                     batchController.observe(new AdaptiveBatchSample(
@@ -286,7 +288,7 @@ public final class InProcessBatchWorker implements BatchWorker, CheckpointBatchW
                             token,
                             BatchDigests.sha256(batch)));
                     metrics.writtenCount += batch.size();
-                    this.metrics.recordRecordsWritten(task.tenantId(), context.jobId(), batch.size());
+                    this.metrics.recordRecordsWritten(task.tenantId(), context.jobId(), task.requestId(), batch.size());
                 }
                 endOfInput = batch.endOfInput();
             }
@@ -356,6 +358,7 @@ public final class InProcessBatchWorker implements BatchWorker, CheckpointBatchW
                     this.metrics.recordBatchDuration(
                             task.tenantId(),
                             task.jobId(),
+                            task.requestId(),
                             "read",
                             Math.max(0, System.nanoTime() - sourceReadStartedNanos));
                     if (batch.size() > requestedBatchRecords) {
@@ -363,7 +366,7 @@ public final class InProcessBatchWorker implements BatchWorker, CheckpointBatchW
                                 "source returned " + batch.size() + " records, limit is " + requestedBatchRecords);
                     }
                     metrics.observe(batch);
-                    this.metrics.recordRecordsRead(task.tenantId(), task.jobId(), batch.size());
+                    this.metrics.recordRecordsRead(task.tenantId(), task.jobId(), task.requestId(), batch.size());
                     int queueDepthBeforePublish = exchange.size();
                     long queueWaitNanos = exchange.publishMeasured(batch);
                     batchController.observe(new AdaptiveBatchSample(
@@ -418,10 +421,12 @@ public final class InProcessBatchWorker implements BatchWorker, CheckpointBatchW
                         this.metrics.recordBatchDuration(
                                 task.tenantId(),
                                 task.jobId(),
+                                task.requestId(),
                                 "write",
                                 Math.max(0, System.nanoTime() - sinkWriteStartedNanos));
                         metrics.writtenCount += batch.size();
-                        this.metrics.recordRecordsWritten(task.tenantId(), task.jobId(), batch.size());
+                        this.metrics.recordRecordsWritten(
+                                task.tenantId(), task.jobId(), task.requestId(), batch.size());
                         batchController.observe(new AdaptiveBatchSample(
                                 batch.size(),
                                 Math.max(0, System.nanoTime() - sinkWriteStartedNanos),
@@ -442,7 +447,8 @@ public final class InProcessBatchWorker implements BatchWorker, CheckpointBatchW
                                     startedNanos);
                     directFailure = !(exception instanceof ExchangeFailureException);
                     if (!(exception instanceof ExchangeFailureException)) {
-                        this.metrics.recordRecordsRejected(task.tenantId(), task.jobId(), "SINK_WRITE", 1);
+                        this.metrics.recordRecordsRejected(
+                                task.tenantId(), task.jobId(), "SINK_WRITE", task.requestId(), 1);
                     }
                     exchange.fail(failure);
                 }

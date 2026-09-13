@@ -40,8 +40,8 @@ slice).
 - Touching the Java data-plane metrics (Phase 9 / ADR-051 already
   activated all seven families).
 - Adding new metric names that are not in the catalog.
-- Adding `request_id` exemplars (the existing deferred contract
-  requires OpenMetrics negotiation first).
+- Adding `request_id` exemplars in this phase (ADR-095 later added the
+  OpenMetrics transport and ADR-103 added Java data-plane exemplars).
 
 ## Roadmap
 

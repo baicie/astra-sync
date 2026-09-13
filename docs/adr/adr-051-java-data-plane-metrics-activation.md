@@ -5,7 +5,7 @@
 Accepted (implements Phase 7 Slice 26 follow-up `26.F8`). Read/write stage
 breakdown completed by ADR-094; OpenMetrics negotiation completed by ADR-095
 and refined by ADR-096 and ADR-097. Worker protocol identity propagation is
-completed by ADR-098.
+completed by ADR-098. Request-ID exemplar emission is completed by ADR-103.
 
 ## Context
 
@@ -128,7 +128,7 @@ contract.
 `DataPlaneMetricsServer` binds an HTTP listener only when
 `METRICS_LISTEN_ADDRESS` is non-empty. The endpoint returns Prometheus text
 format on `/metrics`. OpenMetrics content negotiation is provided by ADR-095;
-exemplar emission remains a separate contract.
+request-ID exemplar emission is provided by ADR-103.
 
 When the environment variable is empty or absent, the recorder is
 constructed but the server is not started. Existing operational

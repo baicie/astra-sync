@@ -72,8 +72,9 @@ instead of being written as decorative placeholders.
 Structured fields are emitted in addition to the message. The deployment
 log store (Loki, Elasticsearch, etc.) can ingest them as labels or columns.
 Phase 55 (ADR-102) propagates one Coordinator execution `request_id` through
-normal and checkpoint Worker requests. Old requests omit the field; OpenMetrics
-exemplar emission remains separate work.
+normal and checkpoint Worker requests. Old requests omit the field. Phase 56
+(ADR-103) uses the same identity for bounded Java data-plane OpenMetrics
+exemplars.
 
 The fields are stable. A change to a field name or type is a
 breaking change and requires a corresponding update to the
@@ -211,9 +212,10 @@ loggers with `component`. Phase 50 (ADR-100) adds scoped `tenant_id`,
 `job_id`, `epoch`, `stage`, and `outcome` context to Coordinator and Worker
 logs. Phase 52 (ADR-101) adds `worker_id` to remote dispatch and Worker task
 logs. Phase 55 (ADR-102) adds `request_id` to Coordinator execution, remote
-dispatch, Worker task, stage, outcome, and checkpoint logs. OpenMetrics
-exemplar emission remains follow-up instrumentation; logger tests only verify
-that supplied structured fields are preserved.
+dispatch, Worker task, stage, outcome, and checkpoint logs. Phase 56 (ADR-103)
+attaches canonical `request_id` exemplars to the Java data-plane metrics in
+OpenMetrics responses; logger tests only verify that supplied structured
+fields are preserved.
 
 The implementation commits are recorded in
 [`changelog.md`](changelog.md).

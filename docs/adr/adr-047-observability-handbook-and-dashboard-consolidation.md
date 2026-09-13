@@ -12,7 +12,8 @@ endpoint, and Helm work is recorded in
 authentication and audit-query observations with bounded exemplars. F8–F13
 activate the Java data-plane, Scheduler, Connection Test Executor, Console,
 trusted-proxy HSTS, and Controller reconcile families; remaining Go business
-call sites and Controller lifecycle owners remain deferred.
+call sites and Controller lifecycle owners remain deferred. Java data-plane
+request-ID exemplars are added by ADR-103.
 
 ## Context
 

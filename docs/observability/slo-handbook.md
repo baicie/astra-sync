@@ -254,7 +254,8 @@ follow-up migration slice lands.
 F7 completes API Server authentication and audit-query observations with
 bounded `request_id` exemplars. F8, F9, F10, F11, F12, and F13 activate the
 Java data-plane, Scheduler, Connection Test Executor, Console, trusted-proxy
-HSTS, and Controller reconcile families. Remaining follow-up work must
+HSTS, and Controller reconcile families. Phase 56 (ADR-103) adds canonical
+request-ID exemplars to the Java data-plane families. Remaining follow-up work must
 instrument the other Go control-plane descriptors. The completed slices
 are recorded in ADR-047 and the observability changelog.
 
