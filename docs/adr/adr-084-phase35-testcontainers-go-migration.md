@@ -99,13 +99,11 @@ Phase 35 ships four artefacts:
    the build tag is the missing enforcement.
 
 2. **`testcontainers-go/modules/postgres` migration** of the
-   two integration tests. The helper code lives **inline** at
-   the top of each integration test file (a single
-   `startPostgresContainer(t)` helper, 30 lines) — **not** as a
-   shared module. Two integration test files do not justify a
-   shared package; the duplication is bounded (the helper is
-   ~30 lines) and a future third consumer would justify the
-   shared module extraction.
+   two integration tests. The helper code lives in a shared
+   `postgres_testcontainer_helper_test.go` file. The helper only
+   owns container lifecycle; repository migrations remain owned
+   by each test and run in cross-module dependency order
+   (`auth → job core → connection → job mutations`).
 
 3. **CI lane**
    `.github/workflows/control-plane-integration.yml` that
@@ -122,13 +120,13 @@ Phase 35 ships four artefacts:
    environment-variable escape hatch is dropped; the two
    integration tests are now hermetic by construction.
 
-### Inline helper shape
+### Shared helper shape
 
 ```go
 // startPostgresContainer boots a Postgres 16 container via
-// testcontainers-go, applies the migrations under
-// control-plane/job/postgres/migrations, and registers
-// t.Cleanup to terminate the container when the test ends.
+// testcontainers-go and registers t.Cleanup to terminate the
+// container when the test ends. Repository migrations remain
+// test-owned so they can be applied in dependency order.
 // The image tag is pinned to match the production deployment
 // (PostgreSQL 16).
 func startPostgresContainer(t *testing.T) string {
@@ -146,7 +144,6 @@ func startPostgresContainer(t *testing.T) string {
             t.Logf("terminate postgres: %v", err)
         }
     })
-    // Apply migrations ...
     return connectionString
 }
 ```
@@ -193,10 +190,9 @@ PostgreSQL 17 bump is a separate ADR.
 
 ### Neutral
 
-- The inline helper is duplicated across the two integration
-  test files (~30 lines each). A future third consumer would
-  justify extracting a shared package; today the duplication
-  is bounded.
+- The shared helper file is used by both integration tests.
+  A future third consumer may justify extracting a shared
+  helper package.
 
 ## Alternatives Considered
 

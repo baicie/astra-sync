@@ -315,6 +315,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Make `make catalog-export` write the deployment catalog by
   default and honor `CATALOG_OUTPUT`, matching the documented
   re-bake workflow.
+- Keep PostgreSQL testcontainer migration ownership in the
+  integration tests and apply cross-module schemas in dependency
+  order, fixing the CI failure caused by running job mutations
+  before auth and connection schemas.
 
 <!-- Add new Phase content above this line. -->
 
