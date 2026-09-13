@@ -110,6 +110,7 @@ This directory contains the Architecture Decision Records (ADRs) for AstraSync.
 | [ADR-098](adr-098-worker-protocol-trusted-identity.md) | Worker Protocol Trusted Identity Propagation (`job_id` / `tenant_id` metric attribution) | Accepted | 2026-09-13 |
 | [ADR-099](adr-099-coordinator-trusted-tenant-binding.md) | Coordinator Trusted Tenant Binding (`ASTRASYNC_COORDINATOR_TENANT_ID`) | Accepted | 2026-09-13 |
 | [ADR-100](adr-100-data-plane-structured-log-context.md) | Data-Plane Structured Log Context (scoped MDC identity, stage, and outcome) | Accepted | 2026-09-14 |
+| [ADR-101](adr-101-data-plane-worker-id-log-field.md) | Data-Plane Worker Identity in Logs (`worker_id` correlation field) | Accepted | 2026-09-14 |
 
 ## Template
 

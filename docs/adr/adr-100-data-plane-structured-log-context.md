@@ -42,6 +42,8 @@ credentials, connector options, SQL text, or free-form user input.
 - Worker executor threads receive stage-specific context independently.
 - Coordinator-side remote task dispatch uses the same identity context as the
   Worker task it invokes.
+- ADR-101 adds `worker_id` to the same nested context for multi-Worker
+  correlation.
 - Failure paths emit a structured warning before the original exception
   propagates.
 - No metric, protocol, deployment, or dependency change is required.

@@ -64,6 +64,7 @@ request-, tenant-, job-, epoch-, or stage-scoped fields.
 | `request_id` | UUID | The request ID assigned by the API Server or the data plane. Joins the record to the audit table and to a Prometheus exemplar. |
 | `tenant_id` | UUID | Tenant UUID. Dropped on logs that are not tenant-scoped. |
 | `job_id` | UUID | Job UUID. Dropped on logs that are not job-scoped. |
+| `worker_id` | string | Bounded Worker identifier. Used by remote dispatch and Worker task logs for metrics/log correlation. |
 | `component` | string | Component name (`apiserver`, `controller`, `coordinator`, etc.). |
 | `epoch` | integer | Execution epoch of the Job. Set on every Coordinator and Worker log. |
 | `stage` | string | Lifecycle stage (`read`, `transform`, `write`, `checkpoint`). Used by the dashboard recipes. |
@@ -208,6 +209,7 @@ startup, shutdown, and error records in `api-server`, `console`,
 `scheduler`, `connection-test-executor`, and `astra-auth-admin` use JSON
 loggers with `component`. Phase 50 (ADR-100) adds scoped `tenant_id`,
 `job_id`, `epoch`, `stage`, and `outcome` context to Coordinator and Worker
+logs. Phase 52 (ADR-101) adds `worker_id` to remote dispatch and Worker task
 logs. Request-scoped `request_id` propagation and exemplar correlation remain
 follow-up instrumentation; logger tests only verify that supplied structured
 fields are preserved.

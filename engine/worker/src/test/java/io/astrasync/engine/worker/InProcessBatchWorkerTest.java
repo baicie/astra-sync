@@ -143,6 +143,7 @@ class InProcessBatchWorkerTest {
         assertThat(appender.list).allSatisfy(event -> {
             assertThat(event.getMDCPropertyMap()).containsEntry("tenant_id", tenantId);
             assertThat(event.getMDCPropertyMap()).containsEntry("job_id", jobId);
+            assertThat(event.getMDCPropertyMap()).containsEntry("worker_id", "worker-a");
         });
     }
 
