@@ -112,6 +112,7 @@ This directory contains the Architecture Decision Records (ADRs) for AstraSync.
 | [ADR-100](adr-100-data-plane-structured-log-context.md) | Data-Plane Structured Log Context (scoped MDC identity, stage, and outcome) | Accepted | 2026-09-14 |
 | [ADR-101](adr-101-data-plane-worker-id-log-field.md) | Data-Plane Worker Identity in Logs (`worker_id` correlation field) | Accepted | 2026-09-14 |
 | [ADR-102](adr-102-data-plane-request-id-propagation.md) | Data-Plane Request ID Propagation (`request_id` protocol and log correlation) | Accepted | 2026-09-14 |
+| [ADR-103](adr-103-java-data-plane-request-id-exemplars.md) | Java Data-Plane Request ID Exemplars (bounded OpenMetrics correlation) | Accepted | 2026-09-14 |
 
 ## Template
 

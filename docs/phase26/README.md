@@ -54,7 +54,7 @@ coverage for the controller reconcile loop introduced in slice
 
 - OpenMetrics content negotiation (ADR-051 §130) — remains a separate deferred decision.
 - Java data-plane metrics 26.F9 (ADR-051 §7) — not in Phase 17 scope.
-- `request_id` exemplar contract — requires OpenMetrics negotiation before it can transmit; Phase 17 does not unblock that deferral.
+- `request_id` exemplar contract — Phase 17 did not unblock the deferral; ADR-095 later added OpenMetrics negotiation and ADR-103 added Java data-plane exemplars.
 
 ## Phase 17 Slice Timeline (reference)
 

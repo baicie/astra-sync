@@ -314,7 +314,9 @@ and histogram and on the authorized audit-query histogram, as documented in
 [`audit-correlation.md`](audit-correlation.md). A populated dashboard may
 offer a direct audit lookup from those samples. Other metric families still
 require tenant/component/timestamp correlation until their own bounded
-exemplar call sites land.
+exemplar call sites land. Phase 56 (ADR-103) adds canonical `request_id`
+exemplars to all seven Java data-plane families, so their OpenMetrics samples
+can join directly to Coordinator and Worker log records.
 
 ## What the recipes do not record
 
@@ -335,7 +337,8 @@ reconcile boundary. F7 covers API Server authentication decisions and
 authorized audit queries with bounded exemplars; F10 covers Connection Test
 Executor completion outcomes; F11 covers Console BFF requests and HTML
 rendering; F12 covers trusted-proxy HSTS responses; F13 covers Controller
-reconcile duration; Phase 10 covers the API Server multi-region scrape
+reconcile duration; Phase 56 covers Java data-plane request-ID exemplars;
+Phase 10 covers the API Server multi-region scrape
 integration.
 
 ## Inline placeholders for the populated handbook

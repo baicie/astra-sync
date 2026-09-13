@@ -28,6 +28,8 @@ import io.astrasync.engine.runtime.EpochFence;
 import io.astrasync.engine.runtime.EpochFencedException;
 import io.astrasync.engine.runtime.SpillPolicy;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import io.micrometer.prometheusmetrics.PrometheusConfig;
+import io.micrometer.prometheusmetrics.PrometheusMeterRegistry;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -117,6 +119,26 @@ class InProcessBatchWorkerTest {
                         .timer()
                         .count())
                 .isEqualTo(2);
+    }
+
+    @Test
+    void recordsRequestIdExemplarsForNonCheckpointExecution() {
+        String jobId = UUID.randomUUID().toString();
+        String tenantId = UUID.randomUUID().toString();
+        String requestId = UUID.randomUUID().toString();
+        PrometheusMeterRegistry registry = new PrometheusMeterRegistry(PrometheusConfig.DEFAULT);
+        LifecycleSource source =
+                new LifecycleSource(RowBatch.data(List.of(Row.of("id", 1))), RowBatch.last(List.of(Row.of("id", 2))));
+        LifecycleSink sink = new LifecycleSink(new ArrayList<>());
+        BatchTask task = new BatchTask(split("split-1"), source, sink, 1, 1).withIdentity(jobId, tenantId, requestId);
+
+        new InProcessBatchWorker("worker-a", new DataPlaneMetrics(registry)).execute(task);
+
+        String body = registry.scrape("application/openmetrics-text; version=1.0.0; charset=utf-8");
+        assertThat(body).contains("worker_records_read_total");
+        assertThat(body).contains("worker_records_written_total");
+        assertThat(body).contains("coordinator_batch_duration_seconds");
+        assertThat(body).contains("request_id=\"" + requestId + "\"");
     }
 
     @Test

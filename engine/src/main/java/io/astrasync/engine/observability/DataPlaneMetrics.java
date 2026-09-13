@@ -6,6 +6,11 @@ import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import io.micrometer.prometheusmetrics.PrometheusConfig;
 import io.micrometer.prometheusmetrics.PrometheusMeterRegistry;
+import io.prometheus.metrics.core.datapoints.CounterDataPoint;
+import io.prometheus.metrics.core.datapoints.DistributionDataPoint;
+import io.prometheus.metrics.model.registry.PrometheusRegistry;
+import io.prometheus.metrics.model.snapshots.Labels;
+import io.prometheus.metrics.model.snapshots.Unit;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
@@ -24,12 +29,17 @@ public final class DataPlaneMetrics {
     private static final PrometheusMeterRegistry PROCESS_REGISTRY =
             new PrometheusMeterRegistry(PrometheusConfig.DEFAULT);
     private static final DataPlaneMetrics GLOBAL = new DataPlaneMetrics(PROCESS_REGISTRY);
+    private static final Unit RECORDS = new Unit("records");
 
     private final MeterRegistry registry;
+    private final PrometheusBackend prometheus;
 
     /** Creates a recorder backed by the supplied registry. */
     public DataPlaneMetrics(MeterRegistry registry) {
         this.registry = Objects.requireNonNull(registry, "registry must not be null");
+        this.prometheus = registry instanceof PrometheusMeterRegistry prometheusRegistry
+                ? new PrometheusBackend(prometheusRegistry.getPrometheusRegistry())
+                : null;
     }
 
     /** Returns the process-local recorder used by Coordinator and Worker runtime paths. */
@@ -49,6 +59,22 @@ public final class DataPlaneMetrics {
 
     /** Records source records accepted by a Worker batch under a trusted tenant identity. */
     public void recordRecordsRead(String tenantId, String jobId, long count) {
+        recordRecordsRead(tenantId, jobId, null, count);
+    }
+
+    /** Records source records with trusted identity and an optional request-id exemplar. */
+    public void recordRecordsRead(String tenantId, String jobId, String requestId, long count) {
+        if (count <= 0) {
+            return;
+        }
+        Labels exemplar = requestExemplar(requestId);
+        if (prometheus != null) {
+            increment(
+                    prometheus.recordsRead.labelValues(canonicalTenantId(tenantId), canonicalJobId(jobId)),
+                    count,
+                    exemplar);
+            return;
+        }
         increment("worker.records.read", tenantId, jobId, count);
     }
 
@@ -59,6 +85,22 @@ public final class DataPlaneMetrics {
 
     /** Records records committed to a Worker sink batch under a trusted tenant identity. */
     public void recordRecordsWritten(String tenantId, String jobId, long count) {
+        recordRecordsWritten(tenantId, jobId, null, count);
+    }
+
+    /** Records written records with trusted identity and an optional request-id exemplar. */
+    public void recordRecordsWritten(String tenantId, String jobId, String requestId, long count) {
+        if (count <= 0) {
+            return;
+        }
+        Labels exemplar = requestExemplar(requestId);
+        if (prometheus != null) {
+            increment(
+                    prometheus.recordsWritten.labelValues(canonicalTenantId(tenantId), canonicalJobId(jobId)),
+                    count,
+                    exemplar);
+            return;
+        }
         increment("worker.records.written", tenantId, jobId, count);
     }
 
@@ -69,10 +111,24 @@ public final class DataPlaneMetrics {
 
     /** Records rejected sink records with trusted tenant and stable reason labels. */
     public void recordRecordsRejected(String tenantId, String jobId, String reason, long count) {
+        recordRecordsRejected(tenantId, jobId, reason, null, count);
+    }
+
+    /** Records rejected records with trusted identity and an optional request-id exemplar. */
+    public void recordRecordsRejected(String tenantId, String jobId, String reason, String requestId, long count) {
         if (count <= 0) {
             return;
         }
         String stableReason = REJECTION_REASONS.contains(reason) ? reason : "UNKNOWN";
+        Labels exemplar = requestExemplar(requestId);
+        if (prometheus != null) {
+            increment(
+                    prometheus.recordsRejected.labelValues(
+                            canonicalTenantId(tenantId), canonicalJobId(jobId), stableReason),
+                    count,
+                    exemplar);
+            return;
+        }
         Counter.builder("worker.records.rejected")
                 .tags(commonTags(tenantId, jobId))
                 .tag("reason", stableReason)
@@ -87,7 +143,20 @@ public final class DataPlaneMetrics {
 
     /** Records the configured batch size with a trusted tenant identity. */
     public void recordBatchSize(String tenantId, String jobId, int batchSize) {
+        recordBatchSize(tenantId, jobId, null, batchSize);
+    }
+
+    /** Records batch size with trusted identity and an optional request-id exemplar. */
+    public void recordBatchSize(String tenantId, String jobId, String requestId, int batchSize) {
         if (batchSize <= 0) {
+            return;
+        }
+        Labels exemplar = requestExemplar(requestId);
+        if (prometheus != null) {
+            observe(
+                    prometheus.batchSize.labelValues(canonicalTenantId(tenantId), canonicalJobId(jobId)),
+                    batchSize,
+                    exemplar);
             return;
         }
         DistributionSummary.builder("coordinator.batch.size")
@@ -104,13 +173,25 @@ public final class DataPlaneMetrics {
 
     /** Records a completed batch duration with trusted tenant identity and an allowlisted stage. */
     public void recordBatchDuration(String tenantId, String jobId, String stage, long durationNanos) {
-        recordTimer(
-                "coordinator.batch.duration",
-                tenantId,
-                jobId,
-                durationNanos,
-                "stage",
-                BATCH_STAGES.contains(stage) ? stage : "unknown");
+        recordBatchDuration(tenantId, jobId, null, stage, durationNanos);
+    }
+
+    /** Records batch duration with trusted identity and an optional request-id exemplar. */
+    public void recordBatchDuration(String tenantId, String jobId, String requestId, String stage, long durationNanos) {
+        if (durationNanos < 0) {
+            return;
+        }
+        String stableStage = BATCH_STAGES.contains(stage) ? stage : "unknown";
+        Labels exemplar = requestExemplar(requestId);
+        if (prometheus != null) {
+            observe(
+                    prometheus.batchDuration.labelValues(
+                            canonicalTenantId(tenantId), canonicalJobId(jobId), stableStage),
+                    Unit.nanosToSeconds(durationNanos),
+                    exemplar);
+            return;
+        }
+        recordTimer("coordinator.batch.duration", tenantId, jobId, durationNanos, "stage", stableStage);
     }
 
     /** Records durable checkpoint latency with a bounded outcome. */
@@ -120,7 +201,25 @@ public final class DataPlaneMetrics {
 
     /** Records durable checkpoint latency with trusted tenant identity and a bounded outcome. */
     public void recordCheckpointDuration(String tenantId, String jobId, String outcome, long durationNanos) {
+        recordCheckpointDuration(tenantId, jobId, null, outcome, durationNanos);
+    }
+
+    /** Records checkpoint duration with trusted identity and an optional request-id exemplar. */
+    public void recordCheckpointDuration(
+            String tenantId, String jobId, String requestId, String outcome, long durationNanos) {
+        if (durationNanos < 0) {
+            return;
+        }
         String stableOutcome = CHECKPOINT_OUTCOMES.contains(outcome) ? outcome : "failure";
+        Labels exemplar = requestExemplar(requestId);
+        if (prometheus != null) {
+            observe(
+                    prometheus.checkpointDuration.labelValues(
+                            canonicalTenantId(tenantId), canonicalJobId(jobId), stableOutcome),
+                    Unit.nanosToSeconds(durationNanos),
+                    exemplar);
+            return;
+        }
         recordTimer("coordinator.checkpoint.duration", tenantId, jobId, durationNanos, "outcome", stableOutcome);
     }
 
@@ -131,6 +230,22 @@ public final class DataPlaneMetrics {
 
     /** Records successfully enqueued spill bytes with trusted tenant identity. */
     public void recordSpillBytes(String tenantId, String jobId, long bytes) {
+        recordSpillBytes(tenantId, jobId, null, bytes);
+    }
+
+    /** Records spill bytes with trusted identity and an optional request-id exemplar. */
+    public void recordSpillBytes(String tenantId, String jobId, String requestId, long bytes) {
+        if (bytes <= 0) {
+            return;
+        }
+        Labels exemplar = requestExemplar(requestId);
+        if (prometheus != null) {
+            increment(
+                    prometheus.spillBytes.labelValues(canonicalTenantId(tenantId), canonicalJobId(jobId)),
+                    bytes,
+                    exemplar);
+            return;
+        }
         increment("coordinator.spill.bytes", tenantId, jobId, bytes);
     }
 
@@ -166,5 +281,82 @@ public final class DataPlaneMetrics {
 
     private static String canonicalJobId(String jobId) {
         return jobId != null && CANONICAL_UUID.matcher(jobId).matches() ? jobId : UNKNOWN_JOB_ID;
+    }
+
+    private static Labels requestExemplar(String requestId) {
+        if (requestId == null || !CANONICAL_UUID.matcher(requestId).matches()) {
+            return null;
+        }
+        return Labels.of("request_id", requestId);
+    }
+
+    private static void increment(CounterDataPoint counter, long count, Labels exemplar) {
+        if (exemplar == null) {
+            counter.inc(count);
+        } else {
+            counter.incWithExemplar(count, exemplar);
+        }
+    }
+
+    private static void observe(DistributionDataPoint histogram, double value, Labels exemplar) {
+        if (exemplar == null) {
+            histogram.observe(value);
+        } else {
+            histogram.observeWithExemplar(value, exemplar);
+        }
+    }
+
+    private static final class PrometheusBackend {
+        private final io.prometheus.metrics.core.metrics.Counter recordsRead;
+        private final io.prometheus.metrics.core.metrics.Counter recordsWritten;
+        private final io.prometheus.metrics.core.metrics.Counter recordsRejected;
+        private final io.prometheus.metrics.core.metrics.Counter spillBytes;
+        private final io.prometheus.metrics.core.metrics.Histogram batchSize;
+        private final io.prometheus.metrics.core.metrics.Histogram batchDuration;
+        private final io.prometheus.metrics.core.metrics.Histogram checkpointDuration;
+
+        private PrometheusBackend(PrometheusRegistry registry) {
+            recordsRead = register(counter("worker.records.read", "tenant_id", "job_id"), registry);
+            recordsWritten = register(counter("worker.records.written", "tenant_id", "job_id"), registry);
+            recordsRejected = register(counter("worker.records.rejected", "tenant_id", "job_id", "reason"), registry);
+            spillBytes = register(counter("coordinator.spill.bytes", "tenant_id", "job_id"), registry);
+            batchSize = register(histogram("coordinator.batch.size", RECORDS, "tenant_id", "job_id"), registry);
+            batchDuration = register(
+                    histogram("coordinator.batch.duration", Unit.SECONDS, "tenant_id", "job_id", "stage"), registry);
+            checkpointDuration = register(
+                    histogram("coordinator.checkpoint.duration", Unit.SECONDS, "tenant_id", "job_id", "outcome"),
+                    registry);
+        }
+
+        private static io.prometheus.metrics.core.metrics.Counter counter(String name, String... labelNames) {
+            return io.prometheus.metrics.core.metrics.Counter.builder()
+                    .name(name)
+                    .labelNames(labelNames)
+                    .withExemplars()
+                    .build();
+        }
+
+        private static io.prometheus.metrics.core.metrics.Histogram histogram(
+                String name, Unit unit, String... labelNames) {
+            return io.prometheus.metrics.core.metrics.Histogram.builder()
+                    .name(name)
+                    .unit(unit)
+                    .labelNames(labelNames)
+                    .classicOnly()
+                    .withExemplars()
+                    .build();
+        }
+
+        private static io.prometheus.metrics.core.metrics.Counter register(
+                io.prometheus.metrics.core.metrics.Counter counter, PrometheusRegistry registry) {
+            registry.register(counter);
+            return counter;
+        }
+
+        private static io.prometheus.metrics.core.metrics.Histogram register(
+                io.prometheus.metrics.core.metrics.Histogram histogram, PrometheusRegistry registry) {
+            registry.register(histogram);
+            return histogram;
+        }
     }
 }

@@ -37,7 +37,9 @@ batch/checkpoint samples, `InProcessBatchWorker` emits record-count samples,
 and the Worker-local spillable exchange emits
 `coordinator_spill_bytes_total` after successful durable enqueue. The Worker
 exposes that shared registry only when `METRICS_LISTEN_ADDRESS` is set;
-Coordinator remains one-shot. F10 records `connection_test_total` only after
+Coordinator remains one-shot. Phase 56 (ADR-103) attaches canonical
+`request_id` exemplars to all seven Java data-plane families in the
+OpenMetrics representation. F10 records `connection_test_total` only after
 the executor durably completes a claimed operation; policy-denied probes use
 the bounded `rejected` outcome. F11 records Console BFF request outcomes and
 HTML render latency with bounded handler names. F12 records trusted-proxy HSTS

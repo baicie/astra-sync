@@ -209,7 +209,10 @@ Worker request now carries optional `job_id` and `tenant_id` attribution
 fields. Missing or non-canonical identifiers normalize to `_unknown`; the
 Coordinator reads its optional trusted tenant binding from
 `ASTRASYNC_COORDINATOR_TENANT_ID` and fails startup when an explicit value is
-invalid.
+invalid. Phase 56 (ADR-103) attaches a canonical `request_id` exemplar to all
+seven families when the Prometheus registry is scraped in OpenMetrics format.
+The request ID is never a normal series label, and invalid or missing values
+produce the ordinary sample without an exemplar.
 
 | Metric | Type | Labels | Description |
 |---|---|---|---|
@@ -221,8 +224,9 @@ invalid.
 | `worker_records_written_total` | counter | `tenant_id`, `job_id` | Records written by the Worker. |
 | `worker_records_rejected_total` | counter | `tenant_id`, `job_id`, `reason` | Records rejected by the sink writer; the `reason` is a stable code, not a free-form message. |
 
-The Java data plane exposes these families through Micrometer; the legacy
-sentence below is superseded by the F8 activation described above.
+The Java data plane exposes these families through Micrometer. The Prometheus
+registry path uses the underlying Prometheus client for custom exemplar
+labels; other registry implementations retain the Micrometer behavior.
 
 ## CLI metrics
 
@@ -288,10 +292,10 @@ The backlog table above is frozen; future metrics activation follows the
 same slice pattern documented in ADR-058.
 
 OpenMetrics content negotiation is enabled by ADR-095, honors HTTP quality
-values under ADR-096, and resolves media-range precedence under ADR-097. The
-`request_id` exemplar contract documented in ADR-047 §126 remains a separate
-instrumentation decision; no exemplar is emitted by the negotiation changes
-alone.
+values under ADR-096, and resolves media-range precedence under ADR-097.
+Phase 56 (ADR-103) implements the Java data-plane `request_id` exemplar
+contract documented in ADR-047 §126. Other metric owners remain responsible
+for adding their own exemplars.
 
 ### Slice 43.0 — umbrella infrastructure
 

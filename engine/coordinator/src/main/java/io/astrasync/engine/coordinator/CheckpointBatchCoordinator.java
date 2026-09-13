@@ -115,14 +115,22 @@ public final class CheckpointBatchCoordinator {
                         "Worker does not support checkpoint execution: " + worker.workerId());
             }
             AtomicLong durableSequence = new AtomicLong(context.checkpointSequence());
-            metrics.recordBatchSize(jobId, task.maxBatchRecords());
+            metrics.recordBatchSize(task.tenantId(), jobId, task.requestId(), task.maxBatchRecords());
             long executionStartedNanos = System.nanoTime();
             WorkerResult result = checkpointWorker.executeCheckpoint(
                     context,
                     task,
-                    progress -> durableSequence.set(record(jobId, epoch, split.splitId(), splitFingerprint, progress)
+                    progress -> durableSequence.set(record(
+                                    task.tenantId(),
+                                    task.requestId(),
+                                    jobId,
+                                    epoch,
+                                    split.splitId(),
+                                    splitFingerprint,
+                                    progress)
                             .checkpointSequence()));
-            metrics.recordBatchDuration(jobId, "read", System.nanoTime() - executionStartedNanos);
+            metrics.recordBatchDuration(
+                    task.tenantId(), jobId, task.requestId(), "read", System.nanoTime() - executionStartedNanos);
             if (!split.splitId().equals(result.taskId())) {
                 throw new BatchCoordinatorException(
                         "Worker returned an unexpected task result: " + result.taskId(), null);
@@ -136,7 +144,13 @@ public final class CheckpointBatchCoordinator {
     }
 
     private CheckpointRecord record(
-            String jobId, long executionEpoch, String splitId, String splitFingerprint, CheckpointProgress progress) {
+            String tenantId,
+            String requestId,
+            String jobId,
+            long executionEpoch,
+            String splitId,
+            String splitFingerprint,
+            CheckpointProgress progress) {
         if (!jobId.equals(progress.jobId())
                 || executionEpoch != progress.executionEpoch()
                 || !splitId.equals(progress.taskId())) {
@@ -158,10 +172,10 @@ public final class CheckpointBatchCoordinator {
                 throw new BatchCoordinatorException(
                         "checkpoint store returned a different record for " + progress.taskId(), null);
             }
-            metrics.recordCheckpointDuration(jobId, "success", System.nanoTime() - startedNanos);
+            metrics.recordCheckpointDuration(tenantId, jobId, requestId, "success", System.nanoTime() - startedNanos);
             return durable;
         } catch (RuntimeException exception) {
-            metrics.recordCheckpointDuration(jobId, "failure", System.nanoTime() - startedNanos);
+            metrics.recordCheckpointDuration(tenantId, jobId, requestId, "failure", System.nanoTime() - startedNanos);
             throw exception;
         }
     }

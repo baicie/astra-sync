@@ -3,12 +3,16 @@ package io.astrasync.engine.observability;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import io.micrometer.prometheusmetrics.PrometheusConfig;
+import io.micrometer.prometheusmetrics.PrometheusMeterRegistry;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
 class DataPlaneMetricsTest {
     private static final String JOB_ID = "1f36d9c6-77a2-4e83-8c7d-dc59b9b94a52";
     private static final String TENANT_ID = "2f36d9c6-77a2-4e83-8c7d-dc59b9b94a53";
+    private static final String REQUEST_ID = "3f36d9c6-77a2-4e83-8c7d-dc59b9b94a54";
+    private static final String OPENMETRICS_CONTENT_TYPE = "application/openmetrics-text; version=1.0.0; charset=utf-8";
 
     @Test
     void recordsWorkerCountsWithBoundedLabels() {
@@ -172,5 +176,48 @@ class DataPlaneMetricsTest {
                         .counter()
                         .count())
                 .isEqualTo(1);
+    }
+
+    @Test
+    void recordsCanonicalRequestIdAsPrometheusExemplar() {
+        PrometheusMeterRegistry registry = new PrometheusMeterRegistry(PrometheusConfig.DEFAULT);
+        DataPlaneMetrics metrics = new DataPlaneMetrics(registry);
+
+        metrics.recordRecordsRead(TENANT_ID, JOB_ID, REQUEST_ID, 3);
+        metrics.recordRecordsWritten(TENANT_ID, JOB_ID, REQUEST_ID, 2);
+        metrics.recordRecordsRejected(TENANT_ID, JOB_ID, "SINK_WRITE", REQUEST_ID, 1);
+        metrics.recordBatchSize(TENANT_ID, JOB_ID, REQUEST_ID, 2);
+        metrics.recordBatchDuration(TENANT_ID, JOB_ID, REQUEST_ID, "read", 1);
+        metrics.recordCheckpointDuration(TENANT_ID, JOB_ID, REQUEST_ID, "success", 1);
+        metrics.recordSpillBytes(TENANT_ID, JOB_ID, REQUEST_ID, 128);
+
+        String body = registry.scrape(OPENMETRICS_CONTENT_TYPE);
+
+        assertExemplar(body, "worker_records_read_total", REQUEST_ID);
+        assertExemplar(body, "worker_records_written_total", REQUEST_ID);
+        assertExemplar(body, "worker_records_rejected_total", REQUEST_ID);
+        assertExemplar(body, "coordinator_batch_size_records", REQUEST_ID);
+        assertExemplar(body, "coordinator_batch_duration_seconds", REQUEST_ID);
+        assertExemplar(body, "coordinator_checkpoint_duration_seconds", REQUEST_ID);
+        assertExemplar(body, "coordinator_spill_bytes_total", REQUEST_ID);
+        assertThat(body).doesNotContain("trace_id=");
+    }
+
+    @Test
+    void omitsNonCanonicalRequestIdFromPrometheusExemplar() {
+        PrometheusMeterRegistry registry = new PrometheusMeterRegistry(PrometheusConfig.DEFAULT);
+        DataPlaneMetrics metrics = new DataPlaneMetrics(registry);
+
+        metrics.recordRecordsRead(TENANT_ID, JOB_ID, "not-a-uuid", 3);
+
+        String body = registry.scrape(OPENMETRICS_CONTENT_TYPE);
+
+        assertThat(body).contains("worker_records_read_total");
+        assertThat(body).doesNotContain("request_id=");
+    }
+
+    private static void assertExemplar(String metrics, String family, String requestId) {
+        assertThat(metrics.lines().toList())
+                .anySatisfy(line -> assertThat(line).contains(family).contains("request_id=\"" + requestId + "\""));
     }
 }

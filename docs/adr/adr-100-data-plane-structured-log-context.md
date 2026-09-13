@@ -49,8 +49,8 @@ credentials, connector options, SQL text, or free-form user input.
 - Failure paths emit a structured warning before the original exception
   propagates.
 - No metric, protocol, deployment, or dependency change is required.
-- OIDC request correlation and `request_id` exemplar emission remain separate
-  follow-up work.
+- OIDC request correlation remains separate. Java data-plane `request_id`
+  exemplar emission is added by ADR-103.
 
 ## Rollback
 

@@ -50,6 +50,11 @@ or missing values create the normal metric sample without an exemplar. The
 ID is never copied into the normal metric label set, so exemplar correlation
 does not change time-series cardinality.
 
+Phase 56 (ADR-103) applies the same contract to all seven Java data-plane
+metric families. A Coordinator execution request ID is propagated to the
+Worker, attached to successful and failed data-plane observations, and
+exposed only through the OpenMetrics response.
+
 ## Manual lookup procedure
 
 An operator with no Prometheus exemplar support can join the three
@@ -64,7 +69,9 @@ signals manually. The procedure is:
 
 For the three F7 metric families, step 3 can provide a direct link back to the
 matching request without adding `request_id` as a normal metric label. Other
-families continue to use the timestamp fallback.
+control-plane families continue to use the timestamp fallback. Java
+data-plane families can use the Phase 56 exemplar when the same Coordinator
+request ID is present in the logs.
 
 ## Per-tenant join
 
@@ -108,10 +115,10 @@ and the metrics.
 ## Follow-up
 
 F1–F5 deliver logging, descriptor, exposition, and Helm foundations. F7 adds
-API Server authentication and audit-query exemplars. Request-context and
-exemplar propagation for the remaining control-plane and data-plane call
-sites remains incomplete. The landed work is recorded in
-[`changelog.md`](changelog.md).
+API Server authentication and audit-query exemplars. Phase 56 (ADR-103) adds
+request-ID exemplars to all seven Java data-plane families. Exemplar coverage
+for the remaining control-plane call sites remains incomplete. The landed
+work is recorded in [`changelog.md`](changelog.md).
 
 ## Inline placeholders for the populated handbook
 
