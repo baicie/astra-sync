@@ -116,12 +116,12 @@ admin CLI success boundaries to be instrumented.
 |---|---|---|---|
 | `apiserver_auth_request_total` | counter | `tenant_id`, `outcome` | Completed API Server authentication and authorization decisions. |
 | `apiserver_auth_request_duration_seconds` | histogram | `tenant_id`, `outcome` | Decision time through authorization, excluding business-handler execution. |
-| `apiserver_sign_in_total` | counter | `tenant_id`, `outcome` | Sign-in events, including denied sign-ins. **Emitted** by Console BFF `Manager.CompleteLogin` (Phase 17 slice 43.1.5, 2026-09-08). The Recorder routes every label value through `io.astrasync/control-plane/observability/normalize`. |
-| `apiserver_session_revoke_total` | counter | `tenant_id`, `actor_id` | Sessions revoked by the API Server `RevokeConsoleSession` RPC (Phase 24 slice 50, ADR-068) or the admin CLI path (Phase 22 / ADR-065). Recorder wired in Phase 17 slice 43.1; production call site landed in slice 50. |
+| `apiserver_sign_in_total` | counter | `tenant_id`, `outcome` | Sign-in events, including denied sign-ins. **Emitted** by Console BFF `Manager.CompleteLogin` (Phase 17 slice 43.1.5, 2026-09-08). The Recorder routes every label value through `io.astrasync/control-plane/observability/normalize` and attaches a canonical `request_id` exemplar (Phase 57, ADR-104). |
+| `apiserver_session_revoke_total` | counter | `tenant_id`, `actor_id` | Sessions revoked by the API Server `RevokeConsoleSession` RPC (Phase 24 slice 50, ADR-068) or the admin CLI path (Phase 22 / ADR-065). Recorder wired in Phase 17 slice 43.1; production call site landed in slice 50. Phase 57 (ADR-104) reuses the audit request ID as the bounded exemplar. |
 | `apiserver_audit_query_duration_seconds` | histogram | `tenant_id` | Time to fulfil one authorized audit query, including failures after authorization. |
 | `apiserver_trusted_proxy_hsts_total` | counter | `tenant_id` | HSTS responses emitted for HTTPS requests accepted from a trusted proxy; F12 records the pre-auth `_unknown` tenant value. |
-| `auth_sign_in_total` | counter | `tenant_id`, `outcome` | Auth-library sign-in descriptor. **Emitted** by Console BFF `Manager.CompleteLogin` (Phase 17 slice 43.1.5, 2026-09-08). Phase 17 slice 43.2 (ADR-058) wires a Recorder that routes every label value through `observability/normalize`. The Recorder uses `success | rejected | failure` as the outcome allowlist. |
-| `auth_session_revoke_total` | counter | `tenant_id` | Auth-library revoke descriptor. Phase 17 slice 43.2 (ADR-058) wires a Recorder that routes every label value through `observability/normalize`. Phase 22 slice 48 (ADR-065) observes at the admin CLI `revoke-session` success boundary. A `prometheus.Registry` is created per invocation; a structured log line (`slog` JSON) confirms the observation per tenant. The one-shot CLI uses log-dump emission; a long-running consumer (API Server, Console) can host the same Recorder for traditional scrape emission. `tenant_id` is derived by joining sessions to memberships (one observation per unique tenant the principal holds an active membership in). Because the registry is per-invocation, historical rate queries (e.g. `rate(auth_session_revoke_total[5m])`) require a long-running consumer; the log-dump is a best-effort one-shot signal. |
+| `auth_sign_in_total` | counter | `tenant_id`, `outcome` | Auth-library sign-in descriptor. **Emitted** by Console BFF `Manager.CompleteLogin` (Phase 17 slice 43.1.5, 2026-09-08). Phase 17 slice 43.2 (ADR-058) wires a Recorder that routes every label value through `observability/normalize`. The Recorder uses `success | rejected | failure` as the outcome allowlist and attaches a canonical `request_id` exemplar (Phase 57, ADR-104). |
+| `auth_session_revoke_total` | counter | `tenant_id` | Auth-library revoke descriptor. Phase 17 slice 43.2 (ADR-058) wires a Recorder that routes every label value through `observability/normalize`. Phase 22 slice 48 (ADR-065) observes at the admin CLI `revoke-session` success boundary. A `prometheus.Registry` is created per invocation; a structured log line (`slog` JSON) confirms the observation per tenant. The one-shot CLI uses log-dump emission; a long-running consumer (API Server, Console) can host the same Recorder for traditional scrape emission. `tenant_id` is derived by joining sessions to memberships (one observation per unique tenant the principal holds an active membership in). Phase 57 (ADR-104) attaches a canonical `request_id` exemplar. Because the registry is per-invocation, historical rate queries (e.g. `rate(auth_session_revoke_total[5m])`) require a long-running consumer; the log-dump is a best-effort one-shot signal. |
 
 The authentication `outcome` allowlist is:
 
@@ -142,9 +142,11 @@ tenant series.
 
 F7 attaches `request_id` exemplars to the authentication counter and
 histogram and to the audit-query histogram only when the value is a canonical
-lowercase UUID. Other values still produce the bounded metric sample but no
-exemplar. `request_id` is never a normal time-series label. Histogram metrics
-emit `le` buckets; the dashboard recipes compose P50, P95, and P99 from them.
+lowercase UUID. Phase 57 (ADR-104) extends the same contract to API Server and
+auth-library sign-in and session-revoke counters. Other values still produce
+the bounded metric sample but no exemplar. `request_id` is never a normal
+time-series label. Histogram metrics emit `le` buckets; the dashboard recipes
+compose P50, P95, and P99 from them.
 
 ## Job lifecycle metrics
 
@@ -294,8 +296,9 @@ same slice pattern documented in ADR-058.
 OpenMetrics content negotiation is enabled by ADR-095, honors HTTP quality
 values under ADR-096, and resolves media-range precedence under ADR-097.
 Phase 56 (ADR-103) implements the Java data-plane `request_id` exemplar
-contract documented in ADR-047 §126. Other metric owners remain responsible
-for adding their own exemplars.
+contract documented in ADR-047 §126, and Phase 57 (ADR-104) completes the
+API Server and auth-library sign-in/session-revoke counters. Other metric
+owners remain responsible for adding their own exemplars.
 
 ### Slice 43.0 — umbrella infrastructure
 

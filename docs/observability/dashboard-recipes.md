@@ -316,7 +316,8 @@ offer a direct audit lookup from those samples. Other metric families still
 require tenant/component/timestamp correlation until their own bounded
 exemplar call sites land. Phase 56 (ADR-103) adds canonical `request_id`
 exemplars to all seven Java data-plane families, so their OpenMetrics samples
-can join directly to Coordinator and Worker log records.
+can join directly to Coordinator and Worker log records. Phase 57 (ADR-104)
+adds the same exemplar to sign-in and session-revoke counters.
 
 ## What the recipes do not record
 
@@ -338,7 +339,8 @@ authorized audit queries with bounded exemplars; F10 covers Connection Test
 Executor completion outcomes; F11 covers Console BFF requests and HTML
 rendering; F12 covers trusted-proxy HSTS responses; F13 covers Controller
 reconcile duration; Phase 56 covers Java data-plane request-ID exemplars;
-Phase 10 covers the API Server multi-region scrape
+Phase 57 covers sign-in and session-revoke exemplars; Phase 10 covers the API
+Server multi-region scrape
 integration.
 
 ## Inline placeholders for the populated handbook

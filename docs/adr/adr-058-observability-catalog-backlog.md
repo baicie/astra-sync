@@ -144,6 +144,8 @@ unblock that deferral. ADR-095 later added OpenMetrics negotiation, and
 ADR-103 adds request-ID exemplars to the Java data-plane families. The Phase
 17 samples themselves remain bounded time-series without exemplars unless
 their owning call site is later updated with a trusted request identity.
+ADR-104 completes the API Server and auth-library sign-in/session-revoke
+exemplar call sites.
 
 ### 6. CHANGELOG discipline
 

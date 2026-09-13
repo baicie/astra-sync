@@ -22,19 +22,23 @@ func TestRecorderObservesSLOMetricsWithBoundedExemplars(t *testing.T) {
 
 	recorder.ObserveAuthRequest("tenant-a", "success", exemplarRequestID, 25*time.Millisecond)
 	recorder.ObserveAuditQuery("tenant-a", exemplarRequestID, 40*time.Millisecond)
+	recorder.ObserveSignIn(canonicalTenantUUID, "success", exemplarRequestID)
+	recorder.ObserveSessionRevoke(canonicalTenantUUID, "actor-a", exemplarRequestID)
 
 	body := scrapeOpenMetrics(t, registry)
 	for _, sample := range []string{
 		`apiserver_auth_request_total{outcome="success",tenant_id="tenant-a"} 1.0`,
 		`apiserver_auth_request_duration_seconds_count{outcome="success",tenant_id="tenant-a"} 1`,
 		`apiserver_audit_query_duration_seconds_count{tenant_id="tenant-a"} 1`,
+		`apiserver_sign_in_total{outcome="success",tenant_id="` + canonicalTenantUUID + `"} 1.0`,
+		`apiserver_session_revoke_total{actor_id="actor-a",tenant_id="` + canonicalTenantUUID + `"} 1.0`,
 	} {
 		if !strings.Contains(body, sample) {
 			t.Fatalf("OpenMetrics body missing %q: %s", sample, body)
 		}
 	}
-	if count := strings.Count(body, `request_id="`+exemplarRequestID+`"`); count != 3 {
-		t.Fatalf("request_id exemplar count = %d, want 3: %s", count, body)
+	if count := strings.Count(body, `request_id="`+exemplarRequestID+`"`); count != 5 {
+		t.Fatalf("request_id exemplar count = %d, want 5: %s", count, body)
 	}
 }
 
@@ -47,6 +51,8 @@ func TestRecorderDropsNonCanonicalRequestIDExemplars(t *testing.T) {
 
 	recorder.ObserveAuthRequest("tenant-a", "rejected", "attacker-controlled", 5*time.Millisecond)
 	recorder.ObserveAuditQuery("tenant-a", "D724AD9A-30A2-4DAB-9704-2B01EA1F67E1", 8*time.Millisecond)
+	recorder.ObserveSignIn("tenant-a", "rejected", "attacker-controlled")
+	recorder.ObserveSessionRevoke("tenant-a", "actor-a", "attacker-controlled")
 
 	body := scrapeOpenMetrics(t, registry)
 	if strings.Contains(body, "request_id=") {
@@ -226,7 +232,7 @@ func TestRecorderSessionRevokeNormalisesActorAndTenant(t *testing.T) {
 			if err != nil {
 				t.Fatalf("new recorder: %v", err)
 			}
-			recorder.ObserveSessionRevoke(testCase.tenantID, testCase.actorID)
+			recorder.ObserveSessionRevoke(testCase.tenantID, testCase.actorID, "")
 			body := scrapeOpenMetrics(t, registry)
 			sample := `apiserver_session_revoke_total{actor_id="` + testCase.wantActor + `",tenant_id="` + testCase.wantTenant + `"} 1.0`
 			if !strings.Contains(body, sample) {

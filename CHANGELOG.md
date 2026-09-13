@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Phase 57 (ADR-104): attach canonical `request_id` exemplars to API Server
+  and auth-library sign-in and session-revoke counters. API Server session
+  revoke now reuses one request ID across the audit row and per-tenant metric
+  observations.
+
 - Phase 56 (ADR-103): attach canonical `request_id` exemplars to all seven
   Java data-plane metric families in OpenMetrics responses. Invalid or
   missing IDs emit ordinary samples, request IDs remain absent from normal

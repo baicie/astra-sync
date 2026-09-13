@@ -474,10 +474,11 @@ func (s *AccessService) RevokeConsoleSession(
 		return nil, status.Errorf(codes.InvalidArgument, "principal_id is invalid: %v", err)
 	}
 	actorID := principalActorID(auth.Decision{Principal: principal})
+	requestID := accessAuditRequestID(ctx, s.uid)
 	auditEvent := auth.SecurityAuditEvent{
 		EventID: s.uid(), EventType: "access.console_session.revoked",
 		ActorID:   actorID,
-		RequestID: accessAuditRequestID(ctx, s.uid),
+		RequestID: requestID,
 		Outcome:   "CHANGED",
 		Attributes: map[string]any{
 			"principalId":    request.GetPrincipalId(),
@@ -492,7 +493,7 @@ func (s *AccessService) RevokeConsoleSession(
 		return nil, accessRepositoryError(err)
 	}
 	for _, tenantID := range tenantIDs {
-		s.revokeRecorder.ObserveSessionRevoke(tenantID, actorID)
+		s.revokeRecorder.ObserveSessionRevoke(tenantID, actorID, requestID)
 	}
 	return &controlv1.RevokeConsoleSessionResponse{
 		SessionsRevoked: count,
