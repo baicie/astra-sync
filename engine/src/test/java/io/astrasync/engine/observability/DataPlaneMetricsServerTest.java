@@ -168,4 +168,67 @@ class DataPlaneMetricsServerTest {
             assertThat(response.body()).doesNotContain("# EOF");
         }
     }
+
+    @Test
+    void prefersPrometheusTextWhenTypeWildcardHasHigherQuality() throws IOException, InterruptedException {
+        PrometheusMeterRegistry registry = new PrometheusMeterRegistry(PrometheusConfig.DEFAULT);
+        try (DataPlaneMetricsServer server =
+                DataPlaneMetricsServer.start("127.0.0.1:0", registry).orElseThrow()) {
+
+            HttpResponse<String> response = HttpClient.newHttpClient()
+                    .send(
+                            HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + server.port() + "/metrics"))
+                                    .header("Accept", "application/openmetrics-text;q=0.5, text/*;q=1")
+                                    .GET()
+                                    .build(),
+                            HttpResponse.BodyHandlers.ofString());
+
+            assertThat(response.statusCode()).isEqualTo(200);
+            assertThat(response.headers().firstValue("Content-Type"))
+                    .hasValueSatisfying(value -> assertThat(value).contains("text/plain; version=0.0.4"));
+            assertThat(response.body()).doesNotContain("# EOF");
+        }
+    }
+
+    @Test
+    void prefersExactPrometheusQualityOverGlobalWildcard() throws IOException, InterruptedException {
+        PrometheusMeterRegistry registry = new PrometheusMeterRegistry(PrometheusConfig.DEFAULT);
+        try (DataPlaneMetricsServer server =
+                DataPlaneMetricsServer.start("127.0.0.1:0", registry).orElseThrow()) {
+
+            HttpResponse<String> response = HttpClient.newHttpClient()
+                    .send(
+                            HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + server.port() + "/metrics"))
+                                    .header("Accept", "application/openmetrics-text;q=0.8, text/plain;q=0.5, */*;q=1")
+                                    .GET()
+                                    .build(),
+                            HttpResponse.BodyHandlers.ofString());
+
+            assertThat(response.statusCode()).isEqualTo(200);
+            assertThat(response.headers().firstValue("Content-Type")).hasValueSatisfying(value -> assertThat(value)
+                    .contains("application/openmetrics-text; version=1.0.0"));
+            assertThat(response.body()).contains("# EOF");
+        }
+    }
+
+    @Test
+    void prefersOpenMetricsWhenGlobalWildcardHasLowerQuality() throws IOException, InterruptedException {
+        PrometheusMeterRegistry registry = new PrometheusMeterRegistry(PrometheusConfig.DEFAULT);
+        try (DataPlaneMetricsServer server =
+                DataPlaneMetricsServer.start("127.0.0.1:0", registry).orElseThrow()) {
+
+            HttpResponse<String> response = HttpClient.newHttpClient()
+                    .send(
+                            HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + server.port() + "/metrics"))
+                                    .header("Accept", "application/openmetrics-text;q=1, */*;q=0.5")
+                                    .GET()
+                                    .build(),
+                            HttpResponse.BodyHandlers.ofString());
+
+            assertThat(response.statusCode()).isEqualTo(200);
+            assertThat(response.headers().firstValue("Content-Type")).hasValueSatisfying(value -> assertThat(value)
+                    .contains("application/openmetrics-text; version=1.0.0"));
+            assertThat(response.body()).contains("# EOF");
+        }
+    }
 }

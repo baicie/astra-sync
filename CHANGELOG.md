@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Phase 47 (ADR-097): resolve data-plane OpenMetrics negotiation through
+  exact, type-wildcard, and global-wildcard media range precedence. Exact
+  `Accept` ranges outrank `type/*`, `type/*` outranks `*/*`, and OpenMetrics
+  still requires an explicit media range.
+
 - Phase 46 (ADR-096): honor HTTP quality values when selecting the Java
   data-plane `/metrics` representation. OpenMetrics wins only when its valid
   `q` value is higher than the Prometheus text value; invalid or tied values
