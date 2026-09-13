@@ -187,6 +187,42 @@ class InProcessBatchWorkerTest {
                         .counter()
                         .count())
                 .isEqualTo(1);
+        assertThat(registry.get("coordinator.batch.duration")
+                        .tag("job_id", jobId)
+                        .tag("stage", "read")
+                        .timer()
+                        .count())
+                .isEqualTo(1);
+        assertThat(registry.get("coordinator.batch.duration")
+                        .tag("job_id", jobId)
+                        .tag("stage", "write")
+                        .timer()
+                        .count())
+                .isEqualTo(1);
+    }
+
+    @Test
+    void recordsBatchStageDurationsForNonCheckpointExecution() {
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        LifecycleSource source =
+                new LifecycleSource(RowBatch.data(List.of(Row.of("id", 1))), RowBatch.last(List.of(Row.of("id", 2))));
+        LifecycleSink sink = new LifecycleSink(new ArrayList<>());
+
+        new InProcessBatchWorker("worker-a", new DataPlaneMetrics(registry))
+                .execute(new BatchTask(split("split-1"), source, sink, 1, 1));
+
+        assertThat(registry.get("coordinator.batch.duration")
+                        .tag("job_id", DataPlaneMetrics.UNKNOWN_JOB_ID)
+                        .tag("stage", "read")
+                        .timer()
+                        .count())
+                .isEqualTo(2);
+        assertThat(registry.get("coordinator.batch.duration")
+                        .tag("job_id", DataPlaneMetrics.UNKNOWN_JOB_ID)
+                        .tag("stage", "write")
+                        .timer()
+                        .count())
+                .isEqualTo(2);
     }
 
     @Test

@@ -19,6 +19,7 @@ public final class DataPlaneMetrics {
     private static final Pattern CANONICAL_UUID =
             Pattern.compile("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}");
     private static final Set<String> REJECTION_REASONS = Set.of("SINK_OPEN", "SINK_WRITE", "SINK_CLOSE");
+    private static final Set<String> BATCH_STAGES = Set.of("read", "write");
     private static final Set<String> CHECKPOINT_OUTCOMES = Set.of("success", "failure");
     private static final PrometheusMeterRegistry PROCESS_REGISTRY =
             new PrometheusMeterRegistry(PrometheusConfig.DEFAULT);
@@ -79,7 +80,11 @@ public final class DataPlaneMetrics {
     /** Records a completed Coordinator batch duration under an allowlisted stage. */
     public void recordBatchDuration(String jobId, String stage, long durationNanos) {
         recordTimer(
-                "coordinator.batch.duration", jobId, durationNanos, "stage", "read".equals(stage) ? "read" : "unknown");
+                "coordinator.batch.duration",
+                jobId,
+                durationNanos,
+                "stage",
+                BATCH_STAGES.contains(stage) ? stage : "unknown");
     }
 
     /** Records durable checkpoint latency with a bounded outcome. */
