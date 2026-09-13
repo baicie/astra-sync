@@ -1,6 +1,6 @@
 name: control-plane-integration
 
-# Phase 35 (ADR-084) + Phase 36 (ADR-085) + Phase 37 (ADR-087) + Phase 39 (ADR-089) + Phase 40 (ADR-090).
+# Phase 35 (ADR-084) + Phase 36 (ADR-085) + Phase 37 (ADR-087) + Phase 39 (ADR-089) + Phase 40 (ADR-090) + Phase 42 (ADR-092).
 # Runs integration tests for:
 #   - PostgreSQL (control-plane/job/postgres/) using testcontainers-go
 #   - Controller (control-plane/controller/) using envtest
@@ -24,6 +24,7 @@ on:
       - 'control-plane/go.mod'
       - 'control-plane/go.sum'
       - 'deployment/operator/config/**'
+      - 'scripts/envtest-versions.py'
       - '.github/workflows/control-plane-integration.yml'
   push:
     branches:
@@ -74,17 +75,22 @@ jobs:
           go-version: '1.26.x'
           cache: false
 
-      - name: Setup envtest
-        # Phase 36 (ADR-085 §3): install setup-envtest and download
-        # kube-apiserver + etcd binaries for controller integration tests.
-        # The tools version matches control-plane/controller/go.mod and
-        # 1.36.x matches its k8s.io/apimachinery version.
+      - name: Resolve envtest tool versions
         env:
           GOPROXY: https://goproxy.cn,direct
         run: |
           set -euo pipefail
-          go install sigs.k8s.io/controller-runtime/tools/setup-envtest@v0.24.1
-          assets_path="$(setup-envtest use -p path 1.36.x)"
+          python3 scripts/envtest-versions.py >> "${GITHUB_ENV}"
+
+      - name: Setup envtest
+        # Phase 42 (ADR-092): setup-envtest and Kubernetes test binaries are
+        # derived from control-plane/controller/go.mod, not hard-coded here.
+        env:
+          GOPROXY: https://goproxy.cn,direct
+        run: |
+          set -euo pipefail
+          go install "sigs.k8s.io/controller-runtime/tools/setup-envtest@${SETUP_ENVTEST_VERSION}"
+          assets_path="$(setup-envtest use -p path "${ENVTEST_K8S_VERSION}")"
           echo "KUBEBUILDER_ASSETS=${assets_path}" >> "${GITHUB_ENV}"
 
       - name: Run PostgreSQL integration tests

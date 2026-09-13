@@ -101,6 +101,7 @@ This directory contains the Architecture Decision Records (ADRs) for AstraSync.
 | [ADR-089](adr-089-controller-manager-metrics-integration.md) | Controller Manager Metrics Integration Test (real manager lifecycle via envtest) | Accepted | 2026-09-13 |
 | [ADR-090](adr-090-postgres-envtest-finalizer-integration.md) | PostgreSQL and Envtest Finalizer Integration (cross-store cleanup) | Accepted | 2026-09-13 |
 | [ADR-091](adr-091-repository-epoch-fencing.md) | Repository-Level Epoch Fencing (atomic rejection of stale writers) | Accepted | 2026-09-13 |
+| [ADR-092](adr-092-envtest-tool-version-automation.md) | Envtest Tool Version Automation (controller module as source of truth) | Accepted | 2026-09-13 |
 
 ## Template
 

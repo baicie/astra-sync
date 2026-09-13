@@ -21,8 +21,8 @@ ACTION_RE = re.compile(r"^\s*uses:\s+([^\s#]+)", re.MULTILINE)
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 
 
-def _read_workflow() -> str:
-    return WORKFLOW.read_text(encoding="utf-8")
+def _read_workflow(file_name: str = "ci.yml") -> str:
+    return (WORKFLOW.parent / file_name).read_text(encoding="utf-8")
 
 
 def _step_body(workflow: str, name: str) -> str:
@@ -175,6 +175,28 @@ class CIWorkflowPhase15CatalogTest(unittest.TestCase):
         self.assertIn("scripts/diff-catalog.py", self.body)
         self.assertIn("catalog differs from freshly-exported catalog", self.body)
         self.assertIn("Running diff-catalog for diagnostics", self.body)
+
+
+class CIWorkflowPhase42EnvtestVersionTest(unittest.TestCase):
+    """Phase 42: envtest tool versions come from the controller module."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.workflow = _read_workflow("control-plane-integration.yml")
+
+    def test_versions_are_resolved_from_controller_module(self):
+        self.assertIn("scripts/envtest-versions.py", self.workflow)
+        resolve_body = _step_body(
+            self.workflow, "Resolve envtest tool versions"
+        )
+        self.assertIn("scripts/envtest-versions.py", resolve_body)
+        self.assertIn("${GITHUB_ENV}", resolve_body)
+
+        setup_body = _step_body(self.workflow, "Setup envtest")
+        self.assertIn("${SETUP_ENVTEST_VERSION}", setup_body)
+        self.assertIn("${ENVTEST_K8S_VERSION}", setup_body)
+        self.assertNotIn("v0.24.1", setup_body)
+        self.assertNotIn("1.36.x", setup_body)
 
 
 class CIWorkflowStepInventoryTest(unittest.TestCase):
