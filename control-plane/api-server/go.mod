@@ -9,7 +9,7 @@ require (
 	github.com/prometheus/client_golang v1.20.5
 	go.uber.org/zap v1.28.0
 	google.golang.org/grpc v1.83.0
-	google.golang.org/protobuf v1.36.12-0.20260120151049-f2248ac996af
+	google.golang.org/protobuf v1.36.12
 	io.astrasync/control-plane v0.0.0
 	io.astrasync/control-plane/auth v0.0.0-00010101000000-000000000000
 	io.astrasync/control-plane/catalog v0.0.0
