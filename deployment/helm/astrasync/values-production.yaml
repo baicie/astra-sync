@@ -1,0 +1,242 @@
+# Production values for AstraSync.
+# Apply with: helm upgrade --install astrasync deployment/helm/astrasync --values deployment/helm/astrasync/values-production.yaml
+#
+# Prerequisites:
+#   1. metrics-server must be installed in the cluster for HPA to work:
+#      kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+#   2. A CNI that supports NetworkPolicy (Calico, Cilium, kube-router) must be present
+#      for the internal network policy to be enforced.
+#   3. TLS certificates must be provisioned before deploying with mtls.enabled=true.
+
+# Global defaults for production environment.
+# All components inherit these unless overridden below.
+
+image:
+  tag: "v0.2.0"
+
+# Production API Server configuration.
+apiServer:
+  environment: production
+  replicaCount: 3
+  auth:
+    # OIDC MUST be configured before enabling production mode.
+    mode: oidc
+    oidcIssuer: "https://your-issuer.example.com"
+    oidcAudience: "astrasync-api"
+  mtls:
+    enabled: true
+    requireClientCert: true
+    secretName: "astrasync-api-server-mtls"
+    clientCAKey: ca.crt
+  connectionRollout:
+    mutationsEnabled: false
+    testsEnabled: false
+    runtimeEnabled: false
+  ingress:
+    enabled: true
+    className: nginx
+    annotations:
+      cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    hosts:
+      - host: api.astrasync.example.com
+        paths:
+          - path: /
+            pathType: Prefix
+    tls:
+      - secretName: astrasync-api-tls
+        hosts:
+          - api.astrasync.example.com
+
+# Enable autoscaling for all components. Requires metrics-server.
+autoscaling:
+  enabled: true
+  apiServer:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 20
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+  controller:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+  scheduler:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+
+# Enable PodDisruptionBudgets.
+podDisruptionBudget:
+  enabled: true
+  apiServer:
+    minAvailable: 2
+  controller:
+    minAvailable: 2
+  scheduler:
+    minAvailable: 2
+  compilerValidation:
+    minAvailable: 1
+
+# Enable internal network policy (East-West traffic restriction).
+# Requires a CNI that supports NetworkPolicy.
+networkPolicy:
+  enabled: true
+  internal: true
+  apiServer:
+    enabled: true
+    allowedSources: []
+  controller:
+    enabled: true
+    allowedSources: []
+  worker:
+    enabled: true
+    allowedSources: []
+
+# Production security context: seccomp profile, non-root, read-only root filesystem.
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+
+# Container security context.
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+# Compiler Validation (production requires mTLS).
+compilerValidation:
+  replicaCount: 2
+  tls:
+    enabled: true
+    secretName: "astrasync-compiler-validation-tls"
+    certificateKey: tls.crt
+    privateKeyKey: tls.key
+    clientCAKey: ca.crt
+
+# Controller — leader election ensures HA.
+controller:
+  replicaCount: 3
+  leaderElection:
+    enabled: true
+    leaseDuration: 15s
+    renewDeadline: 10s
+    retryPeriod: 5s
+
+# Scheduler — HA with multiple replicas.
+scheduler:
+  replicaCount: 3
+
+# Console — production OIDC configuration.
+console:
+  replicaCount: 2
+  environment: production
+  publicUrl: "https://console.astrasync.example.com"
+  auth:
+    mode: oidc
+    oidcIssuer: "https://your-issuer.example.com"
+    oidcAudience: "astrasync-console"
+    clientId: "astrasync-console"
+    scopes: "openid profile email"
+    clientSecret:
+      secretName: "astrasync-console-oidc"
+      key: client-secret
+    sessionKey:
+      secretName: "astrasync-session-key"
+      key: session-key
+  ingress:
+    enabled: true
+    className: nginx
+    annotations:
+      cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    hosts:
+      - host: console.astrasync.example.com
+        paths:
+          - path: /
+            pathType: Prefix
+    tls:
+      - secretName: astrasync-console-tls
+        hosts:
+          - console.astrasync.example.com
+  api:
+    endpoint: "api.astrasync.example.com:443"
+    tls:
+      enabled: true
+      secretName: "astrasync-api-server-mtls"
+      caKey: ca.crt
+      serverName: api.astrasync.example.com
+    clientCert:
+      enabled: true
+      certKey: tls.crt
+      keyKey: tls.key
+
+# TLS for global secret.
+tls:
+  enabled: true
+  secretName: "astrasync-tls"
+  certManager:
+    enabled: true
+    issuerRef:
+      name: "letsencrypt-prod"
+      kind: ClusterIssuer
+
+# Monitoring — enable Prometheus metrics.
+monitoring:
+  enabled: true
+  prometheus:
+    enabled: true
+    port: 9090
+    serviceMonitor:
+      enabled: true
+      interval: 30s
+      scrapeTimeout: 10s
+      additionalLabels:
+        release: prometheus
+
+# Logging — production log level.
+logging:
+  level: INFO
+  output: stdout
+
+# Pod anti-affinity — spread across nodes.
+podAntiAffinity:
+  enabled: true
+  topologyKey: kubernetes.io/hostname
+
+# PostgreSQL — production persistence.
+postgresql:
+  enabled: true
+  primary:
+    persistence:
+      enabled: true
+      size: 50Gi
+    resources:
+      limits:
+        cpu: 2000m
+        memory: 2Gi
+      requests:
+        cpu: 500m
+        memory: 1Gi
+
+# etcd — production persistence.
+etcd:
+  enabled: true
+  replicaCount: 3
+  persistence:
+    enabled: true
+    size: 10Gi
+  resources:
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+    requests:
+      cpu: 250m
+      memory: 256Mi

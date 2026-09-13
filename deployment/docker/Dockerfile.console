@@ -8,12 +8,14 @@ RUN apk add --no-cache git ca-certificates
 COPY control-plane/go.mod control-plane/go.sum ./control-plane/
 COPY control-plane/auth/go.mod control-plane/auth/go.sum ./control-plane/auth/
 COPY control-plane/catalog/go.mod control-plane/catalog/go.sum ./control-plane/catalog/
+COPY control-plane/observability/go.mod control-plane/observability/go.sum ./control-plane/observability/
 COPY control-plane/api-server/go.mod control-plane/api-server/go.sum ./control-plane/api-server/
 COPY console/go.mod console/go.sum ./console/
 WORKDIR /app/console
 RUN go mod download
 
 COPY control-plane/auth ../control-plane/auth
+COPY control-plane/observability ../control-plane/observability
 COPY control-plane/api-server/gen ../control-plane/api-server/gen
 COPY console ./
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /app/console-server ./cmd/console

@@ -39,8 +39,17 @@ benchmarks, and chaos tests.
 | Recovery integration tests | ✅ |
 | Performance benchmarks | ✅ |
 | Chaos tests | ✅ |
-| All tests passing | ✅ |
+| Go, Java, and script test suites passing | ✅ |
+| Docker Compose acceptance | ✅ |
 | Tests use tables-drivers + subtests | ✅ |
+
+The verification suites pass, including `make check`, `make test-go`,
+`make test-java`, `make test-scripts`, the multi-region framework, failover,
+recovery, benchmark, and chaos packages, and
+`make test-integration-multi-region`. The Docker Compose acceptance built both
+regional images, waited for both API servers to become healthy, and verified
+TCP checkpoint delivery, duplicate suppression, and delivery after a
+secondary API server restart.
 
 ## Files Changed
 
@@ -57,11 +66,11 @@ tests/integration/multi-region/docker-compose.yaml | +70 lines
 
 ## Next Steps
 
-Phase 9 is complete. Potential next phases:
+Phase 9 is complete. Phase 10 completed the first multi-region observability
+integration slice, and Phase 11 completed the bounded disaster recovery drill.
+The remaining roadmap is:
 
-1. **Phase 10**: Multi-region observability integration
-2. **Phase 11**: Cross-region disaster recovery drills
-3. **Phase 12**: CI/CD pipeline integration for multi-region tests
+1. **Phase 12**: CI/CD pipeline integration for multi-region tests
 
 ## Sign-Off
 

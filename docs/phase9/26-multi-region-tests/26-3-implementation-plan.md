@@ -8,7 +8,13 @@
 
 ## Tasks
 
-- [ ] Create recovery test package
-- [ ] Implement happy path test
-- [ ] Implement error path tests
-- [ ] Add validation
+- [x] Create recovery test package
+- [x] Implement happy path test
+- [x] Implement error path tests
+- [x] Add validation
+
+## Verification
+
+- [x] Recovery tests pass
+- [x] Checkpoint-not-found and epoch-mismatch paths are covered
+- [x] Validation and state-transition assertions are covered

@@ -244,7 +244,7 @@ func (s *JobService) newJobMutation(
 			minimumIdempotencyKeySize, maximumIdempotencyKeySize,
 		)
 	}
-	tenantID, err := tenantIDForConnectionUse(ctx, key.Namespace)
+	tenantID, err := resolvedTenantIDForMutation(ctx, key.Namespace)
 	if err != nil {
 		return job.Mutation{}, status.Error(codes.PermissionDenied, "tenant access denied")
 	}

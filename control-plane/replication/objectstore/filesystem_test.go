@@ -64,7 +64,16 @@ func TestFileStoreRejectsInvalidKeysAndCancellation(t *testing.T) {
 		t.Fatalf("create store: %v", err)
 	}
 	ctx := context.Background()
-	for _, key := range []string{"", "/absolute", "../escape", "nested/../../escape", `C:\\escape`} {
+	for _, key := range []string{
+		"",
+		"/absolute",
+		"//server/share",
+		"../escape",
+		"nested/../../escape",
+		`C:\\escape`,
+		"C:/escape",
+		"C:relative",
+	} {
 		if err := store.PutObject(ctx, key, []byte("data")); !errors.Is(err, ErrInvalidKey) {
 			t.Errorf("put key %q error = %v, want ErrInvalidKey", key, err)
 		}

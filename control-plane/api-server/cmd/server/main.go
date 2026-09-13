@@ -42,6 +42,7 @@ import (
 	"io.astrasync/control-plane/connection"
 	connectionpostgres "io.astrasync/control-plane/connection/postgres"
 	jobpostgres "io.astrasync/control-plane/job/postgres"
+	"io.astrasync/control-plane/observability/normalize"
 	replicationadapters "io.astrasync/control-plane/replication/adapters"
 	replicationmetrics "io.astrasync/control-plane/replication/metrics"
 	replicationobjectstore "io.astrasync/control-plane/replication/objectstore"
@@ -436,6 +437,7 @@ func run(ctx context.Context, configuration config, multiRegionMetrics *replicat
 	accessService, err := service.NewAccessService(authRepository, authorizer,
 		service.WithAccessClock(time.Now),
 		service.WithAccessUIDSource(uuid.NewString),
+		service.WithAccessRevokeRecorder(metricRecorder),
 	)
 	if err != nil {
 		return fmt.Errorf("create access service: %w", err)
@@ -527,11 +529,6 @@ func run(ctx context.Context, configuration config, multiRegionMetrics *replicat
 			return fmt.Errorf("create recovery backend: %w", err)
 		}
 		replicationService.SetRecoveryBackend(recoveryBackend)
-		if err := replicationRuntime.Start(ctx); err != nil {
-			_ = replicationRuntime.Close()
-			return fmt.Errorf("start replication runtime: %w", err)
-		}
-		defer replicationRuntime.Close()
 	}
 	trustedProxyPrefixes, err := loadTrustedProxyPrefixes(configuration)
 	if err != nil {
@@ -599,7 +596,7 @@ func run(ctx context.Context, configuration config, multiRegionMetrics *replicat
 		Addr: configuration.httpListen,
 		Handler: apiHandler(
 			transport.TrustedProxyMiddleware(trustedProxyPrefixes)(
-				transport.SecurityHeaders()(gateway),
+				transport.SecurityHeadersWithHSTSObserver(observeTrustedProxyHSTS)(gateway),
 			),
 			func(ctx context.Context) error {
 				for _, check := range []func(context.Context) error{
@@ -640,6 +637,18 @@ func run(ctx context.Context, configuration config, multiRegionMetrics *replicat
 			errorsChannel <- fmt.Errorf("serve HTTP: %w", serveErr)
 		}
 	}()
+	// Start the replication runtime only after this API server is listening.
+	// Both regional runtimes dial their peer during startup, so starting the
+	// runtime before serving gRPC would deadlock the two-region topology.
+	if replicationRuntime != nil {
+		if err := replicationRuntime.Start(ctx); err != nil {
+			grpcServer.Stop()
+			_ = httpServer.Close()
+			_ = replicationRuntime.Close()
+			return fmt.Errorf("start replication runtime: %w", err)
+		}
+		defer replicationRuntime.Close()
+	}
 
 	select {
 	case <-ctx.Done():
@@ -678,6 +687,24 @@ func apiHandler(gateway http.Handler, ping func(context.Context) error) http.Han
 	})
 	mux.Handle("/", gateway)
 	return mux
+}
+
+func observeTrustedProxyHSTS(request *http.Request) {
+	if request == nil {
+		return
+	}
+	address, ok := transport.ClientAddressFromContext(request.Context())
+	if !ok || !address.Trusted || !strings.EqualFold(address.Scheme, "https") {
+		return
+	}
+	// The trusted-proxy layer runs before any tenant claim is parsed, so
+	// the label value is the fixed pre-auth sentinel. Routing through
+	// normalize.NormalizeTenant keeps the label contract owned by the
+	// observability package (ADR-058 §3) so this site cannot drift from
+	// every other tenant-deriving call site in the control plane.
+	metrics.TrustedProxyHSTS.WithLabelValues(
+		normalize.NormalizeTenant("_unknown"),
+	).Inc()
 }
 
 func valueOrDefault(value, defaultValue string) string {

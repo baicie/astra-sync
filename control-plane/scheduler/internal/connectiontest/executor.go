@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"io.astrasync/control-plane/connection"
+	"io.astrasync/control-plane/scheduler/internal/connectiontestmetrics"
 	"io.astrasync/control-plane/scheduler/internal/materialization"
 )
 
@@ -25,6 +26,21 @@ type ExecutorConfig struct {
 	LeaseDuration     time.Duration
 	ProbeTimeout      time.Duration
 	CompletionTimeout time.Duration
+}
+
+// ExecutorOption customizes an Executor after its required dependencies are
+// validated.
+type ExecutorOption func(*Executor) error
+
+// WithMetrics installs the recorder used for authoritative test outcomes.
+func WithMetrics(recorder *connectiontestmetrics.Recorder) ExecutorOption {
+	return func(executor *Executor) error {
+		if recorder == nil {
+			return fmt.Errorf("Connection test executor metrics recorder must not be nil")
+		}
+		executor.metrics = recorder
+		return nil
+	}
 }
 
 func (c ExecutorConfig) Validate() error {
@@ -48,6 +64,7 @@ type Executor struct {
 	provider   materialization.CredentialProvider
 	registry   *Registry
 	guard      *EgressGuard
+	metrics    *connectiontestmetrics.Recorder
 	config     ExecutorConfig
 	clock      func() time.Time
 }
@@ -59,6 +76,7 @@ func NewExecutor(
 	guard *EgressGuard,
 	configuration ExecutorConfig,
 	clock func() time.Time,
+	options ...ExecutorOption,
 ) (*Executor, error) {
 	if repository == nil || provider == nil || registry == nil || guard == nil || clock == nil {
 		return nil, fmt.Errorf("Connection test executor dependencies must not be nil")
@@ -66,10 +84,20 @@ func NewExecutor(
 	if err := configuration.Validate(); err != nil {
 		return nil, err
 	}
-	return &Executor{
+	executor := &Executor{
 		repository: repository, provider: provider, registry: registry,
-		guard: guard, config: configuration, clock: clock,
-	}, nil
+		guard: guard, metrics: connectiontestmetrics.DefaultRecorder(),
+		config: configuration, clock: clock,
+	}
+	for _, option := range options {
+		if option == nil {
+			return nil, fmt.Errorf("Connection test executor option must not be nil")
+		}
+		if err := option(executor); err != nil {
+			return nil, err
+		}
+	}
+	return executor, nil
 }
 
 func (e *Executor) Run(ctx context.Context) error {
@@ -166,7 +194,20 @@ func (e *Executor) execute(ctx context.Context, work connection.TestWork) error 
 	if err != nil {
 		return fmt.Errorf("complete Connection test %s: %w", work.Operation.OperationID, err)
 	}
+	e.metrics.Observe(work.Operation.TenantID, connectionTestOutcome(completion))
 	return nil
+}
+
+func connectionTestOutcome(completion connection.TestCompletion) string {
+	if completion.State == connection.TestSucceeded && completion.Success &&
+		completion.ResultCode == connection.TestResultOK {
+		return connectiontestmetrics.OutcomeSuccess
+	}
+	if completion.State == connection.TestFailed &&
+		completion.ResultCode == connection.TestResultPolicyDenied {
+		return connectiontestmetrics.OutcomeRejected
+	}
+	return connectiontestmetrics.OutcomeFailure
 }
 
 func (e *Executor) probe(ctx context.Context, work connection.TestWork) ProbeResult {

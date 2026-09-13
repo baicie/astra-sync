@@ -1,0 +1,153 @@
+# Staging values for AstraSync.
+# Activate with: helm upgrade --install astrasync deployment/helm/astrasync \
+#   --values deployment/helm/astrasync/values-staging.yaml
+#
+# Differences from production:
+#   - image.tag: "latest" (vs "v0.2.0")
+#   - replicaCount: 2 (vs 3)
+#   - autoscaling: disabled (vs enabled)
+#   - mtls: disabled (vs enabled)
+#   - ingress: disabled (vs enabled)
+#   - OIDC: placeholder values (vs real issuer)
+#   - PDB: enabled (same as production, minAvailable=2)
+#   - NetworkPolicy: disabled (vs enabled)
+#   - Prometheus ServiceMonitor: enabled
+
+image:
+  tag: "latest"
+
+apiServer:
+  environment: staging
+  replicaCount: 2
+  auth:
+    mode: oidc
+    oidcIssuer: "https://staging-issuer.example.com"
+    oidcAudience: "astrasync-api-staging"
+  mtls:
+    enabled: false
+  ingress:
+    enabled: false
+  connectionRollout:
+    mutationsEnabled: true
+    testsEnabled: false
+    runtimeEnabled: false
+
+autoscaling:
+  enabled: false
+  apiServer:
+    enabled: false
+  controller:
+    enabled: false
+  scheduler:
+    enabled: false
+
+podDisruptionBudget:
+  enabled: true
+  apiServer:
+    minAvailable: 1
+  controller:
+    minAvailable: 1
+  scheduler:
+    minAvailable: 1
+  compilerValidation:
+    minAvailable: 1
+
+networkPolicy:
+  enabled: false
+
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: false
+
+compilerValidation:
+  replicaCount: 1
+  tls:
+    enabled: false
+
+controller:
+  replicaCount: 2
+  leaderElection:
+    enabled: true
+
+scheduler:
+  replicaCount: 2
+
+console:
+  replicaCount: 1
+  environment: staging
+  publicUrl: "http://localhost:8090"
+  auth:
+    mode: oidc
+    oidcIssuer: "https://staging-issuer.example.com"
+    oidcAudience: "astrasync-console-staging"
+    clientId: "astrasync-console-staging"
+    scopes: "openid profile email"
+    clientSecret:
+      secretName: "astrasync-console-oidc-staging"
+      key: client-secret
+    sessionKey:
+      secretName: "astrasync-session-key-staging"
+      key: session-key
+  ingress:
+    enabled: false
+  api:
+    endpoint: "api-server:8080"
+    tls:
+      enabled: false
+    clientCert:
+      enabled: false
+
+tls:
+  enabled: false
+
+monitoring:
+  enabled: true
+  prometheus:
+    enabled: true
+    port: 9090
+    serviceMonitor:
+      enabled: true
+      interval: 60s
+      scrapeTimeout: 10s
+      additionalLabels:
+        environment: staging
+
+logging:
+  level: DEBUG
+  output: stdout
+
+podAntiAffinity:
+  enabled: false
+
+postgresql:
+  enabled: true
+  primary:
+    persistence:
+      enabled: false
+    resources:
+      limits:
+        cpu: 1000m
+        memory: 1Gi
+      requests:
+        cpu: 250m
+        memory: 512Mi
+
+etcd:
+  enabled: true
+  replicaCount: 1
+  persistence:
+    enabled: false
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi

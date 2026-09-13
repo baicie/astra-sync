@@ -489,23 +489,164 @@ func (r *Repository) ReadTenant(ctx context.Context, tenantID string) (auth.Tena
 	return view, nil
 }
 
-// RevokeSessionsForPrincipal deletes every console session for the given
-// principal. It returns the number of sessions removed.
-func (r *Repository) RevokeSessionsForPrincipal(ctx context.Context, principalID string) (int64, error) {
+// LoadTenantIDsForPrincipal returns the unique tenant IDs for which the
+// given principal holds an ACTIVE membership. The result is used by
+// metric emission to label auth_session_revoke_total per tenant.
+// Returns an empty slice if the principal has no active memberships.
+func (r *Repository) LoadTenantIDsForPrincipal(ctx context.Context, principalID string) ([]string, error) {
 	if _, err := uuid.Parse(principalID); err != nil {
-		return 0, auth.ErrUnauthenticated
+		return nil, auth.ErrUnauthenticated
 	}
-	result, err := r.db.ExecContext(ctx,
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT DISTINCT tenant_id::text
+           FROM astrasync_auth_memberships
+          WHERE principal_id = $1::uuid AND status = 'ACTIVE'
+       ORDER BY tenant_id`, principalID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("load tenant ids for principal: %w", err)
+	}
+	defer rows.Close()
+	var tenantIDs []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan tenant id: %w", err)
+		}
+		tenantIDs = append(tenantIDs, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate tenant ids: %w", err)
+	}
+	return tenantIDs, nil
+}
+
+// RevokeSessionsForPrincipal deletes every console session for the given
+// principal. It returns the number of sessions removed and the list of
+// active tenant IDs the principal holds memberships in at the time of
+// the call (used for metric emission: one observation per unique tenant).
+// Both values are read from a consistent snapshot via a serializable
+// transaction so the count and tenant list stay in sync.
+//
+// This is the admin-CLI counterpart to RevokeConsoleSessionsForPrincipal.
+// It deliberately does not write an audit row: the admin command has no
+// authenticated principal. Operators that require an audit trail must
+// drive the API Server revoke-console-session RPC instead (ADR-068).
+func (r *Repository) RevokeSessionsForPrincipal(ctx context.Context, principalID string) (int64, []string, error) {
+	if _, err := uuid.Parse(principalID); err != nil {
+		return 0, nil, auth.ErrUnauthenticated
+	}
+	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	if err != nil {
+		return 0, nil, fmt.Errorf("begin revoke sessions tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	// Load tenant IDs in the same transaction so count and list are consistent.
+	rows, err := tx.QueryContext(ctx,
+		`SELECT DISTINCT tenant_id::text
+           FROM astrasync_auth_memberships
+          WHERE principal_id = $1::uuid AND status = 'ACTIVE'
+       ORDER BY tenant_id`, principalID,
+	)
+	if err != nil {
+		return 0, nil, fmt.Errorf("load tenant ids for revoke: %w", err)
+	}
+	var tenantIDs []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return 0, nil, fmt.Errorf("scan tenant id: %w", err)
+		}
+		tenantIDs = append(tenantIDs, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, nil, fmt.Errorf("iterate tenant ids: %w", err)
+	}
+
+	result, err := tx.ExecContext(ctx,
 		`DELETE FROM astrasync_auth_sessions WHERE principal_id = $1::uuid`, principalID,
 	)
 	if err != nil {
-		return 0, fmt.Errorf("revoke principal sessions: %w", err)
+		return 0, nil, fmt.Errorf("revoke principal sessions: %w", err)
 	}
 	count, err := result.RowsAffected()
 	if err != nil {
-		return 0, fmt.Errorf("session rows affected: %w", err)
+		return 0, nil, fmt.Errorf("session rows affected: %w", err)
 	}
-	return count, nil
+
+	if err := tx.Commit(); err != nil {
+		return 0, nil, fmt.Errorf("commit revoke sessions tx: %w", err)
+	}
+	return count, tenantIDs, nil
+}
+
+// RevokeConsoleSessionsForPrincipal deletes every console session for the
+// given principal and writes the matching security audit event in the same
+// PostgreSQL transaction (ADR-037 / ADR-068). It returns the number of
+// sessions removed and the list of active tenant IDs the principal holds
+// memberships in at the time of the call. All three values (count, tenant
+// list, audit row) are committed atomically so the audit trail cannot drift
+// from the actual session deletes.
+func (r *Repository) RevokeConsoleSessionsForPrincipal(
+	ctx context.Context, principalID, _ string, audit auth.SecurityAuditEvent,
+) (int64, []string, error) {
+	if _, err := uuid.Parse(principalID); err != nil {
+		return 0, nil, auth.ErrUnauthenticated
+	}
+	if err := audit.Validate(); err != nil {
+		return 0, nil, err
+	}
+	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	if err != nil {
+		return 0, nil, fmt.Errorf("begin revoke console sessions tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	rows, err := tx.QueryContext(ctx,
+		`SELECT DISTINCT tenant_id::text
+           FROM astrasync_auth_memberships
+          WHERE principal_id = $1::uuid AND status = 'ACTIVE'
+       ORDER BY tenant_id`, principalID,
+	)
+	if err != nil {
+		return 0, nil, fmt.Errorf("load tenant ids for revoke console sessions: %w", err)
+	}
+	var tenantIDs []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return 0, nil, fmt.Errorf("scan tenant id: %w", err)
+		}
+		tenantIDs = append(tenantIDs, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, nil, fmt.Errorf("iterate tenant ids: %w", err)
+	}
+
+	result, err := tx.ExecContext(ctx,
+		`DELETE FROM astrasync_auth_sessions WHERE principal_id = $1::uuid`, principalID,
+	)
+	if err != nil {
+		return 0, nil, fmt.Errorf("revoke principal console sessions: %w", err)
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return 0, nil, fmt.Errorf("session rows affected: %w", err)
+	}
+
+	if err := writeAuditInTx(ctx, tx, audit); err != nil {
+		return 0, nil, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, nil, fmt.Errorf("commit revoke console sessions tx: %w", err)
+	}
+	return count, tenantIDs, nil
 }
 
 // LoadTenantMembers returns the roster of ACTIVE and DISABLED memberships for a

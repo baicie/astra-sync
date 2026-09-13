@@ -2,8 +2,9 @@
 
 ## Status
 
-Proposed. Implements the multi-region end-to-end testing framework
-required by Phase 9.
+**Complete.** Implemented the multi-region end-to-end testing framework
+required by Phase 9 on 2026-08-19. The deterministic framework tests and
+Docker Compose acceptance pass.
 
 ## Context
 

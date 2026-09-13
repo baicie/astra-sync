@@ -156,6 +156,30 @@ apiServer:
     databaseUrl: ""
     etcdEndpoints: ""
 
+# Global autoscaling switch and per-component autoscaling configuration.
+# Master switch: autoscaling.enabled=false means all HPAs are disabled regardless
+# of per-component .enabled flags. Set autoscaling.enabled=true in production.
+autoscaling:
+  enabled: false
+  apiServer:
+    enabled: false
+    minReplicas: 3
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+  controller:
+    enabled: false
+    minReplicas: 3
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+  scheduler:
+    enabled: false
+    minReplicas: 3
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+
 # Operator Console and OIDC backend-for-frontend. Production requires OIDC,
 # an HTTPS public URL, a session-key Secret, and TLS to the API gRPC endpoint.
 console:
@@ -215,12 +239,18 @@ console:
     requests:
       cpu: 50m
       memory: 64Mi
+  # SyncJob CR dual-write (ADR-073 Slice 28-B). When enabled, the Console
+  # ServiceAccount is granted narrow verbs on sync.astrasync.io/syncjobs so
+  # it can create / update / delete the CR after the durable PostgreSQL
+  # job.Job row is committed. The api-server's ServiceAccount is unaffected.
+  syncjobCRWrite:
+    enabled: true
 
 # Internal Java semantic compiler. Production requires mTLS on this workload-only service.
 compilerValidation:
   enabled: true
   replicaCount: 2
-  compilerBuild: 0.1.0-SNAPSHOT
+  compilerBuild: 0.8.0
   maxConcurrency: 32
   service:
     port: 50052
@@ -407,6 +437,9 @@ objectStorage:
 # Network policy
 networkPolicy:
   enabled: false
+  # When internal=true, renders a NetworkPolicy restricting East-West traffic to
+  # required ports. Requires a CNI that supports NetworkPolicy (Calico, Cilium, etc.).
+  internal: false
   apiServer:
     enabled: true
     allowedSources: []
@@ -426,6 +459,8 @@ podDisruptionBudget:
     minAvailable: 2
   scheduler:
     minAvailable: 2
+  compilerValidation:
+    minAvailable: 1
 
 # Pod anti-affinity
 podAntiAffinity:

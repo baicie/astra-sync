@@ -21,6 +21,30 @@ def run(
     return subprocess.run(args, cwd=cwd, check=check, text=True)
 
 
+def collect_compose_logs(compose: tuple[str, ...]) -> None:
+    """Write best-effort Compose diagnostics without masking the test result."""
+    logs = LOG_DIR / "compose.log"
+    try:
+        with logs.open("w", encoding="utf-8") as output:
+            subprocess.run(
+                (*compose, "logs", "--no-color"),
+                cwd=ROOT,
+                stdout=output,
+                stderr=subprocess.STDOUT,
+                check=False,
+            )
+    except OSError as error:
+        print(f"could not write Compose logs: {error}", file=sys.stderr)
+
+
+def teardown_compose(compose: tuple[str, ...]) -> None:
+    """Remove all disposable Compose resources and never mask the test result."""
+    try:
+        run(*compose, "down", "-v", "--remove-orphans", check=False)
+    except OSError as error:
+        print(f"could not tear down Compose resources: {error}", file=sys.stderr)
+
+
 def main() -> int:
     if shutil.which("docker") is None:
         print("docker executable is required", file=sys.stderr)
@@ -38,10 +62,10 @@ def main() -> int:
             cwd=ROOT / "tests" / "integration",
         ).returncode
     finally:
-        logs = LOG_DIR / "compose.log"
-        with logs.open("w", encoding="utf-8") as output:
-            subprocess.run((*compose, "logs", "--no-color"), cwd=ROOT, stdout=output, stderr=subprocess.STDOUT, check=False)
-        run(*compose, "down", "-v", "--remove-orphans", check=False)
+        try:
+            collect_compose_logs(compose)
+        finally:
+            teardown_compose(compose)
 
 
 if __name__ == "__main__":

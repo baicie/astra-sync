@@ -1,0 +1,116 @@
+# ArgoCD ApplicationSet: manage AstraSync across multiple clusters and environments.
+#
+# This ApplicationSet uses a matrix generator combining:
+#   1. Cluster generator  — lists all clusters registered in ArgoCD
+#   2. Git generator      — lists environment directories in this repo
+#
+# Each cluster × environment combination produces one Application.
+#
+# Environment directories (in this repo):
+#   deployment/argocd/environments/{dev,staging,production}/values-override.yaml
+#
+# Apply:
+#   kubectl apply -n argocd -f deployment/argocd/applicationset.yaml
+#
+# Bootstrap: all target clusters must be registered with ArgoCD first:
+#   argocd cluster add <context-name> --name <cluster-short-name>
+---
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: astrasync
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: astrasync
+    app.kubernetes.io/part-of: astrasync
+    app.kubernetes.io/component: gitops
+spec:
+  generators:
+    # Matrix: combine cluster list with environment list
+    - matrix:
+        generators:
+          # 1. Cluster generator: reads all clusters registered in ArgoCD.
+          # To restrict to specific clusters, replace with:
+          #   clusters:
+          #     selector:
+          #       matchLabels:
+          #         environment: production
+          - clusters:
+              selector:
+                matchLabels: {}
+
+          # 2. Git generator: enumerate environment directories.
+          # Each subdirectory should contain a values-override.yaml fragment.
+          - git:
+              repoURL: https://github.com/astrasync/astra-sync
+              revision: HEAD
+              pathParam: name                      # environment name from directory
+              paths:
+                - path: deployment/argocd/environments/{{path}}
+                  shallow: true
+
+  # ─── Template (applied for each cluster × environment pair) ───────────
+  template:
+    metadata:
+      name: "astrasync-{{name}}-{{path.basename}}"   # e.g. astrasync-prod-production
+      namespace: argocd
+      labels:
+        app.kubernetes.io/name: astrasync
+        app.kubernetes.io/instance: "astrasync-{{name}}"
+        app.kubernetes.io/part-of: astrasync
+        astrasync.io/cluster: "{{name}}"
+        astrasync.io/environment: "{{path.basename}}"
+      annotations:
+        argocd.argoproj.io/sync-options: "Prune=true,RespectIgnoreDifferences=true"
+
+    spec:
+      project: default
+
+      source:
+        repoURL: https://github.com/astrasync/astra-sync
+        targetRevision: HEAD
+        path: deployment/helm/astrasync
+        helm:
+          # Base values file + environment override
+          valueFiles:
+            - values-staging.yaml        # staging is the dev default
+            - >-
+              deployment/argocd/environments/{{path}}/values-override.yaml
+          # Pass cluster/environment as release name suffix for multi-cluster
+          # to avoid Helm release name collisions
+          releaseName: "astrasync-{{name}}"
+
+      destination:
+        server: "{{server}}"
+        namespace: astrasync-system
+
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+          allowEmpty: false
+        retry:
+          limit: 5
+          backoff:
+            duration: 5s
+            factor: 2
+            maxDuration: 3m
+        ignoreDifferences:
+          - group: apps
+            kinds:
+              - kind: StatefulSet
+              - kind: Deployment
+            jsonPointers:
+              - /metadata/annotations
+              - /spec/template/metadata/annotations
+          - group: ""
+            kind: ConfigMap
+            jsonPointers:
+              - /metadata/annotations
+
+  # ─── Sync Policy ───────────────────────────────────────────────────────
+  syncPolicy:
+    # Applications in the set sync automatically.
+    # Use pause annotation on individual Applications to gate specific environments:
+    #   argocd.argoproj.io/async-hold: "true"
+    preserveResourcesOnDeletion: false

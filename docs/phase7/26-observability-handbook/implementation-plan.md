@@ -84,9 +84,58 @@ metrics listeners and ServiceMonitor resources only when enabled; the
 default-disabled listener path remains unchanged. The implementation ships
 when the closeout PR merges.
 
+## F10 work breakdown
+
+The Connection Test Executor instrumentation is delivered as one focused
+follow-up:
+
+1. Add an isolated recorder with a bounded `tenant_id` and `outcome` label
+   allowlist.
+2. Record exactly once after a claimed operation's durable completion succeeds.
+3. Classify egress-policy denial as `rejected`; classify timeout, cancellation,
+   credential, transport, and handshake failures as `failure`.
+4. Verify that lease loss does not create a business sample.
+
+## F11 work breakdown
+
+The Console BFF instrumentation follow-up is delivered as one focused slice:
+
+1. Add an isolated recorder with bounded tenant, outcome, and handler labels.
+2. Observe each completed HTTP request at the BFF boundary and classify 2xx/3xx,
+   4xx, and 5xx responses as `success`, `rejected`, and `failure`.
+3. Take tenant identity only from the server-written scope response header and
+   use `_unknown` for unauthenticated or unscoped responses.
+4. Observe HTML response latency only for the fixed static render handler.
+5. Verify that incoming tenant headers cannot create a metric tenant series.
+
+## F12 work breakdown
+
+The trusted-proxy HSTS instrumentation follow-up is delivered as one focused
+slice:
+
+1. Add an isolated recorder for HSTS responses with bounded tenant labels.
+2. Observe only responses for HTTPS requests accepted from a trusted proxy and
+   only when the middleware adds the HSTS header.
+3. Use the fixed pre-auth `_unknown` tenant value at the API Server boundary.
+4. Verify that direct TLS and plaintext requests do not create observations.
+
+## F13 work breakdown
+
+The Controller reconcile instrumentation follow-up is delivered as one focused
+slice:
+
+1. Add an isolated recorder for Controller reconcile duration with bounded
+   `tenant_id` and `outcome` labels.
+2. Observe every completed `SyncJob` reconcile iteration, including failures,
+   using `success` and `failure` outcomes.
+3. Use the fixed `_unknown` tenant value until a trusted Controller tenant
+   binding exists.
+4. Verify descriptor registration, label normalization, and the production
+   reconcile call path with deterministic unit tests.
+
 ## Open questions
 
-F7 completes API Server authentication and audit-query observations. Other Go
-business call sites and Java data-plane metric families remain intentionally
+F13 completes Controller reconcile-duration observations. Other Go business
+call sites and the remaining Controller lifecycle owners remain intentionally
 deferred. The boundary is documented in ADR-047 and the observability
 handbook.

@@ -20,6 +20,9 @@ var migration string
 //go:embed migrations/002_job_mutations.sql
 var mutationMigration string
 
+//go:embed migrations/003_jobs_tenant_id.sql
+var tenantIDMigration string
+
 type Repository struct {
 	db *sql.DB
 }
@@ -46,6 +49,11 @@ func New(db *sql.DB) *Repository {
 func (r *Repository) Migrate(ctx context.Context) error {
 	if _, err := r.db.ExecContext(ctx, migration); err != nil {
 		return fmt.Errorf("migrate control-plane jobs: %w", err)
+	}
+	// Phase 29 (ADR-074 §1): adds the `tenant_id` column. Idempotent — the
+	// migration uses ADD COLUMN IF NOT EXISTS.
+	if _, err := r.db.ExecContext(ctx, tenantIDMigration); err != nil {
+		return fmt.Errorf("migrate job tenant id: %w", err)
 	}
 	return nil
 }
@@ -83,11 +91,16 @@ func (r *Repository) Create(ctx context.Context, candidate job.Job) (job.Job, er
 	if err != nil {
 		return job.Job{}, err
 	}
+	// Phase 29 (ADR-074 §5): the legacy Repository.Create path does not have
+	// a Mutation.TenantID to write into `tenant_id` (only the lifecycle
+	// controller reaches this path, and it always has a tenant-bound
+	// caller). We write NULL and rely on the MutationRepository path to
+	// populate the column when the mutation arrives through JobService.
 	_, err = r.db.ExecContext(
 		ctx,
 		`INSERT INTO astrasync_control_jobs
-            (namespace, name, uid, version, spec, status, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8)`,
+            (namespace, name, uid, version, spec, status, created_at, updated_at, tenant_id)
+         VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8, NULL)`,
 		candidate.Key.Namespace,
 		candidate.Key.Name,
 		candidate.UID,

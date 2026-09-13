@@ -24,6 +24,9 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"io.astrasync/console/internal/authflow"
+	"io.astrasync/console/internal/syncjobcr"
+	consolemetrics "io.astrasync/console/observability"
+	"io.astrasync/console/pkg/bffbackend"
 	jobv1 "io.astrasync/control-plane/api-server/gen/go/v1"
 	"io.astrasync/control-plane/auth"
 )
@@ -49,14 +52,25 @@ type SessionManager interface {
 	Logout(context.Context, authflow.Session) error
 }
 
+// RequestMetrics records bounded Console request observations.
+type RequestMetrics interface {
+	ObserveRequest(tenantID, outcome, handler string, duration time.Duration, rendered bool)
+}
+
 type Config struct {
-	Backend      any
+	Backend      bffbackend.Backend
 	Sessions     SessionManager
 	Namespace    string
 	PublicOrigin string
 	AuthMode     string
 	Ready        func(context.Context) error
 	MaximumBody  int64
+	Metrics      RequestMetrics
+	Clock        func() time.Time
+	// CRWriter is the SyncJob CR dual-write pipeline. ADR-073 Slice 28-B.
+	// Optional; nil falls back to a no-op writer that records OutcomeSuccess.
+	// Production wires syncjobcr.NewDualWriter(NewInCluster(), recorder, nil).
+	CRWriter any
 }
 
 type Server struct {
@@ -73,6 +87,51 @@ type Server struct {
 	ready        func(context.Context) error
 	legacy       bool
 	maximumBody  int64
+	metrics      RequestMetrics
+	clock        func() time.Time
+	crWriter     crWriter
+}
+
+// crWriter is a transport-agnostic interface used by the mutation handlers.
+// The Console injects a syncjobcr-backed implementation in production and
+// a noop implementation in tests. Defined here so the server package's
+// mutation code does not need to import syncjobcr's full surface.
+//
+// The interface uses syncjobcr.Scope / syncjobcr.MutationKind /
+// syncjobcr.SyncJobSpec by value pointer. Because crWriter is a *pointer-
+// to-package-type* consumer, the server package must import syncjobcr —
+// but only for type references, never for transitive deps. The syncjobcr
+// package's only dependency beyond the standard library is crypto/x509
+// (already on the indirect closure via k8s.io) and the k8s in-cluster
+// helpers, none of which surface here.
+type crWriter interface {
+	WriteCR(ctx context.Context, scope syncjobcr.Scope, name string, mutation syncjobcr.MutationKind, spec *syncjobcr.SyncJobSpec)
+}
+
+// crWriterFromConfig converts the any-typed Config.CRWriter into a crWriter.
+// A nil value or a non-DualWriter value falls back to a no-op writer that
+// does nothing. ADR-073 §5.
+func crWriterFromConfig(value any) crWriter {
+	if value == nil {
+		return noopCRWriter{}
+	}
+	// DualWriter is a pointer-receiver interface (write-first); check both
+	// value and pointer forms.
+	if w, ok := value.(syncjobcr.DualWriter); ok {
+		return syncjobcr.WriterAdapter{Writer: w}
+	}
+	if w, ok := value.(*syncjobcr.DualWriter); ok {
+		return syncjobcr.WriterAdapter{Writer: *w}
+	}
+	if w, ok := value.(crWriter); ok {
+		return w
+	}
+	return noopCRWriter{}
+}
+
+type noopCRWriter struct{}
+
+func (noopCRWriter) WriteCR(context.Context, syncjobcr.Scope, string, syncjobcr.MutationKind, *syncjobcr.SyncJobSpec) {
 }
 
 // New preserves the development-only read-only constructor used by the first
@@ -90,7 +149,7 @@ func New(reader JobReader, namespace string) (*Server, error) {
 		return nil, err
 	}
 	return &Server{jobs: reader, sessions: development, namespace: namespace, authMode: "disabled", legacy: true,
-		maximumBody: maximumBodySize}, nil
+		maximumBody: maximumBodySize, metrics: consolemetrics.DefaultRecorder(), clock: time.Now}, nil
 }
 
 func NewWithConfig(configuration Config) (*Server, error) {
@@ -111,15 +170,24 @@ func NewWithConfig(configuration Config) (*Server, error) {
 	if maximumBody < 1024 || maximumBody > 4*1024*1024 {
 		return nil, fmt.Errorf("Console maximum body size is invalid")
 	}
+	requestMetrics := configuration.Metrics
+	if requestMetrics == nil {
+		requestMetrics = consolemetrics.DefaultRecorder()
+	}
+	clock := configuration.Clock
+	if clock == nil {
+		clock = time.Now
+	}
 	server := &Server{sessions: configuration.Sessions, namespace: strings.TrimSpace(configuration.Namespace),
 		publicOrigin: strings.TrimRight(strings.TrimSpace(configuration.PublicOrigin), "/"), authMode: authMode,
-		ready: configuration.Ready, maximumBody: maximumBody}
+		ready: configuration.Ready, maximumBody: maximumBody, metrics: requestMetrics, clock: clock}
 	server.jobs, _ = configuration.Backend.(JobReader)
 	server.catalog, _ = configuration.Backend.(CatalogReader)
 	server.connections, _ = configuration.Backend.(ConnectionClient)
 	server.mutations, _ = configuration.Backend.(JobMutationClient)
 	server.validator, _ = configuration.Backend.(JobValidator)
 	server.audit, _ = configuration.Backend.(AuditReader)
+	server.crWriter = crWriterFromConfig(configuration.CRWriter)
 	if server.jobs == nil {
 		return nil, fmt.Errorf("Console backend does not implement JobReader")
 	}
@@ -175,7 +243,8 @@ func (s *Server) Handler() http.Handler {
 		panic(fmt.Sprintf("embedded Console assets: %v", err))
 	}
 	mux.Handle("/", http.FileServer(http.FS(content)))
-	return securityHeaders(mux)
+	handler := securityHeaders(mux)
+	return observeRequests(handler, s.metrics, s.clock)
 }
 
 func (s *Server) health(response http.ResponseWriter, _ *http.Request) {
@@ -487,6 +556,13 @@ func (s *Server) requireMutation(request *http.Request, session authflow.Session
 }
 
 func (s *Server) backendContext(request *http.Request, session authflow.Session, timeout time.Duration) (context.Context, context.CancelFunc) {
+	return s.backendContextWithTenant(request, session, timeout, "")
+}
+
+// backendContextWithTenant builds an outgoing gRPC context. When tenantID is
+// non-empty it appends x-astra-tenant-id to the outgoing metadata, providing
+// the authoritative tenant context to the control plane. ADR-072.
+func (s *Server) backendContextWithTenant(request *http.Request, session authflow.Session, timeout time.Duration, tenantID string) (context.Context, context.CancelFunc) {
 	ctx, cancel := context.WithTimeout(request.Context(), timeout)
 	requestID := strings.TrimSpace(request.Header.Get("X-Request-ID"))
 	if requestID == "" || len(requestID) > 128 {
@@ -496,6 +572,9 @@ func (s *Server) backendContext(request *http.Request, session authflow.Session,
 	if session.Record.Tokens.AccessToken != "" {
 		ctx = metadata.AppendToOutgoingContext(ctx, "authorization", "Bearer "+session.Record.Tokens.AccessToken,
 			"x-request-id", requestID)
+	}
+	if tenantID != "" {
+		ctx = metadata.AppendToOutgoingContext(ctx, "x-astra-tenant-id", tenantID)
 	}
 	return ctx, cancel
 }

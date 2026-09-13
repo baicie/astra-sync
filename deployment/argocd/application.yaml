@@ -1,0 +1,147 @@
+# ArgoCD Application: single-cluster deployment of AstraSync via Helm.
+# Register this Application in ArgoCD (either via UI or `kubectl apply -f`).
+#
+# Prerequisites:
+#   1. ArgoCD is installed in the cluster:
+#        kubectl create namespace argocd
+#        kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/v2.13.0/manifests/install.yaml
+#   2. The astrasync git repo is registered as an ArgoCD project source:
+#        argocd repo add https://github.com/astrasync/astra-sync
+#   3. Optional: create the astrasync-system namespace:
+#        kubectl apply -f deployment/argocd/namespace.yaml
+#
+# Apply:
+#   kubectl apply -n argocd -f deployment/argocd/application.yaml
+#   # or in ArgoCD UI: New App → name=astrasync, project=default, repo=<your-repo>,
+#   #   path=deployment/helm/astrasync, values-files=values-production.yaml
+#
+# Sync (from CLI):
+#   argocd app sync astrasync
+#   argocd app wait astrasync --timeout 300
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: astrasync
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: astrasync
+    app.kubernetes.io/instance: astrasync
+    app.kubernetes.io/component: control-plane
+    app.kubernetes.io/part-of: astrasync
+  annotations:
+    argocd.argoproj.io/sync-options: "Prune=true,RespectIgnoreDifferences=true"
+    # Require admin approval for production sync
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  # ─── Source ───────────────────────────────────────────────────────────────
+  project: default
+
+  source:
+    repoURL: https://github.com/astrasync/astra-sync
+    targetRevision: HEAD
+    path: deployment/helm/astrasync
+
+    # Use values-production.yaml for production deployments.
+    # Change to values-staging.yaml for staging environments.
+    helm:
+      valueFiles:
+        - values-production.yaml
+      # Optional: pass additional values inline (uncomment to override)
+      # values: |
+      #   apiServer:
+      #     replicaCount: 5
+
+  # ─── Destination ────────────────────────────────────────────────────────
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: astrasync-system
+
+  # ─── Sync Policy ────────────────────────────────────────────────────────
+  syncPolicy:
+    # Automated sync: ArgoCD applies changes from git automatically.
+    # Set automated: null (or remove the block) to require manual syncs.
+    automated:
+      prune: true          # Remove resources deleted from git
+      selfHeal: true       # Reconcile cluster drift back to git state
+      allowEmpty: false    # Do not sync if all rendered resources are empty
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+
+    # Ignore differences that ArgoCD should not attempt to manage
+    # (annotations written by server-side apply, managedFields server-side changes)
+    ignoreDifferences:
+      - group: apps
+        kind: Deployment
+        jsonPointers:
+          - /metadata/annotations
+          - /spec/template/metadata/annotations
+      - group: apps
+        kind: StatefulSet
+        jsonPointers:
+          - /metadata/annotations
+          - /spec/template/metadata/annotations
+      - group: ""
+        kind: ConfigMap
+        jsonPointers:
+          - /metadata/annotations
+
+  # ─── Health Checks ─────────────────────────────────────────────────────
+  # ArgoCD evaluates these to determine Application health.
+  # Missing a resource type → ArgoCD falls back to default health assessment.
+  health:
+    status:
+      - group: apps
+        kind: Deployment
+        # Healthy when all replicas are ready
+        health.lua: |
+          if obj.status.readyReplicas == nil then
+            return { status = "Progressing" }
+          end
+          if obj.status.readyReplicas >= obj.spec.replicas then
+            return { status = "Healthy" }
+          else
+            return { status = "Progressing" }
+          end
+      - group: apps
+        kind: StatefulSet
+        health.lua: |
+          if obj.status.readyReplicas == nil then
+            return { status = "Progressing" }
+          end
+          if obj.status.readyReplicas >= obj.spec.replicas then
+            return { status = "Healthy" }
+          else
+            return { status = "Progressing" }
+          end
+      - group: autoscaling
+        kind: HorizontalPodAutoscaler
+        health.lua: |
+          for _, cond in ipairs(obj.status.conditions or {}) do
+            if cond.type == "ScalingActive" and cond.status == "True" then
+              return { status = "Healthy" }
+            end
+          end
+          return { status = "Progressing" }
+      - group: policy
+        kind: PodDisruptionBudget
+        health.lua: |
+          if obj.status.disruptionsAllowed > 0 then
+            return { status = "Healthy" }
+          end
+          if obj.status.currentHealthy ~= nil and obj.spec.minAvailable ~= nil then
+            if obj.status.currentHealthy >= tonumber(obj.spec.minAvailable) then
+              return { status = "Healthy" }
+            end
+          end
+          return { status = "Progressing" }
+
+  # ─── Reference Architecture ─────────────────────────────────────────────
+  # Uncomment and fill to provide external cluster target for GitOps bootstrapping:
+  # destination:
+  #   server: https://<cluster-api-server>:<port>
+  #   namespace: astrasync-system

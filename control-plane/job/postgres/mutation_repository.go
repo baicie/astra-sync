@@ -109,10 +109,10 @@ func createJobMutation(
 	}
 	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO astrasync_control_jobs
-            (namespace, name, uid, version, spec, status, created_at, updated_at)
-         VALUES ($1, $2, $3::uuid, 1, $4::jsonb, $5::jsonb, $6, $6)`,
+            (namespace, name, uid, version, spec, status, created_at, updated_at, tenant_id)
+         VALUES ($1, $2, $3::uuid, 1, $4::jsonb, $5::jsonb, $6, $6, $7::uuid)`,
 		created.Key.Namespace, created.Key.Name, created.UID, spec, statusDocument,
-		created.CreatedAt); err != nil {
+		created.CreatedAt, mutation.TenantID); err != nil {
 		return job.MutationResult{}, classifyMutationPostgresError("create Job", err)
 	}
 	if err := replaceStableBindings(ctx, tx, created, mutation.TenantID, mutation.Validation.Bindings); err != nil {
@@ -280,6 +280,10 @@ func updateLockedJob(
 	if err != nil {
 		return job.Job{}, err
 	}
+	// Phase 29 (ADR-074 §5): the UPDATE is keyed by `uid` so the tenant-id
+	// binding is preserved across updates without an explicit SET. The
+	// locked row already carries the tenant binding from the create-time
+	// INSERT.
 	updated, err := scanJob(tx.QueryRowContext(ctx,
 		`UPDATE astrasync_control_jobs
             SET spec = $1::jsonb, status = $2::jsonb, version = version + 1, updated_at = $3

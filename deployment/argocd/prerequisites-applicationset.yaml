@@ -1,0 +1,54 @@
+# ArgoCD ApplicationSet for cluster-scoped AstraSync prerequisites.
+#
+# One prerequisite Application is created per registered cluster. These
+# resources are cluster-scoped and intentionally exclude prune.
+---
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: astrasync-prerequisites
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: astrasync
+    app.kubernetes.io/part-of: astrasync
+    app.kubernetes.io/component: prerequisites
+spec:
+  generators:
+    - clusters:
+        selector:
+          matchLabels: {}
+  template:
+    metadata:
+      name: "astrasync-prerequisites-{{name}}"
+      namespace: argocd
+      labels:
+        app.kubernetes.io/name: astrasync
+        app.kubernetes.io/instance: "astrasync-{{name}}"
+        app.kubernetes.io/part-of: astrasync
+        astrasync.io/cluster: "{{name}}"
+      annotations:
+        argocd.argoproj.io/sync-wave: "-10"
+    spec:
+      project: default
+      source:
+        repoURL: https://github.com/astrasync/astra-sync
+        targetRevision: HEAD
+        path: deployment/operator/config
+      destination:
+        server: "{{server}}"
+        namespace: astrasync-system
+      syncPolicy:
+        automated:
+          prune: false
+          selfHeal: true
+          allowEmpty: false
+        syncOptions:
+          - ServerSideApply=true
+          - Prune=false
+        retry:
+          limit: 5
+          backoff:
+            duration: 5s
+            factor: 2
+            maxDuration: 3m
+  preserveResourcesOnDeletion: true

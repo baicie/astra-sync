@@ -1,24 +1,34 @@
+//go:build integration
+
 package postgres_test
 
 import (
 	"context"
 	"errors"
-	"os"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 
+	authpostgres "io.astrasync/control-plane/auth/postgres"
 	"io.astrasync/control-plane/job"
 	jobpostgres "io.astrasync/control-plane/job/postgres"
 )
 
 func TestRepositoryPersistsLifecycleAcrossConnections(t *testing.T) {
-	dataSourceName := os.Getenv("ASTRASYNC_TEST_POSTGRES_URL")
-	if dataSourceName == "" {
-		t.Skip("ASTRASYNC_TEST_POSTGRES_URL is not configured")
-	}
+	dataSourceName := startPostgresContainer(t)
 	ctx := context.Background()
+	authRepository, err := authpostgres.Open(ctx, dataSourceName)
+	if err != nil {
+		t.Fatalf("open auth repository: %v", err)
+	}
+	if err := authRepository.Migrate(ctx); err != nil {
+		authRepository.Close()
+		t.Fatalf("migrate auth: %v", err)
+	}
+	if err := authRepository.Close(); err != nil {
+		t.Fatalf("close auth repository: %v", err)
+	}
 	repository, err := jobpostgres.Open(ctx, dataSourceName)
 	if err != nil {
 		t.Fatalf("open repository: %v", err)

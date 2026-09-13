@@ -398,6 +398,133 @@ func (m *memoryAuthMetrics) ObserveAuthRequest(tenantID, outcome, requestID stri
 	})
 }
 
+// TestInterceptorAttachesVerifiedTenantID covers the Phase 29 happy path
+// (ADR-074 §3). A BFF-issued mutation carrying `x-astra-tenant-id` matching
+// the principal's active membership MUST attach the verified tenant-id to
+// the request context, and the handler MUST observe the attached value via
+// `authn.JobTenantIDFromContext`.
+func TestInterceptorAttachesVerifiedTenantID(t *testing.T) {
+	membership, err := auth.NewMembership(interceptorTenantID, true, auth.PermissionJobsRead)
+	if err != nil {
+		t.Fatalf("membership: %v", err)
+	}
+	membership.TenantNamespace = "tenant-a"
+	principal := auth.Principal{
+		ID: "principal-1", Subject: "operator-1", Active: true, PolicyRevision: "1",
+		Memberships: map[string]auth.Membership{interceptorTenantID: membership},
+	}
+	interceptor := authn.Interceptor{
+		Authenticator: staticAuthenticator{principal: principal},
+		Authorizer:    auth.ContextAuthorizer{},
+		AuditWriter:   &memoryAudit{},
+		Metrics:       &memoryAuthMetrics{},
+		Registry:      authn.NewRegistry(),
+		Clock:         time.Now,
+		EventID:       func() string { return "tenant-attach" },
+	}
+	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs(
+		"authorization", "Bearer valid-token",
+		authn.TenantMetadataKey, interceptorTenantID,
+	))
+	called := false
+	_, err = interceptor.Unary()(
+		ctx,
+		&controlv1.GetJobRequest{Namespace: "tenant-a", Name: "orders"},
+		&grpc.UnaryServerInfo{FullMethod: controlv1.JobService_GetJob_FullMethodName},
+		func(handlerCtx context.Context, request any) (any, error) {
+			called = true
+			if got := authn.JobTenantIDFromContext(handlerCtx); got != interceptorTenantID {
+				t.Fatalf("handler context tenant-id = %q, want %q", got, interceptorTenantID)
+			}
+			return nil, nil
+		},
+	)
+	if err != nil || !called {
+		t.Fatalf("tenant-id attach: called=%v err=%v", called, err)
+	}
+}
+
+// TestInterceptorRejectsTenantMetadataMismatch covers ADR-074 §3 / §6: a BFF
+// sending `x-astra-tenant-id: <X>` for a principal whose membership binds
+// them to `<Y>` MUST be rejected. This catches BFF misconfiguration and
+// mid-session membership rotation.
+func TestInterceptorRejectsTenantMetadataMismatch(t *testing.T) {
+	membership, err := auth.NewMembership(interceptorTenantID, true, auth.PermissionJobsRead)
+	if err != nil {
+		t.Fatalf("membership: %v", err)
+	}
+	membership.TenantNamespace = "tenant-a"
+	principal := auth.Principal{
+		ID: "principal-1", Subject: "operator-1", Active: true, PolicyRevision: "1",
+		Memberships: map[string]auth.Membership{interceptorTenantID: membership},
+	}
+	audit := &memoryAudit{}
+	interceptor := authn.Interceptor{
+		Authenticator: staticAuthenticator{principal: principal},
+		Authorizer:    auth.ContextAuthorizer{},
+		AuditWriter:   audit,
+		Metrics:       &memoryAuthMetrics{},
+		Registry:      authn.NewRegistry(),
+		Clock:         time.Now,
+		EventID:       func() string { return "tenant-mismatch" },
+	}
+	otherTenant := "30982542-e097-4c66-99a9-31081fd6b285"
+	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs(
+		"authorization", "Bearer valid-token",
+		authn.TenantMetadataKey, otherTenant,
+	))
+	called := false
+	_, err = interceptor.Unary()(
+		ctx,
+		&controlv1.GetJobRequest{Namespace: "tenant-a", Name: "orders"},
+		&grpc.UnaryServerInfo{FullMethod: controlv1.JobService_GetJob_FullMethodName},
+		func(context.Context, any) (any, error) { called = true; return nil, nil },
+	)
+	if status.Code(err) != codes.PermissionDenied || called {
+		t.Fatalf("tenant mismatch: called=%v err=%v", called, err)
+	}
+	if len(audit.events) != 1 || audit.events[0].Outcome != "TENANT_DENIED" {
+		t.Fatalf("mismatch audit: %+v", audit.events)
+	}
+}
+
+// TestInterceptorRejectsMalformedTenantMetadata covers ADR-074 §3: a
+// non-canonical UUID on the metadata header MUST be rejected.
+func TestInterceptorRejectsMalformedTenantMetadata(t *testing.T) {
+	membership, err := auth.NewMembership(interceptorTenantID, true, auth.PermissionJobsRead)
+	if err != nil {
+		t.Fatalf("membership: %v", err)
+	}
+	membership.TenantNamespace = "tenant-a"
+	principal := auth.Principal{
+		ID: "principal-1", Subject: "operator-1", Active: true, PolicyRevision: "1",
+		Memberships: map[string]auth.Membership{interceptorTenantID: membership},
+	}
+	interceptor := authn.Interceptor{
+		Authenticator: staticAuthenticator{principal: principal},
+		Authorizer:    auth.ContextAuthorizer{},
+		AuditWriter:   &memoryAudit{},
+		Metrics:       &memoryAuthMetrics{},
+		Registry:      authn.NewRegistry(),
+		Clock:         time.Now,
+		EventID:       func() string { return "tenant-malformed" },
+	}
+	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs(
+		"authorization", "Bearer valid-token",
+		authn.TenantMetadataKey, "not-a-uuid",
+	))
+	called := false
+	_, err = interceptor.Unary()(
+		ctx,
+		&controlv1.GetJobRequest{Namespace: "tenant-a", Name: "orders"},
+		&grpc.UnaryServerInfo{FullMethod: controlv1.JobService_GetJob_FullMethodName},
+		func(context.Context, any) (any, error) { called = true; return nil, nil },
+	)
+	if status.Code(err) != codes.PermissionDenied || called {
+		t.Fatalf("malformed tenant metadata: called=%v err=%v", called, err)
+	}
+}
+
 func assertAuthObservation(
 	t *testing.T, recorder *memoryAuthMetrics, tenantID, outcome, requestID string,
 ) {

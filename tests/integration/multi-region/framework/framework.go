@@ -509,6 +509,44 @@ func (f *Framework) WaitForHTTPReady(ctx context.Context, regionName string) err
 	})
 }
 
+// WaitForHTTPUnavailable waits until a region no longer reports ready.
+func (f *Framework) WaitForHTTPUnavailable(ctx context.Context, regionName string) error {
+	return f.WaitForCondition(ctx, f.cfg.BootstrapTimeout, func() (bool, error) {
+		region, ok := f.GetRegion(regionName)
+		if !ok {
+			return false, fmt.Errorf("region not found: %s", regionName)
+		}
+		request, err := http.NewRequestWithContext(ctx, http.MethodGet, region.HTTPURI+"/ready", nil)
+		if err != nil {
+			return false, err
+		}
+		response, err := (&http.Client{Timeout: 2 * time.Second}).Do(request)
+		if err != nil {
+			return true, nil
+		}
+		_ = response.Body.Close()
+		return response.StatusCode != http.StatusOK, nil
+	})
+}
+
+// WaitForGRPCUnavailable waits until a region refuses gRPC connections.
+func (f *Framework) WaitForGRPCUnavailable(ctx context.Context, regionName string) error {
+	return f.WaitForCondition(ctx, f.cfg.BootstrapTimeout, func() (bool, error) {
+		region, ok := f.GetRegion(regionName)
+		if !ok {
+			return false, fmt.Errorf("region not found: %s", regionName)
+		}
+		probeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		defer cancel()
+		conn, err := grpc.DialContext(probeCtx, region.APIServerURI, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithBlock())
+		if err != nil {
+			return true, nil
+		}
+		_ = conn.Close()
+		return false, nil
+	})
+}
+
 // DisconnectRegions stops the source API service to make delivery unavailable.
 func (f *Framework) DisconnectRegions(ctx context.Context, source, _ string) error {
 	return f.StopRegion(ctx, source)

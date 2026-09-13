@@ -16,7 +16,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	syncv1 "io.astrasync/control-plane/controller/api/v1"
+	"io.astrasync/control-plane/controller/internal/metrics"
 	"io.astrasync/control-plane/job"
+	"io.astrasync/control-plane/observability/normalize"
 )
 
 type SyncJobReconciler struct {
@@ -25,14 +27,60 @@ type SyncJobReconciler struct {
 	Clock                 func() time.Time
 	Jobs                  job.Repository
 	StatusRefreshInterval time.Duration
+	Metrics               ReconcileMetrics
+	// Recorder observes job state transitions. It is set by SetupWithManager
+	// from the controller-runtime manager's registerer (the same registerer
+	// that hosts controller-runtime's own metrics). The field is nil-safe:
+	// metrics.Recorder.ObserveStateTransition is a nil-check method, so
+	// callers can pass a nil Recorder without a nil guard. The field is
+	// separate from Metrics so that the ReconcileMetrics interface remains
+	// minimal (only the reconcile-level ObserveReconcile) and the job
+	// state transition observer is opt-in for tests that do not exercise
+	// state transitions.
+	Recorder *metrics.Recorder
+}
+
+// ReconcileMetrics records the bounded observations produced by a reconcile
+// iteration.
+type ReconcileMetrics interface {
+	ObserveReconcile(tenantID, outcome string, duration time.Duration)
 }
 
 const controlPlaneFinalizer = "sync.astrasync.io/control-plane-finalizer"
 
-func (r *SyncJobReconciler) Reconcile(ctx context.Context, request ctrl.Request) (ctrl.Result, error) {
+func (r *SyncJobReconciler) Reconcile(ctx context.Context, request ctrl.Request) (result ctrl.Result, reconcileErr error) {
+	startedAt := r.now()
+	// tenantID is the bound label value for the reconcile-level
+	// `controller_job_controller_reconcile_duration_seconds` metric. It
+	// MUST be resolved from the SyncJob resource's tenant-id label so
+	// the metric series reflects the actual tenant the reconcile was
+	// dispatched against; emitting a constant `"_unknown"` would
+	// collapse every tenant's reconcile latency into a single
+	// degenerate series and erase the BFF label translation
+	// (ADR-072 / ADR-074) at the Controller boundary (Phase 34).
+	//
+	// The variable stays bound to "_unknown" when the resource is not
+	// yet fetched (Get failure, missing object). The label is
+	// overwritten after the Get succeeds so the defer always reports
+	// the tenant that owned the observed CR, never the hard-coded
+	// pre-fetch placeholder.
+	tenantID := normalize.UnknownTenant
+	defer func() {
+		if r.Metrics == nil {
+			return
+		}
+		outcome := "success"
+		if reconcileErr != nil {
+			outcome = "failure"
+		}
+		r.Metrics.ObserveReconcile(tenantID, outcome, r.now().Sub(startedAt))
+	}()
 	resource := &syncv1.SyncJob{}
 	if err := r.Get(ctx, request.NamespacedName, resource); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
+	if resource.Labels != nil {
+		tenantID = normalize.NormalizeTenant(resource.Labels["astrasync.io/tenant-id"])
 	}
 	if r.Jobs == nil {
 		return ctrl.Result{}, fmt.Errorf("controller Job repository must not be nil")
@@ -111,6 +159,11 @@ func (r *SyncJobReconciler) converge(
 				if errors.Is(updateErr, job.ErrConflict) {
 					continue
 				}
+				if updateErr != nil {
+					return job.Job{}, updateErr
+				}
+				r.observeTransition(resource, stored, updated)
+				r.observeEpochFence(resource, stored, updated)
 				return updated, updateErr
 			}
 			var replaceErr error
@@ -143,6 +196,8 @@ func (r *SyncJobReconciler) converge(
 		if updateErr != nil {
 			return job.Job{}, updateErr
 		}
+		r.observeTransition(resource, stored, updated)
+		r.observeEpochFence(resource, stored, updated)
 		return updated, nil
 	}
 	return job.Job{}, job.ErrConflict
@@ -169,6 +224,8 @@ func (r *SyncJobReconciler) reconcileDeletion(
 			} else if err != nil {
 				return ctrl.Result{}, err
 			}
+			r.observeTransition(resource, stored, next)
+			r.observeEpochFence(resource, stored, next)
 		}
 		if err := r.projectStatus(ctx, resource, next.Status); err != nil {
 			return ctrl.Result{}, err
@@ -294,6 +351,62 @@ func (r *SyncJobReconciler) now() time.Time {
 	return r.Clock()
 }
 
-func (r *SyncJobReconciler) SetupWithManager(manager ctrl.Manager) error {
+// SetupWithManager registers the SyncJob controller with the given manager
+// and wires the metrics Recorder for job state transition observation.
+// The recorder is nil-safe: if nil, ObserveStateTransition calls are dropped.
+func (r *SyncJobReconciler) observeTransition(resource *syncv1.SyncJob, stored, next job.Job) {
+	tenantID := ""
+	if resource != nil && resource.Labels != nil {
+		tenantID = resource.Labels["astrasync.io/tenant-id"]
+	}
+	if tenantID == "" {
+		tenantID = "_unknown"
+	}
+	namespace := ""
+	if resource != nil {
+		namespace = resource.Namespace
+	}
+	if stored.Status.State != next.Status.State {
+		r.Recorder.ObserveStateTransition(tenantID, namespace, string(stored.Status.State), string(next.Status.State))
+	}
+}
+
+// observeEpochFence records the outcome of an epoch assignment at the
+// controller reconcile durable-commit boundary (ADR-069 §Slice 51.1).
+// outcome derives from the direction of the epoch change:
+//   - fenced:  next.Status.Epoch > stored.Status.Epoch  — a strictly higher epoch
+//     was assigned; the previous epoch's writer was cleanly fenced off.
+//   - success: stored.Status.Epoch == next.Status.Epoch — no epoch change.
+//   - failure: next.Status.Epoch < stored.Status.Epoch  — a lower epoch was
+//     written; safety fallback for misconfiguration.
+//
+// The recorder is nil-safe: if Recorder is nil, the call is silently dropped.
+func (r *SyncJobReconciler) observeEpochFence(resource *syncv1.SyncJob, stored, next job.Job) {
+	if r.Recorder == nil || r.Recorder.EpochFenceTotal == nil {
+		return
+	}
+	tenantID := ""
+	if resource != nil && resource.Labels != nil {
+		tenantID = resource.Labels["astrasync.io/tenant-id"]
+	}
+	if tenantID == "" {
+		tenantID = "_unknown"
+	}
+	outcome := "success"
+	if stored.Status.Epoch != next.Status.Epoch {
+		if next.Status.Epoch > stored.Status.Epoch {
+			outcome = "fenced"
+		} else {
+			outcome = "failure"
+		}
+	}
+	r.Recorder.ObserveEpochFence(tenantID, outcome)
+}
+
+// SetupWithManager registers the SyncJob controller with the given manager
+// and wires the metrics Recorder for job state transition observation.
+// The recorder is nil-safe: if nil, ObserveStateTransition calls are dropped.
+func (r *SyncJobReconciler) SetupWithManager(manager ctrl.Manager, recorder *metrics.Recorder) error {
+	r.Recorder = recorder
 	return ctrl.NewControllerManagedBy(manager).For(&syncv1.SyncJob{}).Complete(r)
 }

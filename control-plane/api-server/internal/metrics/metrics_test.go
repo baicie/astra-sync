@@ -153,6 +153,155 @@ func TestHandlerNegotiatesOpenMetrics(t *testing.T) {
 	}
 }
 
+// canonicalTenantUUID is a lowercase UUID accepted by NormalizeTenant as
+// the canonical tenant shape. The dashboard recipes (ADR-047 §126) bind
+// on this exact form so the slice-43.1 tests can assert exact-match
+// series names.
+const canonicalTenantUUID = "0190f7c4-6c8d-7a01-9d2b-1ecabdff0011"
+
+// TestRecorderSignInEmitsCanonicalTenantAndOutcomeAllowlist exercises the
+// Phase 17 slice 43.1 happy / rejected / failure paths through the
+// Recorder. The scrape-level assertion mirrors the existing scrape
+// patterns for AuthRequestTotal (ADR-058 §4 test contract, item 2).
+func TestRecorderSignInEmitsCanonicalTenantAndOutcomeAllowlist(t *testing.T) {
+	cases := []struct {
+		name        string
+		tenantID    string
+		outcome     string
+		wantTenant  string
+		wantOutcome string
+	}{
+		{name: "happy_canonical_success", tenantID: canonicalTenantUUID, outcome: "success", wantTenant: canonicalTenantUUID, wantOutcome: "success"},
+		{name: "rejected_canonical", tenantID: canonicalTenantUUID, outcome: "rejected", wantTenant: canonicalTenantUUID, wantOutcome: "rejected"},
+		{name: "failure_canonical", tenantID: canonicalTenantUUID, outcome: "failure", wantTenant: canonicalTenantUUID, wantOutcome: "failure"},
+		{name: "platform_self_scope", tenantID: "_platform", outcome: "success", wantTenant: "_platform", wantOutcome: "success"},
+		{name: "non_canonical_tenant_collapsed", tenantID: "ALICE@acme.example", outcome: "success", wantTenant: "_unknown", wantOutcome: "success"},
+		{name: "non_allowlisted_outcome_collapsed", tenantID: canonicalTenantUUID, outcome: "started", wantTenant: canonicalTenantUUID, wantOutcome: "failure"},
+		{name: "empty_tenant_collapsed", tenantID: "   ", outcome: "rejected", wantTenant: "_unknown", wantOutcome: "rejected"},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			registry := prometheus.NewRegistry()
+			recorder, err := NewRecorder(registry)
+			if err != nil {
+				t.Fatalf("new recorder: %v", err)
+			}
+			recorder.ObserveSignIn(testCase.tenantID, testCase.outcome, "")
+			body := scrapeOpenMetrics(t, registry)
+			sample := `apiserver_sign_in_total{outcome="` + testCase.wantOutcome + `",tenant_id="` + testCase.wantTenant + `"} 1.0`
+			if !strings.Contains(body, sample) {
+				t.Fatalf("scrape body missing %q for case %q: %s", sample, testCase.name, body)
+			}
+			// Defensive: raw caller input must never leak into a label
+			// value, regardless of case.
+			if testCase.tenantID != "" && testCase.tenantID != canonicalTenantUUID && testCase.tenantID != "_platform" && strings.Contains(body, `tenant_id="`+testCase.tenantID+`"`) {
+				t.Fatalf("non-canonical tenant %q leaked into a series for case %q: %s", testCase.tenantID, testCase.name, body)
+			}
+		})
+	}
+}
+
+// TestRecorderSessionRevokeNormalisesActorAndTenant covers the second
+// Phase 17 slice 43.1 family. actor_id routes through NormalizeWorkerID
+// so two runaway callers cannot collide on a truncated label (slice
+// 43.0 worker-id contract).
+func TestRecorderSessionRevokeNormalisesActorAndTenant(t *testing.T) {
+	cases := []struct {
+		name       string
+		tenantID   string
+		actorID    string
+		wantTenant string
+		wantActor  string
+	}{
+		{name: "happy_canonical_pair", tenantID: canonicalTenantUUID, actorID: "admin-7", wantTenant: canonicalTenantUUID, wantActor: "admin-7"},
+		{name: "platform_self_scope", tenantID: "_platform", actorID: "platform-admin", wantTenant: "_platform", wantActor: "platform-admin"},
+		{name: "non_canonical_tenant_collapsed", tenantID: "alice@acme.example", actorID: "admin-7", wantTenant: "_unknown", wantActor: "admin-7"},
+		{name: "empty_actor_collapsed", tenantID: canonicalTenantUUID, actorID: "  ", wantTenant: canonicalTenantUUID, wantActor: "_unknown"},
+		{name: "oversize_actor_collapsed", tenantID: canonicalTenantUUID, actorID: strings.Repeat("x", 200), wantTenant: canonicalTenantUUID, wantActor: "_unknown"},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			registry := prometheus.NewRegistry()
+			recorder, err := NewRecorder(registry)
+			if err != nil {
+				t.Fatalf("new recorder: %v", err)
+			}
+			recorder.ObserveSessionRevoke(testCase.tenantID, testCase.actorID)
+			body := scrapeOpenMetrics(t, registry)
+			sample := `apiserver_session_revoke_total{actor_id="` + testCase.wantActor + `",tenant_id="` + testCase.wantTenant + `"} 1.0`
+			if !strings.Contains(body, sample) {
+				t.Fatalf("scrape body missing %q for case %q: %s", sample, testCase.name, body)
+			}
+		})
+	}
+}
+
+// TestRecorderTrustedProxyHSTSRoutesPreAuthThroughNormalize asserts the
+// trusted-proxy pre-auth tenant scope is funnelled through
+// NormalizeTenant. The expected value is "_unknown" (the catalog
+// pre-auth sentinel).
+func TestRecorderTrustedProxyHSTSRoutesPreAuthThroughNormalize(t *testing.T) {
+	registry := prometheus.NewRegistry()
+	recorder, err := NewRecorder(registry)
+	if err != nil {
+		t.Fatalf("new recorder: %v", err)
+	}
+
+	recorder.ObserveTrustedProxyHSTS("_unknown")
+	recorder.ObserveTrustedProxyHSTS("")
+
+	body := scrapeOpenMetrics(t, registry)
+	if !strings.Contains(body, `apiserver_trusted_proxy_hsts_total{tenant_id="_unknown"} 2.0`) {
+		t.Fatalf("expected single _unknown series with count 2; body=%s", body)
+	}
+	if strings.Contains(body, `tenant_id="_platform"`) {
+		t.Fatalf("trusted-proxy HSTS leaked _platform series: %s", body)
+	}
+}
+
+// TestRecorderSignInScrapeIsBoundedAcrossDistinctInputs guarantees the
+// slice 43.1 contract that distinct caller inputs never widen the
+// cardinality of the sign-in family beyond the documented allowlists.
+func TestRecorderSignInScrapeIsBoundedAcrossDistinctInputs(t *testing.T) {
+	registry := prometheus.NewRegistry()
+	recorder, err := NewRecorder(registry)
+	if err != nil {
+		t.Fatalf("new recorder: %v", err)
+	}
+
+	distinct := []struct {
+		tenant  string
+		outcome string
+	}{
+		{tenant: canonicalTenantUUID, outcome: "success"},
+		{tenant: "ALICE@acme.example", outcome: "success"},
+		{tenant: "{0190f7c4-6c8d-7a01-9d2b-1ecabdff0011}", outcome: "rejected"},
+		{tenant: "urn:uuid:0190f7c4-6c8d-7a01-9d2b-1ecabdff0011", outcome: "rejected"},
+		{tenant: canonicalTenantUUID, outcome: "started"},
+		{tenant: canonicalTenantUUID, outcome: "OK"},
+	}
+	for _, call := range distinct {
+		recorder.ObserveSignIn(call.tenant, call.outcome, "")
+	}
+
+	body := scrapeOpenMetrics(t, registry)
+	distinctSeries := strings.Count(body, "apiserver_sign_in_total{")
+	if distinctSeries != 4 {
+		t.Fatalf("apiserver_sign_in_total series count = %d, want 4 (canonical/success, _unknown/success, _unknown/rejected, canonical/failure via outcome-collapse); body=%s", distinctSeries, body)
+	}
+	for _, leak := range []string{
+		`tenant_id="ALICE@acme.example"`,
+		`tenant_id="{0190f7c4-6c8d-7a01-9d2b-1ecabdff0011}"`,
+		`tenant_id="urn:uuid:`,
+		`outcome="started"`,
+		`outcome="OK"`,
+	} {
+		if strings.Contains(body, leak) {
+			t.Fatalf("non-allowlisted label value %q leaked into scrape body: %s", leak, body)
+		}
+	}
+}
+
 func scrapeOpenMetrics(t *testing.T, gatherer prometheus.Gatherer) string {
 	t.Helper()
 	request := httptest.NewRequest(http.MethodGet, "/metrics", nil)

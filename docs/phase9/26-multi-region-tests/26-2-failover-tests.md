@@ -2,7 +2,9 @@
 
 ## Status
 
-Proposed. Implements failover integration tests for multi-region topology.
+**Complete.** Implemented failover integration tests for the multi-region
+topology on 2026-08-19. The failover test suite and shared Docker Compose
+deployment acceptance pass.
 
 ## Context
 

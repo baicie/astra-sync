@@ -41,6 +41,20 @@ type FailureInfo struct {
 	Host      string      `json:"host,omitempty"`
 }
 
+// Validation rules for the astrasync.io/tenant-id label. Kubernetes CRD
+// schemas cannot validate metadata.labels, so trusted writers must enforce
+// this contract before creating or updating a SyncJob. Admission-level
+// enforcement is implemented by ADR-087.
+//
+// +kubelinter:disabled
+const (
+	// TenantIDLabel is the Kubernetes label key for the tenant identifier
+	// on SyncJob resources. The value MUST be a canonical lowercase UUID.
+	// Used by controller_job_state_total and controller_epoch_fence_total
+	// for per-tenant observability (ADR-066, ADR-071).
+	TenantIDLabel = "astrasync.io/tenant-id"
+)
+
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:scope=Namespaced,singular=syncjob,shortName=sj
@@ -48,7 +62,32 @@ type FailureInfo struct {
 // +kubebuilder:printcolumn:name="State",type="string",JSONPath=".status.state"
 // +kubebuilder:printcolumn:name="Epoch",type="integer",JSONPath=".status.epoch"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
-
+// SyncJob represents a data synchronization job managed by the AstraSync
+// controller. The following labels are required for observability:
+//
+//   - astrasync.io/tenant-id: canonical lowercase UUID of the tenant that
+//     owns this job. Used by controller_job_state_total (ADR-066) and
+//     controller_epoch_fence_total (ADR-069) to label transitions per
+//     tenant. If absent, the controller emits _unknown for the tenant_id
+//     label.
+//
+// The label MUST be set by the caller at SyncJob creation time. Users
+// creating SyncJob resources via kubectl MUST include the label.
+// Applications creating SyncJob resources programmatically (e.g. the Console)
+// MUST set the label from the authenticated principal's tenant context.
+//
+// The Kubernetes Namespace field is used as the Prometheus "namespace"
+// label in controller_job_state_total. This is distinct from the
+// astrasync.io/tenant-id label.
+//
+// The tenant-label contract requires:
+//  1. The label key 'astrasync.io/tenant-id' is present and non-empty.
+//  2. The label value matches the canonical lowercase UUID pattern.
+//
+// See ADR-029 (durable state machine), ADR-053 (production hardening),
+// ADR-066 (controller emission slice 43.3.5), ADR-069 (epoch fence
+// emission), ADR-071 (tenant-id label contract), ADR-086 (admission
+// enforcement correction), and ADR-087 (ValidatingAdmissionPolicy).
 type SyncJob struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`

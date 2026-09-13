@@ -59,3 +59,9 @@ various fault injections.
 - [Phase 8 closeout](../phase8/closeout.md)
 - [ADR-048: Multi-Region Control-Plane Replication Model](../adr/adr-048-multi-region-control-plane-replication.md)
 - [ADR-049: Region-pinned Data-Plane Failover with Epoch Fencing](../adr/adr-049-region-pinned-data-plane-failover.md)
+
+## Next Delivery
+
+Phase 10 completed the multi-region observability integration, Phase 11
+completed the bounded [cross-region disaster recovery drill](../phase11/README.md),
+and Phase 12 completed the [CI pipeline integration](../phase12/README.md).

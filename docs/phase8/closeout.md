@@ -91,11 +91,12 @@ docs/phase8/                            | +500 lines
 
 ## Next Steps
 
-Phase 8 is complete. Potential next phases:
+Phase 8 is complete. The subsequent delivery phases are:
 
-1. **Phase 9: Multi-Region Testing** - End-to-end integration tests for multi-region failover
-2. **Phase 10: Auto-Promotion** - Implement auto-promotion policies (if needed)
-3. **Phase 11: Cross-Region Audit** - Implement cross-region audit query (ADR-050)
+1. **Phase 9: Multi-Region Integration Testing** - Complete
+2. **Phase 10: Multi-Region Observability Integration** - Complete
+3. **Phase 11: Cross-Region Disaster Recovery Drills** - Complete
+4. **Phase 12: CI/CD pipeline integration for multi-region tests** - Complete
 
 ## Sign-Off
 

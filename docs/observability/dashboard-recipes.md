@@ -21,9 +21,14 @@ F4/F5 register the Go descriptors, expose `/metrics`, and wire Prometheus
 discovery. F7 activates the authentication availability/latency and audit
 query latency recipes. F8 activates all Java data-plane batch, checkpoint,
 spill-byte, and record-count families. F9 activates Scheduler assignment,
-lease-takeover, and reconcile-duration samples. The remaining Go recipes are
-descriptor-only. Operators must check the status here before using a recipe as
-live SLO evidence.
+lease-takeover, and reconcile-duration samples. F10 activates Connection Test
+Executor outcome samples. F11 activates Console BFF request and render
+samples. F12 activates trusted-proxy HSTS samples. F13 activates Controller
+reconcile-duration samples. Phase 10 verifies the multi-region recipes
+against the API Server shared registry. Remaining unlisted Go recipes are
+descriptor-only.
+Operators must check the status here before using a recipe as live SLO
+evidence.
 
 ## Availability recipes
 
@@ -127,6 +132,103 @@ histogram_quantile(
 Suggested visualisation: `timeseries` panel with the P50, P95, and
 P99 lines.
 
+## Controller recipes
+
+### Controller reconcile duration (per tenant and outcome)
+
+```promql
+histogram_quantile(
+  0.95,
+  sum by (tenant_id, outcome, le) (
+    rate(controller_job_controller_reconcile_duration_seconds[5m])
+  )
+)
+```
+
+Suggested visualisation: `timeseries` panel with the P50, P95, and P99 lines.
+F13 records the pre-tenant `_unknown` value and uses `success` or `failure`.
+
+## Multi-region failover recipes
+
+### Promotion outcomes (per target region and outcome)
+
+```promql
+sum by (target_region, outcome) (
+  rate(astrasync_multi_region_promotion_total[5m])
+)
+```
+
+Suggested visualisation: `timeseries` panel with one series per target
+region and outcome. `success` and `failure` are the only promotion outcomes.
+
+### Cross-region event delivery (per peer, event type, and outcome)
+
+```promql
+sum by (peer_region, event_type, outcome) (
+  rate(astrasync_multi_region_event_total[5m])
+)
+```
+
+Suggested visualisation: `timeseries` panel with event type and outcome in
+the legend. Checkpoint, topology, and health events use the bounded event
+type allowlist.
+
+### Recovery duration (per target region)
+
+```promql
+histogram_quantile(
+  0.95,
+  sum by (target_region, le) (
+    rate(astrasync_multi_region_recovery_duration_seconds_bucket[5m])
+  )
+)
+```
+
+Suggested visualisation: `timeseries` panel with the P50, P95, and P99 lines.
+Use `astrasync_multi_region_recovery_total` beside it to distinguish
+successful and failed recovery attempts.
+
+## Connection test outcomes (per tenant and outcome)
+
+```promql
+sum by (tenant_id, outcome) (
+  rate(connection_test_total[5m])
+)
+```
+
+Suggested visualisation: `timeseries` panel with one series per outcome
+(`success`, `rejected`, `failure`). The `rejected` series identifies an
+egress-policy decision; timeout, credential, transport, and handshake errors
+are included in `failure`.
+
+## Console BFF recipes
+
+### Console request outcomes (per tenant and handler)
+
+```promql
+sum by (tenant_id, outcome, handler) (
+  rate(console_request_total[5m])
+)
+```
+
+Suggested visualisation: `timeseries` panel with the fixed handler name as
+the legend. `success` contains 2xx/3xx responses, `rejected` contains 4xx
+responses, and `failure` contains 5xx responses.
+
+### Console HTML render latency (per handler)
+
+```promql
+histogram_quantile(
+  0.95,
+  sum by (handler, le) (
+    rate(console_render_duration_seconds_bucket[5m])
+  )
+)
+```
+
+Suggested visualisation: `timeseries` panel with the P50, P95, and P99 lines.
+The current `static` handler covers the embedded HTML response path.
+
 ## Deliverability recipes
 
 ### Record rejection rate (per job)
@@ -201,8 +303,9 @@ sum by (tenant_id) (
 )
 ```
 
-F4 registers this descriptor, but the Slice 22 middleware does not yet
-increment it. The recipe remains inactive until that call site is wired.
+F12 increments this metric only when the API Server adds HSTS for a trusted
+proxy request. Direct TLS and plaintext requests do not contribute to this
+trusted-proxy-specific series.
 
 ## Join with the audit table
 
@@ -226,11 +329,14 @@ exemplar call sites land.
 
 ## Follow-up
 
-The remaining implementation must instrument the other API Server, Console,
-Scheduler, Connection Test Executor, and auth-library call sites, then
-register the Java data-plane metric families. F7 already covers API Server
-authentication decisions and authorized audit queries with bounded
-exemplars.
+The remaining implementation must instrument the other API Server and
+auth-library call sites, plus the Controller lifecycle owners outside the
+reconcile boundary. F7 covers API Server authentication decisions and
+authorized audit queries with bounded exemplars; F10 covers Connection Test
+Executor completion outcomes; F11 covers Console BFF requests and HTML
+rendering; F12 covers trusted-proxy HSTS responses; F13 covers Controller
+reconcile duration; Phase 10 covers the API Server multi-region scrape
+integration.
 
 ## Inline placeholders for the populated handbook
 

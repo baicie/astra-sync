@@ -5,12 +5,14 @@ package runtime_test
 import (
 	"context"
 	"database/sql"
+	"net"
 	"os"
 	"path/filepath"
 	"testing"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
 
 	adapters "io.astrasync/control-plane/replication/adapters"
 	replicationmetrics "io.astrasync/control-plane/replication/metrics"
@@ -59,6 +61,21 @@ func TestRuntimeAssemblesDeploymentAdaptersAndCloses(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create metrics bundle: %v", err)
 	}
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen for replication peer: %v", err)
+	}
+	grpcServer := grpc.NewServer()
+	serveDone := make(chan struct{})
+	go func() {
+		defer close(serveDone)
+		_ = grpcServer.Serve(listener)
+	}()
+	t.Cleanup(func() {
+		grpcServer.Stop()
+		_ = listener.Close()
+		<-serveDone
+	})
 	deps := runtimepkg.Dependencies{
 		EventHandler:   testEventHandler{},
 		EventSender:    testEventSender{},
@@ -76,7 +93,7 @@ func TestRuntimeAssemblesDeploymentAdaptersAndCloses(t *testing.T) {
 		Auditor:        auditor,
 	}
 	rt, err := runtimepkg.New(zap.NewNop(), runtimepkg.Config{
-		Region: "us-east-1", PeerRegion: "eu-west-1", PeerEndpoint: "passthrough:///peer", Metrics: metricsBundle,
+		Region: "us-east-1", PeerRegion: "eu-west-1", PeerEndpoint: listener.Addr().String(), Metrics: metricsBundle,
 	}, deps)
 	if err != nil {
 		t.Fatalf("create runtime: %v", err)

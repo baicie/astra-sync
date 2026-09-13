@@ -37,9 +37,9 @@ class AstraSyncCliTest {
         assertThat(help.exitCode()).isZero();
         assertThat(help.stdout()).contains("Usage: astrasync", "run");
         assertThat(version.exitCode()).isZero();
-        assertThat(version.stdout()).contains("AstraSync 0.1.0-SNAPSHOT");
+        assertThat(version.stdout()).contains("AstraSync 0.8.0");
         assertThat(runVersion.exitCode()).isZero();
-        assertThat(runVersion.stdout()).contains("AstraSync 0.1.0-SNAPSHOT");
+        assertThat(runVersion.stdout()).contains("AstraSync 0.8.0");
         assertThat(missingCommand.exitCode()).isEqualTo(AstraSyncCli.EXIT_INPUT);
         assertThat(missingCommand.stderr()).contains("Usage: astrasync");
         assertThat(unknown.exitCode()).isEqualTo(AstraSyncCli.EXIT_INPUT);
@@ -55,6 +55,52 @@ class AstraSyncCliTest {
         assertThat(registry.findDescriptor("mysql-cdc")).isPresent();
         assertThat(registry.findDescriptor("postgres-cdc")).isPresent();
         assertThat(registry.findDescriptor("jdbc")).isPresent();
+    }
+
+    @Test
+    void printsInventoryAsLineOrientedDeterministicText() throws Exception {
+        Path exported = tempDirectory.resolve("inventory.pb");
+
+        Invocation export = invoke(
+                "catalog-export",
+                exported.toString(),
+                "--compiler-build",
+                "test-build",
+                "--execution-profile",
+                "test-profile");
+        assertThat(export.exitCode()).isZero();
+
+        Invocation firstPrint = invoke("catalog-print", exported.toString());
+        Invocation secondPrint = invoke("catalog-print", exported.toString());
+
+        assertThat(firstPrint.exitCode()).isZero();
+        assertThat(secondPrint.exitCode()).isZero();
+        // Print is deterministic: two runs over the same inventory produce
+        // byte-identical stdout.
+        assertThat(firstPrint.stdout()).isEqualTo(secondPrint.stdout());
+        // Header fields reach stdout.
+        assertThat(firstPrint.stdout())
+                .contains("header.compiler_build=test-build")
+                .contains("header.execution_profile=test-profile")
+                .contains("header.inventory_revision=sha256:")
+                .contains("header.descriptor_count=");
+        // Descriptor fields reach stdout.
+        assertThat(firstPrint.stdout())
+                .contains("descriptor.csv")
+                .contains("descriptor.jdbc")
+                .contains("descriptor.mysql-cdc")
+                .contains("descriptor.postgres-cdc");
+    }
+
+    @Test
+    void catalogPrintReportsInvalidInputAsExitTwo() {
+        Invocation invocation =
+                invoke("catalog-print", tempDirectory.resolve("missing.pb").toString());
+
+        assertThat(invocation.exitCode()).isEqualTo(AstraSyncCli.EXIT_INPUT);
+        assertThat(invocation.stderr())
+                .contains("FAILED category=input", "cannot read inventory")
+                .doesNotContain("Exception", "\tat ");
     }
 
     @Test

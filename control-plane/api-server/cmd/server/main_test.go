@@ -22,6 +22,7 @@ import (
 	"time"
 
 	gatewayruntime "github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/test/bufconn"
@@ -29,6 +30,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	jobv1 "io.astrasync/control-plane/api-server/gen/go/v1"
+	"io.astrasync/control-plane/api-server/internal/metrics"
 	"io.astrasync/control-plane/api-server/internal/service"
 	"io.astrasync/control-plane/auth/transport"
 	catalogmemory "io.astrasync/control-plane/catalog/memory"
@@ -339,8 +341,10 @@ func TestAPIHandlerEmitsSecurityHeadersAndHonoursTrustedProxy(t *testing.T) {
 	gateway := http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
 		response.WriteHeader(http.StatusTeapot)
 	})
+	hstsMetric := metrics.TrustedProxyHSTS.WithLabelValues("_unknown")
+	hstsBefore := testutil.ToFloat64(hstsMetric)
 	handler := apiHandler(
-		transport.TrustedProxyMiddleware(cidrs)(transport.SecurityHeaders()(gateway)),
+		transport.TrustedProxyMiddleware(cidrs)(transport.SecurityHeadersWithHSTSObserver(observeTrustedProxyHSTS)(gateway)),
 		func(context.Context) error { return nil },
 	)
 
@@ -362,6 +366,9 @@ func TestAPIHandlerEmitsSecurityHeadersAndHonoursTrustedProxy(t *testing.T) {
 	if got := response.Header().Get(transport.HeaderStrictTransportSecurity); got != transport.ValueStrictTransportSecurity {
 		t.Fatalf("expected HSTS via trusted-proxy https, got %q", got)
 	}
+	if got := testutil.ToFloat64(hstsMetric) - hstsBefore; got != 1 {
+		t.Fatalf("trusted-proxy HSTS observations = %v, want 1", got)
+	}
 
 	request2 := httptest.NewRequest(http.MethodGet, "http://api.example.com/v1/jobs", nil)
 	request2.RemoteAddr = "203.0.113.42:51234"
@@ -371,6 +378,31 @@ func TestAPIHandlerEmitsSecurityHeadersAndHonoursTrustedProxy(t *testing.T) {
 	handler.ServeHTTP(response2, request2)
 	if got := response2.Header().Get(transport.HeaderStrictTransportSecurity); got != "" {
 		t.Fatalf("expected no HSTS from untrusted peer, got %q", got)
+	}
+	if got := testutil.ToFloat64(hstsMetric) - hstsBefore; got != 1 {
+		t.Fatalf("untrusted-proxy HSTS observations = %v, want unchanged count 1", got)
+	}
+}
+
+func TestObserveTrustedProxyHSTSCountsOnlyTrustedProxyHTTPS(t *testing.T) {
+	metric := metrics.TrustedProxyHSTS.WithLabelValues("_unknown")
+	before := testutil.ToFloat64(metric)
+
+	trustedRequest := httptest.NewRequest(http.MethodGet, "http://api.example.com/health", nil)
+	trustedRequest = trustedRequest.WithContext(transport.WithClientAddress(trustedRequest.Context(), transport.ClientAddress{
+		Scheme: "https", Trusted: true,
+	}))
+	observeTrustedProxyHSTS(trustedRequest)
+
+	observeTrustedProxyHSTS(httptest.NewRequest(http.MethodGet, "https://api.example.com/health", nil))
+	plaintextRequest := httptest.NewRequest(http.MethodGet, "http://api.example.com/health", nil)
+	plaintextRequest = plaintextRequest.WithContext(transport.WithClientAddress(plaintextRequest.Context(), transport.ClientAddress{
+		Scheme: "http", Trusted: true,
+	}))
+	observeTrustedProxyHSTS(plaintextRequest)
+
+	if got := testutil.ToFloat64(metric) - before; got != 1 {
+		t.Fatalf("trusted-proxy HSTS observations = %v, want 1", got)
 	}
 }
 

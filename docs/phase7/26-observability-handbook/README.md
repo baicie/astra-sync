@@ -48,13 +48,13 @@ This slice does not:
 
 ## Follow-up records
 
-The Phase 7 Slice 26 follow-up slices (F1–F7) provide the logging,
+The Phase 7 Slice 26 follow-up slices (F1–F13) provide the logging,
 descriptor, exposition, deployment, closeout, and first business
 instrumentation layers. They are recorded in
 [`../../observability/changelog.md`](../../observability/changelog.md)
 together with their source commits and PRs. Descriptor registration alone is
-not treated as emitted SLO data; F7 explicitly identifies the three families
-whose business samples are active.
+not treated as emitted SLO data; the catalog identifies each family whose
+business samples are active.
 
 - F1: SLF4J + Logback + Logstash JSON foundation for the Java data
   plane (coordinator + worker).
@@ -74,11 +74,23 @@ whose business samples are active.
 - F7: API Server authentication decision counter/histogram and authorized
   audit-query histogram observations, with OpenMetrics negotiation and
   canonical UUID `request_id` exemplars.
+- F8/F8.1: Java data-plane batch, checkpoint, record-count, and Worker-local
+  spill-byte observations.
+- F9/F9.1: Scheduler assignment, lease-takeover, and reconcile-duration
+  observations.
+- F10: Connection Test Executor outcome observations after durable completion;
+  policy-denied probes use `rejected` and execution failures use `failure`.
+- F11: Console BFF request outcomes and HTML render latency using a fixed
+  handler allowlist and trusted response tenant scope.
+- F12: Trusted-proxy HSTS observations at the API Server security boundary.
+- F13: Controller `SyncJob` reconcile-duration observations with fixed
+  `_unknown` tenant scope and bounded outcomes.
 
-The API Server availability and audit-query latency recipes can now be used as
-live SLO evidence. The next observability implementation slices must activate
-the remaining Go descriptors and add Java data-plane metrics before freshness
-and deliverability recipes become live.
+The API Server availability, audit-query latency, scheduler, Java data-plane,
+and connection-test recipes can now use live metric samples. Trusted-proxy HSTS
+and Controller reconcile recipes are live as well. Remaining observability work
+covers deferred API Server and auth-library call sites, plus the remaining
+Controller lifecycle call sites.
 
 ## Records
 

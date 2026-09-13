@@ -7,7 +7,7 @@ services:
     environment:
       - APP_ENV=development
       - COMPILER_VALIDATION_PORT=50052
-      - COMPILER_BUILD=0.1.0-SNAPSHOT
+      - COMPILER_BUILD=0.8.0
       - CONNECTOR_EXECUTION_PROFILE=standard
     networks:
       - astrasync-primary
@@ -20,7 +20,7 @@ services:
     environment:
       - APP_ENV=development
       - COMPILER_VALIDATION_PORT=50052
-      - COMPILER_BUILD=0.1.0-SNAPSHOT
+      - COMPILER_BUILD=0.8.0
       - CONNECTOR_EXECUTION_PROFILE=standard
     networks:
       - astrasync-secondary

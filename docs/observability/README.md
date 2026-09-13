@@ -18,7 +18,7 @@ must combine all three to reach a root cause.
 
 | Signal | Source | Format | Sample destination |
 |---|---|---|---|
-| Metrics | Prometheus descriptors in the Go control plane; F7 emits API Server authentication and audit-query SLO samples; F8 emits all seven Java data-plane families | Prometheus/OpenMetrics exposition | `monitoring.prometheus.port: 9090` (deployment-side rewrite) |
+| Metrics | Prometheus descriptors in the Go control plane; F7 emits API Server authentication and audit-query SLO samples; F8 emits all seven Java data-plane families; F10 emits Connection Test Executor outcomes; F11 emits Console BFF request outcomes and render latency; F12 emits trusted-proxy HSTS samples; F13 emits Controller reconcile-duration samples; Phase 10 verifies API Server multi-region promotion, event, and recovery samples | Prometheus/OpenMetrics exposition | `monitoring.prometheus.port: 9090` (deployment-side rewrite) |
 | Logs | SLF4J + Logback in Java error paths, zap in the Controller, and `log/slog` in the other migrated Go entry points | line-delimited JSON | Loki / stdout / deployment log store |
 | Audit | PostgreSQL `audit_events` table (Slice 18) | relational rows | PostgreSQL → deployment audit store |
 
@@ -37,8 +37,15 @@ batch/checkpoint samples, `InProcessBatchWorker` emits record-count samples,
 and the Worker-local spillable exchange emits
 `coordinator_spill_bytes_total` after successful durable enqueue. The Worker
 exposes that shared registry only when `METRICS_LISTEN_ADDRESS` is set;
-Coordinator remains one-shot. Other control-plane business call sites remain
-pending; the catalog marks each family separately.
+Coordinator remains one-shot. F10 records `connection_test_total` only after
+the executor durably completes a claimed operation; policy-denied probes use
+the bounded `rejected` outcome. F11 records Console BFF request outcomes and
+HTML render latency with bounded handler names. F12 records trusted-proxy HSTS
+responses at the API Server security boundary. F13 records Controller
+reconcile duration with fixed `_unknown` tenant scope. Other control-plane
+business call sites remain pending; the catalog marks each family separately.
+Phase 10 verifies the multi-region families through the API Server shared
+registry and documents their dashboard recipes.
 
 ## Documents
 
@@ -101,9 +108,12 @@ The handbook does not:
   the platform's signal store; the handbook documents the
   conventions the wire must follow.
 - Claim that descriptor registration alone produces business samples. F7 emits
-  the three API Server SLO families and F8 emits all seven Java data-plane
-  batch/checkpoint, spill-byte, and record-count families; remaining
-  descriptor-only families stay follow-up work.
+  the three API Server SLO families, F8 emits all seven Java data-plane
+  batch/checkpoint, spill-byte, and record-count families, F10 emits the
+  Connection Test Executor outcome family, F11 emits the Console BFF
+  request and HTML render families, F12 emits trusted-proxy HSTS samples, and
+  F13 emits Controller reconcile-duration samples; remaining descriptor-only
+  families stay follow-up work.
 
 The handbook does:
 
@@ -113,6 +123,16 @@ The handbook does:
   fixed fallback tenant labels and UUID-only exemplar contract.
 - Record F8 Java data-plane observations, their `_unknown` tenant fallback,
   and the explicit Worker metrics listener contract.
+- Record F10 Connection Test Executor outcomes after durable completion, with
+  policy rejection separated from executor or remote failures.
+- Record F11 Console BFF request outcomes and HTML render latency using a
+  fixed handler allowlist and trusted response tenant scope.
+- Record F12 trusted-proxy HSTS observations only when the API Server adds the
+  header for a trusted HTTPS proxy request.
+- Record F13 Controller reconcile duration with bounded outcome labels and a
+  fixed pre-tenant `_unknown` value.
+- Record the Phase 10 API Server scrape integration for multi-region
+  promotion, event-delivery, and recovery metrics.
 - Provide the per-tenant SLI/SLO definitions and the reference
   queries that the operator uses to derive an SLO dashboard.
 - Document the `request_id` join key that links the three signals.

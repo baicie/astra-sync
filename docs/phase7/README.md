@@ -9,13 +9,17 @@ recorded by ADR-001 through ADR-043.
 
 Slice 23 (control-plane mTLS), Slice 24 (operational runbook templates),
 and Slice 26 (observability handbook) are implementation complete.
-Slice 26 follow-up slices F1–F8 have completed the SLF4J/slog,
+Slice 26 follow-up slices F1–F13 have completed the SLF4J/slog,
 Prometheus descriptor/exposition, Helm discovery, status closeout, API
-Server SLO instrumentation, and Java data-plane metrics activation recorded
-in [`docs/observability/changelog.md`](../observability/changelog.md).
-Authentication decision and authorized audit-query observations, plus all Java
-batch, checkpoint, spill-byte, and record-count observations, now provide live
-SLO samples; other control-plane business observations remain deferred.
+Server SLO instrumentation, Java data-plane metrics activation, trusted-proxy
+HSTS observations, and Controller reconcile metrics recorded in
+[`docs/observability/changelog.md`](../observability/changelog.md).
+Authentication decision and authorized audit-query observations, all Java
+batch, checkpoint, spill-byte, and record-count observations, Connection Test
+Executor outcomes, and Console BFF request/render observations now provide
+live samples. Trusted-proxy HSTS and Controller reconcile observations also
+provide live samples; remaining control-plane business observations remain
+deferred.
 Slice 25 (multi-region) shipped its design cluster
 (ADR-048, ADR-049, ADR-050) in Phase 7, was implemented in Phase 8
 (`docs/phase8/closeout.md`), and is integration-tested in Phase 9
@@ -79,6 +83,10 @@ and Slice 26 closed the fourth (ADR-047).
 | Slice 26.F8.1 | Java data-plane spill byte activation (Worker-local exchange) | Implementation Complete |
 | Slice 26.F9 | Scheduler assignment and lease-takeover activation | Implementation Complete |
 | Slice 26.F9.1 | Scheduler reconcile-duration activation | Implementation Complete |
+| Slice 26.F10 | Connection Test Executor outcome activation | Implementation Complete |
+| Slice 26.F11 | Console BFF request and render activation | Implementation Complete |
+| Slice 26.F12 | Trusted-proxy HSTS activation | Implementation Complete |
+| Slice 26.F13 | Controller reconcile-duration activation | Implementation Complete |
 
 The first Phase 7 slice will be Slice 23 (control-plane mTLS) because the
 other three entry criteria depend on having an authenticated channel between

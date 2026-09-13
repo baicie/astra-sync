@@ -68,3 +68,49 @@ func TestSecurityHeadersPreservesUpstreamValues(t *testing.T) {
 		t.Fatalf("expected upstream HSTS to win, got %q", got)
 	}
 }
+
+func TestSecurityHeadersNotifiesObserverOnlyWhenItAddsHSTS(t *testing.T) {
+	cases := []struct {
+		name      string
+		request   *http.Request
+		preloaded string
+		notifies  int
+	}{
+		{
+			name:    "plaintext",
+			request: httptest.NewRequest(http.MethodGet, "http://api.example.com/health", nil),
+		},
+		{
+			name: "trusted proxy https",
+			request: func() *http.Request {
+				request := httptest.NewRequest(http.MethodGet, "http://api.example.com/health", nil)
+				return request.WithContext(WithClientAddress(request.Context(), ClientAddress{
+					Scheme: "https", Trusted: true,
+				}))
+			}(),
+			notifies: 1,
+		},
+		{
+			name:      "upstream hsts",
+			request:   httptest.NewRequest(http.MethodGet, "https://api.example.com/health", nil),
+			preloaded: ValueStrictTransportSecurity,
+		},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			observed := 0
+			recorder := httptest.NewRecorder()
+			if test.preloaded != "" {
+				recorder.Header().Set(HeaderStrictTransportSecurity, test.preloaded)
+			}
+			handler := SecurityHeadersWithHSTSObserver(func(*http.Request) { observed++ })(http.HandlerFunc(
+				func(writer http.ResponseWriter, _ *http.Request) {
+				},
+			))
+			handler.ServeHTTP(recorder, test.request)
+			if observed != test.notifies {
+				t.Fatalf("observer notifications = %d, want %d", observed, test.notifies)
+			}
+		})
+	}
+}

@@ -19,9 +19,32 @@ import (
 	"io.astrasync/control-plane/auth"
 )
 
+// ManagerOption configures a Manager.
+type ManagerOption func(*Manager)
+
+// WithRecorder injects the auth.Recorder for sign-in metric
+// observation. The Recorder is nil-safe (calls are dropped if the
+// receiver is nil), so this option is optional at construction time.
+// See ADR-058 §2 and ADR-065 §2 for the emission design.
+func WithRecorder(r *auth.Recorder) ManagerOption {
+	return func(m *Manager) { m.recorder = r }
+}
+
 type PrincipalResolver interface {
 	ResolveOrCreatePrincipal(context.Context, auth.ExternalIdentity) (auth.Principal, error)
 	ResolvePrincipalByID(context.Context, string) (auth.Principal, error)
+}
+
+// oidcProvider abstracts the OIDC methods the Manager depends on, so tests
+// can supply a fake without spinning up a real OIDC discovery endpoint.
+// The real *oidc.Client satisfies this interface; callers construct it
+// via oidc.New() and pass it directly to New.
+type oidcProvider interface {
+	AuthorizationURL(state, nonce, codeChallenge string) (string, error)
+	Exchange(ctx context.Context, code, verifier string) (oidc.TokenSet, error)
+	ValidateIDToken(ctx context.Context, token, expectedNonce string) (auth.ValidatedToken, error)
+	ValidateAccessToken(ctx context.Context, token string) (auth.ValidatedToken, error)
+	Refresh(ctx context.Context, refreshToken string) (oidc.TokenSet, error)
 }
 
 type Config struct {
@@ -44,18 +67,19 @@ type LoginStart struct {
 }
 
 type Manager struct {
-	provider *oidc.Client
+	provider oidcProvider
 	store    auth.ConsoleSessionStore
 	resolver PrincipalResolver
 	audit    auth.AuditWriter
+	recorder *auth.Recorder
 	config   Config
 	clock    func() time.Time
 	eventID  func() string
 }
 
 func New(
-	provider *oidc.Client, store auth.ConsoleSessionStore, resolver PrincipalResolver,
-	audit auth.AuditWriter, configuration Config,
+	provider oidcProvider, store auth.ConsoleSessionStore, resolver PrincipalResolver,
+	audit auth.AuditWriter, configuration Config, opts ...ManagerOption,
 ) (*Manager, error) {
 	if provider == nil || store == nil || resolver == nil || audit == nil {
 		return nil, fmt.Errorf("Console authentication dependencies must not be nil")
@@ -78,8 +102,12 @@ func New(
 		configuration.RefreshWindow > time.Hour {
 		return nil, fmt.Errorf("Console authentication time bounds are invalid")
 	}
-	return &Manager{provider: provider, store: store, resolver: resolver, audit: audit,
-		config: configuration, clock: time.Now, eventID: uuid.NewString}, nil
+	m := &Manager{provider: provider, store: store, resolver: resolver, audit: audit,
+		config: configuration, clock: time.Now, eventID: uuid.NewString}
+	for _, opt := range opts {
+		opt(m)
+	}
+	return m, nil
 }
 
 func (m *Manager) BeginLogin(ctx context.Context, returnTo string) (LoginStart, error) {
@@ -107,27 +135,42 @@ func (m *Manager) BeginLogin(ctx context.Context, returnTo string) (LoginStart, 
 	return LoginStart{AuthorizationURL: authorizationURL, BrowserBinding: credentials.BrowserBinding, ExpiresAt: credentials.ExpiresAt}, nil
 }
 
+// firstTenantID returns the first tenant ID from principal.Memberships,
+// or "_platform" if the principal has no memberships (consistent with
+// authmetrics.ObserveSessionRevoke tenant-derivation semantics, ADR-065 §2).
+func firstTenantID(principal auth.Principal) string {
+	for id := range principal.Memberships {
+		return id
+	}
+	return "_platform"
+}
+
 func (m *Manager) CompleteLogin(
 	ctx context.Context, state, browserBinding, code string,
 ) (Session, string, error) {
+	requestID := requestID(ctx)
 	transaction, err := m.store.ConsumeLoginTransaction(ctx, state, browserBinding)
 	if err != nil || strings.TrimSpace(code) == "" || len(code) > 16*1024 {
 		m.auditEvent(ctx, "authentication.login", "anonymous", "", "DENIED")
+		m.recorder.ObserveSignIn("_platform", "rejected", requestID)
 		return Session{}, "", auth.ErrUnauthenticated
 	}
 	tokens, err := m.provider.Exchange(ctx, code, transaction.CodeVerifier)
 	if err != nil || tokens.IDToken == "" {
 		m.auditEvent(ctx, "authentication.login", "anonymous", "", "DENIED")
+		m.recorder.ObserveSignIn("_platform", "rejected", requestID)
 		return Session{}, "", auth.ErrUnauthenticated
 	}
 	idToken, err := m.provider.ValidateIDToken(ctx, tokens.IDToken, transaction.Nonce)
 	if err != nil {
 		m.auditEvent(ctx, "authentication.login", "anonymous", "", "DENIED")
+		m.recorder.ObserveSignIn("_platform", "rejected", requestID)
 		return Session{}, "", auth.ErrUnauthenticated
 	}
 	accessToken, err := m.provider.ValidateAccessToken(ctx, tokens.AccessToken)
 	if err != nil || accessToken.Identity != idToken.Identity {
 		m.auditEvent(ctx, "authentication.login", "anonymous", "", "DENIED")
+		m.recorder.ObserveSignIn("_platform", "rejected", requestID)
 		return Session{}, "", auth.ErrUnauthenticated
 	}
 	if accessToken.ExpiresAt.Before(tokens.ExpiresAt) {
@@ -136,25 +179,29 @@ func (m *Manager) CompleteLogin(
 	principal, err := m.resolver.ResolveOrCreatePrincipal(ctx, idToken.Identity)
 	if err != nil || !principal.Active {
 		m.auditEvent(ctx, "authentication.login", "anonymous", "", "DENIED")
+		m.recorder.ObserveSignIn("_platform", "rejected", requestID)
 		return Session{}, "", auth.ErrUnauthenticated
 	}
+	tenantID := firstTenantID(principal)
 	credentials, err := m.store.CreateConsoleSession(ctx, principal.ID, auth.ConsoleTokens{
 		AccessToken: tokens.AccessToken, RefreshToken: tokens.RefreshToken,
 		TokenType: tokens.TokenType, ExpiresAt: tokens.ExpiresAt,
 	}, m.config.IdleTTL, m.config.AbsoluteTTL)
 	if err != nil {
 		m.auditEvent(ctx, "authentication.login", principal.ID, "", "DENIED")
+		m.recorder.ObserveSignIn(tenantID, "failure", requestID)
 		return Session{}, "", fmt.Errorf("create Console session: %w", err)
 	}
 	if err := m.audit.WriteSecurityAudit(ctx, auth.SecurityAuditEvent{
 		EventID: m.eventID(), EventType: "authentication.login", ActorID: principal.ID,
-		RequestID: requestID(ctx), Outcome: "ALLOWED", Attributes: map[string]any{
+		RequestID: requestID, Outcome: "ALLOWED", Attributes: map[string]any{
 			"issuer": idToken.Identity.Issuer,
 		}, OccurredAt: m.clock().UTC(),
 	}); err != nil {
 		_ = m.store.DeleteConsoleSession(ctx, credentials.SessionID)
 		return Session{}, "", fmt.Errorf("record Console login audit: %w", err)
 	}
+	m.recorder.ObserveSignIn(tenantID, "success", requestID)
 	record, err := m.store.ResolveConsoleSession(ctx, credentials.SessionID, m.config.IdleTTL)
 	if err != nil {
 		return Session{}, "", err

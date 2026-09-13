@@ -16,6 +16,7 @@ GO_MODULES = (
     "control-plane/scheduler",
     "control-plane/catalog",
     "control-plane/auth",
+    "control-plane/observability",
     "console",
 )
 

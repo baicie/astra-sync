@@ -1,0 +1,16 @@
+{{- if and .Values.podDisruptionBudget.enabled (hasKey .Values.podDisruptionBudget "controller") .Values.podDisruptionBudget.controller }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "astrasync.componentFullname" (dict "context" . "component" "controller") }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "astrasync.labels" . | nindent 4 }}
+    app.kubernetes.io/component: controller
+spec:
+  minAvailable: {{ .Values.podDisruptionBudget.controller.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "astrasync.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: controller
+{{- end }}

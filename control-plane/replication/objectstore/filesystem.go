@@ -33,7 +33,7 @@ func NewFileStore(root string) (*FileStore, error) {
 
 func (s *FileStore) path(key string) (string, error) {
 	key = strings.TrimSpace(strings.ReplaceAll(key, "\\", "/"))
-	if key == "" || strings.HasPrefix(key, "/") || filepath.IsAbs(key) {
+	if key == "" || strings.HasPrefix(key, "/") || hasWindowsVolumePrefix(key) || filepath.IsAbs(key) {
 		return "", ErrInvalidKey
 	}
 	clean := filepath.Clean(filepath.FromSlash(key))
@@ -43,6 +43,13 @@ func (s *FileStore) path(key string) (string, error) {
 		return "", ErrInvalidKey
 	}
 	return path, nil
+}
+
+func hasWindowsVolumePrefix(key string) bool {
+	if len(key) < 2 || key[1] != ':' {
+		return false
+	}
+	return key[0] >= 'A' && key[0] <= 'Z' || key[0] >= 'a' && key[0] <= 'z'
 }
 
 // PutObject writes an object atomically beneath the configured root.

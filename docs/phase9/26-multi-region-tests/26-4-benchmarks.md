@@ -2,7 +2,9 @@
 
 ## Status
 
-Proposed. Implements performance benchmarks for multi-region operations.
+**Complete.** Implemented performance benchmarks for multi-region operations
+on 2026-08-19. The benchmark package tests and shared Docker Compose
+deployment acceptance pass.
 
 ## Context
 

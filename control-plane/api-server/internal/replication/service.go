@@ -12,6 +12,8 @@ import (
 	controlv1 "io.astrasync/control-plane/api-server/gen/go/v1"
 	replicationdomain "io.astrasync/control-plane/replication"
 	replicationmetrics "io.astrasync/control-plane/replication/metrics"
+	replicationpromotion "io.astrasync/control-plane/replication/promotion"
+	replicationrecovery "io.astrasync/control-plane/replication/recovery"
 )
 
 var ErrBackendUnavailable = errors.New("replication backend is not configured")
@@ -372,7 +374,11 @@ func (s *Service) PromoteRegion(ctx context.Context, request *controlv1.PromoteR
 	if s.backend == nil {
 		return nil, status.Error(codes.FailedPrecondition, ErrBackendUnavailable.Error())
 	}
-	return s.backend.Promote(ctx, request)
+	response, err = s.backend.Promote(ctx, request)
+	if err != nil {
+		return nil, mapPromotionError(err)
+	}
+	return response, nil
 }
 
 // GetPromotionStatus delegates status lookup to the configured backend.
@@ -380,7 +386,11 @@ func (s *Service) GetPromotionStatus(ctx context.Context, request *controlv1.Get
 	if s.backend == nil {
 		return nil, status.Error(codes.FailedPrecondition, ErrBackendUnavailable.Error())
 	}
-	return s.backend.Status(ctx, request)
+	response, err := s.backend.Status(ctx, request)
+	if err != nil {
+		return nil, mapPromotionError(err)
+	}
+	return response, nil
 }
 
 // RecoverForPromotion executes recovery on the target region after promotion.
@@ -403,7 +413,70 @@ func (s *Service) RecoverForPromotion(ctx context.Context, request *controlv1.Re
 	if !s.hasRegion(request.GetSourceRegion()) || !s.hasRegion(request.GetTargetRegion()) {
 		return nil, status.Error(codes.InvalidArgument, "source and target regions must be configured")
 	}
-	return s.recovery.RecoverForPromotion(ctx, request)
+	response, err := s.recovery.RecoverForPromotion(ctx, request)
+	if err != nil {
+		return nil, mapRecoveryError(err)
+	}
+	return response, nil
+}
+
+func mapPromotionError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if _, ok := status.FromError(err); ok {
+		return err
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return err
+	}
+	switch {
+	case errors.Is(err, replicationpromotion.ErrInvalidRequest):
+		return status.Error(codes.InvalidArgument, "promotion request is invalid")
+	case errors.Is(err, replicationpromotion.ErrJobNotFound):
+		return status.Error(codes.NotFound, "promotion job was not found")
+	case errors.Is(err, replicationpromotion.ErrEpochConflict):
+		return status.Error(codes.Aborted, "promotion epoch conflicts with the current job epoch")
+	case errors.Is(err, replicationpromotion.ErrNotStandbyRegion),
+		errors.Is(err, replicationpromotion.ErrAlreadyPromoting),
+		errors.Is(err, replicationpromotion.ErrCapabilityTimeout),
+		errors.Is(err, replicationpromotion.ErrCapabilityFailed),
+		errors.Is(err, replicationpromotion.ErrRecoveryFailed),
+		errors.Is(err, replicationpromotion.ErrPromotionAborted),
+		errors.Is(err, replicationrecovery.ErrCheckpointNotFound),
+		errors.Is(err, replicationrecovery.ErrCheckpointNotReplicated),
+		errors.Is(err, replicationrecovery.ErrCheckpointCorrupted),
+		errors.Is(err, replicationrecovery.ErrCheckpointEpochMismatch),
+		errors.Is(err, replicationrecovery.ErrCheckpointSeqMismatch),
+		errors.Is(err, replicationrecovery.ErrRecoveryAborted):
+		return status.Error(codes.FailedPrecondition, "promotion prerequisites are not satisfied")
+	default:
+		return status.Error(codes.Internal, "promotion failed")
+	}
+}
+
+func mapRecoveryError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if _, ok := status.FromError(err); ok {
+		return err
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return err
+	}
+	switch {
+	case errors.Is(err, replicationrecovery.ErrCheckpointNotFound):
+		return status.Error(codes.NotFound, "checkpoint was not found")
+	case errors.Is(err, replicationrecovery.ErrCheckpointNotReplicated),
+		errors.Is(err, replicationrecovery.ErrCheckpointCorrupted),
+		errors.Is(err, replicationrecovery.ErrCheckpointEpochMismatch),
+		errors.Is(err, replicationrecovery.ErrCheckpointSeqMismatch),
+		errors.Is(err, replicationrecovery.ErrRecoveryAborted):
+		return status.Error(codes.FailedPrecondition, "recovery prerequisites are not satisfied")
+	default:
+		return status.Error(codes.Internal, "recovery failed")
+	}
 }
 
 func (s *Service) hasRegion(name string) bool {

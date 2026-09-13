@@ -20,9 +20,17 @@ F7 adds business instrumentation for API Server authentication decisions and
 authorized audit queries. Those call sites update three families and attach a
 canonical UUID `request_id` through `AddWithExemplar` or
 `ObserveWithExemplar`. The API Server handler enables OpenMetrics content
-negotiation, which is required to transmit those exemplars. The remaining
-descriptors are still registration-only; a scrape exposes their business
-series only after a future call site creates a labelled sample.
+negotiation, which is required to transmit those exemplars. F10 activates
+`connection_test_total` after the executor durably completes a claimed test;
+F11 activates `console_request_total` and
+`console_render_duration_seconds`. F12 activates
+`apiserver_trusted_proxy_hsts_total` when the API Server emits HSTS for a
+trusted proxy request; sign-in and session-revoke descriptors remain
+registration-only because those flows are owned by the Console/auth boundary.
+F13 activates the Controller reconcile-duration sample with fixed `_unknown`
+tenant scope and a bounded outcome label.
+Phase 10 verifies that the API Server exposes the multi-region promotion,
+event, and recovery samples from one shared registry.
 
 ## Implementation status
 
@@ -32,13 +40,16 @@ The table separates descriptor availability from sampled runtime data.
 |---|---|---|---|
 | `apiserver_auth_request_total`, `apiserver_auth_request_duration_seconds` | api-server | F4 descriptor + `/metrics` | emitted by F7 authentication interceptor |
 | `apiserver_audit_query_duration_seconds` | api-server | F4 descriptor + `/metrics` | emitted by F7 authorized audit-query path |
-| remaining `apiserver_*` listed below | api-server | F4 descriptor + `/metrics` | pending |
+| `apiserver_sign_in_total` | api-server / Console BFF | F4 descriptor + Recorder method (slice 43.1) | **Emitted** by slice 43.1.5 (2026-09-08). Console BFF `Manager.CompleteLogin` calls `authmetrics.Recorder.ObserveSignIn` at every sign-in outcome: DENIED paths emit `outcome="rejected"`, session-creation failure emits `outcome="failure"`, success emits `outcome="success"`. `tenant_id` is the first key in `principal.Memberships` for the authenticated principal, or `_platform` for DENIED paths / principals with no memberships. Recorder routes every label value through `io.astrasync/control-plane/observability/normalize`. |
+| `apiserver_session_revoke_total` | api-server | F4 descriptor + Recorder method (slice 43.1) | Phase 24 slice 50 (ADR-068) observes at the API Server `RevokeConsoleSession` RPC success boundary. The RPC requires the platform_admin role; the handler invokes `authpostgres.Repository.RevokeConsoleSessionsForPrincipal` (same transaction as the audit row, ADR-037) and emits `apiserver_session_revoke_total` once per unique active tenant the target principal holds a membership in. `tenant_id` is the active tenant; `actor_id` is the authenticated caller's principal UUID (normalized via `normalize.NormalizeWorkerID`). The Recorder routes every label value through `observability/normalize`. |
+| `apiserver_trusted_proxy_hsts_total` | api-server | F4 descriptor + Recorder method (slice 43.1) | emitted by F12 trusted-proxy HSTS middleware; the observer now funnels the pre-auth tenant through `normalize` (slice 43.1) |
 | `scheduler_*` listed below | scheduler | F4 descriptor + `/metrics` | assignment, lease-takeover, and reconcile-duration samples emitted by the Scheduler |
-| `astrasync_multi_region_promotion_*` | control-plane replication | recorder registration; service exposition is embedding-owned | promotion attempt and duration samples emitted when a recorder is injected |
-| `connection_test_total` | connection-test-executor | F4 descriptor + `/metrics` | pending |
-| `console_*` listed below | console | F4 descriptor + `/metrics` | pending |
-| `auth_*` listed below | auth library | descriptor package only | pending |
-| controller-runtime built-ins | controller | upstream endpoint | emitted by controller-runtime |
+| `astrasync_multi_region_promotion_*`, `astrasync_multi_region_event_*`, `astrasync_multi_region_recovery_*` | control-plane replication | recorder registration; API Server exposition is embedding-owned | promotion, event-delivery, and recovery samples emitted when a recorder is injected; Phase 10 verifies the API Server scrape path |
+| `connection_test_total` | connection-test-executor | F4 descriptor + `/metrics` | emitted by F10 after durable test completion |
+| `console_*` listed below | console | F4 descriptor + `/metrics` | Console BFF request and render samples emitted by F11 |
+| `auth_*` listed below | auth library | descriptor package + `authmetrics.Recorder` | `auth_sign_in_total` is **emitted** by Console BFF `Manager.CompleteLogin` (slice 43.1.5, 2026-09-08); `auth_session_revoke_total` is **emitted** by admin CLI `revoke-session` (Phase 22 slice 48, ADR-065) |
+| `controller_job_controller_reconcile_duration_seconds` | controller | controller-runtime `/metrics` | emitted by F13 with a fixed `_unknown` tenant scope; slice 43.3 deletes the package-local normalize helpers in favour of `observability/normalize` |
+| `controller_job_state_total`, `controller_epoch_fence_total` | controller | controller-runtime `/metrics` | Phase 17 slice 43.3 (ADR-058) wired the Recorder; Phase 23 slice 49 (ADR-066) wires `controller_job_state_total` at the durable commit point via `observeTransition`; Phase 25 slice 51 (ADR-069) wires `controller_epoch_fence_total` at the durable commit point via `observeEpochFence` — the same `r.Jobs.Update(...)` boundary with epoch-comparison outcome derivation (`fenced` for a strictly higher epoch, `success` for unchanged, `failure` for lower). |
 | `coordinator_*`, `worker_*` listed below | Java data plane | F8 Micrometer registry + opt-in Worker `/metrics` | seven families emitted by checkpoint Coordinator and in-process Worker; spill bytes are sampled by the Worker-local exchange |
 
 ## Naming convention
@@ -95,19 +106,22 @@ specification overrides them.
 
 The API Server and auth descriptor packages define metrics that align with
 the audit event types. F7 activates the authentication decision counter and
-histogram plus the authorized audit-query histogram. The other rows remain
-descriptor-only.
+histogram plus the authorized audit-query histogram. F12 activates trusted
+proxy HSTS observations. Sign-in and session-revoke rows are tracked by
+Phase 17 / ADR-058 (slices 43.1 and 43.2): the API Server rows wait for a
+new RPC or a Console forwarder, and the auth-library rows wait for the
+admin CLI success boundaries to be instrumented.
 
 | Metric | Type | Labels | Description |
 |---|---|---|---|
 | `apiserver_auth_request_total` | counter | `tenant_id`, `outcome` | Completed API Server authentication and authorization decisions. |
 | `apiserver_auth_request_duration_seconds` | histogram | `tenant_id`, `outcome` | Decision time through authorization, excluding business-handler execution. |
-| `apiserver_sign_in_total` | counter | `tenant_id`, `outcome` | Sign-in events, including denied sign-ins. |
-| `apiserver_session_revoke_total` | counter | `tenant_id`, `actor_id` | Sessions revoked by the admin CLI or by the audit-driven revocation path. |
+| `apiserver_sign_in_total` | counter | `tenant_id`, `outcome` | Sign-in events, including denied sign-ins. **Emitted** by Console BFF `Manager.CompleteLogin` (Phase 17 slice 43.1.5, 2026-09-08). The Recorder routes every label value through `io.astrasync/control-plane/observability/normalize`. |
+| `apiserver_session_revoke_total` | counter | `tenant_id`, `actor_id` | Sessions revoked by the API Server `RevokeConsoleSession` RPC (Phase 24 slice 50, ADR-068) or the admin CLI path (Phase 22 / ADR-065). Recorder wired in Phase 17 slice 43.1; production call site landed in slice 50. |
 | `apiserver_audit_query_duration_seconds` | histogram | `tenant_id` | Time to fulfil one authorized audit query, including failures after authorization. |
-| `apiserver_trusted_proxy_hsts_total` | counter | `tenant_id` | HSTS responses reserved for trusted-proxy middleware instrumentation. |
-| `auth_sign_in_total` | counter | `tenant_id`, `outcome` | Auth-library sign-in descriptor; the admin CLI does not expose it. |
-| `auth_session_revoke_total` | counter | `tenant_id` | Auth-library revoke descriptor; the admin CLI does not expose it. |
+| `apiserver_trusted_proxy_hsts_total` | counter | `tenant_id` | HSTS responses emitted for HTTPS requests accepted from a trusted proxy; F12 records the pre-auth `_unknown` tenant value. |
+| `auth_sign_in_total` | counter | `tenant_id`, `outcome` | Auth-library sign-in descriptor. **Emitted** by Console BFF `Manager.CompleteLogin` (Phase 17 slice 43.1.5, 2026-09-08). Phase 17 slice 43.2 (ADR-058) wires a Recorder that routes every label value through `observability/normalize`. The Recorder uses `success | rejected | failure` as the outcome allowlist. |
+| `auth_session_revoke_total` | counter | `tenant_id` | Auth-library revoke descriptor. Phase 17 slice 43.2 (ADR-058) wires a Recorder that routes every label value through `observability/normalize`. Phase 22 slice 48 (ADR-065) observes at the admin CLI `revoke-session` success boundary. A `prometheus.Registry` is created per invocation; a structured log line (`slog` JSON) confirms the observation per tenant. The one-shot CLI uses log-dump emission; a long-running consumer (API Server, Console) can host the same Recorder for traditional scrape emission. `tenant_id` is derived by joining sessions to memberships (one observation per unique tenant the principal holds an active membership in). Because the registry is per-invocation, historical rate queries (e.g. `rate(auth_session_revoke_total[5m])`) require a long-running consumer; the log-dump is a best-effort one-shot signal. |
 
 The authentication `outcome` allowlist is:
 
@@ -136,17 +150,19 @@ emit `le` buckets; the dashboard recipes compose P50, P95, and P99 from them.
 
 The table reserves lifecycle metrics for the Controller and Scheduler
 (ADR-029, ADR-031). Scheduler emits assignment and lease-takeover samples;
-the named custom Controller metrics are not implemented by
-controller-runtime's generic collector.
+F13 adds the Controller reconcile-duration sample. The state-transition
+and epoch-fence families are tracked by Phase 17 slice 43.3 (ADR-058);
+their durable transition owners wire the call sites from the Controller
+reconcile boundary at the post-commit snapshot.
 
 | Metric | Type | Labels | Description |
 |---|---|---|---|
-| `controller_job_state_total` | counter | `tenant_id`, `namespace`, `from_state`, `to_state` | Job state transitions. |
-| `controller_job_controller_reconcile_duration_seconds` | histogram | `tenant_id`, `outcome` | Time to reconcile a single Job against the desired state. |
-| `controller_epoch_fence_total` | counter | `tenant_id`, `outcome` | Epoch-fence attempts from the Scheduler. |
-| `scheduler_job_assignment_total` | counter | `tenant_id`, `worker_id`, `outcome` | Assignment outcome when the Scheduler first dispatches a claimed execution. The current dispatch contract has no trusted tenant or target worker identity, so both labels are `_unknown`; `outcome` is `success`, `rejected`, or `failure`. |
-| `scheduler_lease_takeover_total` | counter | `tenant_id`, `outcome` | Successful dispatch-lease takeovers returned by the durable claim transaction. `tenant_id` is `_unknown` until the Scheduler receives a trusted tenant binding; `outcome` is `success`. |
-| `scheduler_job_reconcile_duration_seconds` | histogram | `tenant_id` | Time to reconcile one scheduled Job. |
+| `controller_job_state_total` | counter | `tenant_id`, `namespace`, `from_state`, `to_state` | Job state transitions. Phase 17 slice 43.3 (ADR-058) wires a Recorder that routes every label value through `observability/normalize`. Phase 23 slice 49 (ADR-066) observes at the controller reconcile boundary. The call site is the durable commit point: after `r.Jobs.Update(ctx, next, stored.Version)` returns nil — the moment the job repository has accepted the new state (PostgreSQL / etcd-backed). `tenant_id` is read from the SyncJob resource label `astrasync.io/tenant-id`; if absent, `_unknown` is emitted (enforced by `normalize.NormalizeTenant`). `namespace` is the Kubernetes namespace of the SyncJob resource. `from_state` / `to_state` are the job state before and after the transition, bounded by `normalizeStateValue` (length cap 32 + non-empty check; values not in the Job state machine collapse to `_unknown`). The recorder is nil-safe: if a Reconciler is constructed without a Recorder, the call site is silently dropped (the metric just does not fire). |
+| `controller_job_controller_reconcile_duration_seconds` | histogram | `tenant_id`, `outcome` | Time to reconcile a single `SyncJob`; F13 uses `_unknown` before a trusted tenant binding exists and records `success` or `failure`. Slice 43.3 deletes the package-local `normalizeTenant` / `normalizeOutcome` helpers in favour of the shared `observability/normalize` package (ADR-058 §3). |
+| `controller_epoch_fence_total` | counter | `tenant_id`, `outcome` | Epoch-fence observations at the Controller reconcile durable-commit boundary. Phase 17 slice 43.3 (ADR-058) wired the Recorder; Phase 25 slice 51 (ADR-069) observes at the controller reconcile boundary (`r.Jobs.Update(...)` returns nil). The `outcome` label derives from the epoch change direction: `fenced` for a strictly higher epoch (`next.Status.Epoch > stored.Status.Epoch`), `success` for unchanged epoch, `failure` for a lower epoch (safety fallback). The `tenant_id` label is read from the SyncJob resource label `astrasync.io/tenant-id`; if absent, `_unknown` is emitted (enforced by `normalize.NormalizeTenant`). The Recorder enforces the `success|fenced|failure` allowlist (ADR-058 §3); non-allowlisted values collapse to `failure`. The recorder is nil-safe: if a Reconciler is constructed without a Recorder, the call site is silently dropped. |
+| `scheduler_job_assignment_total` | counter | `tenant_id`, `worker_id`, `outcome` | Assignment outcome when the Scheduler first dispatches a claimed execution. The current dispatch contract has no trusted tenant or target worker identity, so both labels are `_unknown`; `outcome` is `success`, `rejected`, or `failure`. Phase 18 slice 44.1 (ADR-060) wires a Recorder that routes every label value through `io.astrasync/control-plane/observability/normalize`; the `worker_id` label uses `NormalizeWorkerID` and the `outcome` label uses the documented `success\|rejected\|failure` allowlist. |
+| `scheduler_lease_takeover_total` | counter | `tenant_id`, `outcome` | Successful dispatch-lease takeovers returned by the durable claim transaction. `tenant_id` is `_unknown` until the Scheduler receives a trusted tenant binding; `outcome` is `success`. Phase 18 slice 44.1 (ADR-060) wires a Recorder that routes the label through `normalize`; the `outcome` allowlist is the documented `success` only — non-allowlisted values collapse to `_unknown`. |
+| `scheduler_job_reconcile_duration_seconds` | histogram | `tenant_id` | Time to reconcile one scheduled Job. Phase 18 slice 44.1 (ADR-060) wires a Recorder that funnels `tenant_id` through `normalize`. |
 
 Future call-site instrumentation can correlate these metrics to audit rows
 through exemplars; that wiring is not present in the current implementation.
@@ -155,25 +171,29 @@ through exemplars; that wiring is not present in the current implementation.
 
 | Metric | Type | Labels | Description |
 |---|---|---|---|
-| `astrasync_multi_region_promotion_total` | counter | `target_region`, `outcome` | Promotion attempts after a promotion record is created; `outcome` is `success` or `failure`. |
+| `astrasync_multi_region_promotion_total` | counter | `target_region`, `outcome` | Promotion attempts after a promotion record is created; `outcome` is `success` or `failure`. Phase 21 slice 46.2 (ADR-063) wires a Recorder that routes `target_region` through `NormalizeFreeText` and `outcome` through `NormalizeOutcome` with `promotionOutcomeAllowlist`. |
 | `astrasync_multi_region_promotion_duration_seconds` | histogram | `target_region` | Duration of promotion attempts after a promotion record is created. |
-| `astrasync_multi_region_event_total` | counter | `peer_region`, `event_type`, `outcome` | Cross-region event delivery attempts. `event_type` is `checkpoint`, `topology`, or `health`; `outcome` is `success` or `failure`. |
+| `astrasync_multi_region_event_total` | counter | `peer_region`, `event_type`, `outcome` | Cross-region event delivery attempts. `event_type` is `checkpoint`, `topology`, or `health`; `outcome` is `success` or `failure`. Phase 21 slice 46.2 (ADR-063) wires a Recorder that routes `peer_region` through `NormalizeFreeText`, `event_type` through `NormalizeOutcome` with `eventTypeAllowlist`, and `outcome` through `NormalizeOutcome` with `eventOutcomeAllowlist`. |
 | `astrasync_multi_region_event_duration_seconds` | histogram | `peer_region`, `event_type` | Duration of cross-region event delivery attempts. |
-| `astrasync_multi_region_recovery_total` | counter | `target_region`, `outcome` | Checkpoint recovery attempts. `outcome` is `success` or `failure`; an unset target region is `_unknown`. |
+| `astrasync_multi_region_recovery_total` | counter | `target_region`, `outcome` | Checkpoint recovery attempts. `outcome` is `success` or `failure`; an unset target region is `_unknown`. Phase 21 slice 46.2 (ADR-063) wires a Recorder that routes `target_region` through `NormalizeFreeText` and `outcome` through `NormalizeOutcome` with `recoveryOutcomeAllowlist`. |
 | `astrasync_multi_region_recovery_duration_seconds` | histogram | `target_region` | Duration of checkpoint recovery attempts. |
 The recorder uses an injected Prometheus registerer so embedding services can expose the
 families from their own endpoint without creating a second listener or global registration.
+The API Server injects the recorder into the replication service and runtime,
+then combines that registry with its default registry on the optional
+`/metrics` listener.
 
 ## Connection test and Console metrics
 
-F4 registers the following descriptors and exposes them from the owning
-long-running executable. Their business call sites remain unwired.
+F4 registers the descriptors and exposes them from the owning long-running
+executables. F10 wires the Connection Test Executor completion path and F11
+wires the Console BFF request path.
 
 | Metric | Type | Labels | Description |
 |---|---|---|---|
-| `connection_test_total` | counter | `tenant_id`, `outcome` | Connection-test outcomes. |
-| `console_request_total` | counter | `tenant_id`, `outcome`, `handler` | Console request outcomes by stable handler name. |
-| `console_render_duration_seconds` | histogram | `handler` | Console rendering duration. |
+| `connection_test_total` | counter | `tenant_id`, `outcome` | Completed Connection Test Executor operations. `outcome` is `success`, `rejected` for an egress-policy denial, or `failure` for timeout, cancellation, credential, transport, or handshake failure. The sample is recorded only after the durable completion succeeds. Phase 19 slice 45.1 (ADR-061) wires a Recorder that routes both labels through `io.astrasync/control-plane/observability/normalize`; the `outcome` allowlist is the documented `success\|rejected\|failure` and the default value is `failure`. |
+| `console_request_total` | counter | `tenant_id`, `outcome`, `handler` | Console request outcomes by stable handler name. F11 records `success` for 2xx/3xx responses, `rejected` for 4xx responses, and `failure` for 5xx responses. The tenant comes from the server-written scope response header and falls back to `_unknown`. |
+| `console_render_duration_seconds` | histogram | `handler` | HTML response duration for the Console's fixed `static` handler. |
 
 ## Data plane metrics
 
@@ -240,10 +260,44 @@ duplicate the shape.
 
 F4 and F5 provide descriptor packages, HTTP exposition, and Helm discovery;
 F7 activates the three API Server SLO families, F8 activates all Java
-data-plane families, and F9 activates Scheduler assignment and lease-takeover
-samples. Business observations for the remaining API Server, Controller,
-Console, Connection Test Executor, and auth-library descriptors remain
-deferred. The landed work is recorded in [`changelog.md`](changelog.md).
+data-plane families, F9 activates Scheduler assignment and lease-takeover
+samples, F10 activates Connection Test Executor outcomes, F11 activates
+Console BFF request and render samples, F12 activates trusted-proxy HSTS
+samples, and F13 activates Controller reconcile duration. Phase 10
+verifies the API Server multi-region scrape path.
+
+Business observations for the remaining API Server, Controller
+lifecycle, and auth-library descriptors are tracked by Phase 17 and
+ADR-058, which records the recorder owner, call site, label
+normalization contract, and test contract for each pending row. All
+six Phase 17 backlog items are **emitted** as of Phase 25 (2026-09-08):
+
+| Backlog metric | Recorder owner | Phase 17 slice | ADR-058 section | Emitted |
+|---|---|---|---|---|
+| `apiserver_sign_in_total` | api-server | 43.1 | §2 | Phase 17 slice 43.1.5 (2026-09-08) |
+| `apiserver_session_revoke_total` | api-server | 43.1 + 50 | §2 | Phase 24 slice 50 (ADR-068) |
+| `auth_sign_in_total` | auth library | 43.2 | §2 | Phase 17 slice 43.1.5 (2026-09-08) |
+| `auth_session_revoke_total` | auth library | 43.2 | §2 | Phase 22 slice 48 (ADR-065) |
+| `controller_job_state_total` | controller | 43.3 + 49 | §2 | Phase 23 slice 49 (ADR-066) |
+| `controller_epoch_fence_total` | controller | 43.3 + 51 | §2 | Phase 25 slice 51 (ADR-069) |
+
+The backlog table above is frozen; future metrics activation follows the
+same slice pattern documented in ADR-058.
+
+OpenMetrics content negotiation (ADR-051 §130) remains a separate
+deferred decision; the `request_id` exemplar contract documented in
+ADR-047 §126 still requires that negotiation before exemplars can
+transmit. Phase 17 does not unblock that deferral.
+
+### Slice 43.0 — umbrella infrastructure
+
+Phase 17 slice 43.0 introduces the shared helper package
+`io.astrasync/control-plane/observability/normalize`. Slices 43.1,
+43.2, and 43.3 import `NormalizeTenant`, `NormalizeOutcome`, and
+`NormalizeWorkerID` from this package instead of re-implementing the
+helpers. The package documents the allowlist contract in
+`normalize.go` and enforces it through 12 boundary-driven unit tests
+in `normalize_test.go`.
 
 ## Inline placeholders for the populated handbook
 
