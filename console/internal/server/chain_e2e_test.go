@@ -30,8 +30,8 @@ import (
 // `scope.tenantID` for `session.Principal.ID` (or any other origin)
 // the cross-wired assertion fails with a clear chain[X] message:
 //
-//   "chain[egress] mismatch: backend.lastTenantID = X, want Y"
-//   "chain[cr-write] mismatch: cr.Scope.TenantID = X, want Y".
+//	"chain[egress] mismatch: backend.lastTenantID = X, want Y"
+//	"chain[cr-write] mismatch: cr.Scope.TenantID = X, want Y".
 func TestConsoleTenantIDEnvelopeChain_WritesSurface(t *testing.T) {
 	verifiedTenantID := testTenantID // the sole membership in fakeSessions
 
