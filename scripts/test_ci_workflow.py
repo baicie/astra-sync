@@ -164,8 +164,9 @@ class CIWorkflowPhase15CatalogTest(unittest.TestCase):
         cls.workflow = _read_workflow()
         cls.body = _step_body(cls.workflow, "Check deployment connector inventory")
 
-    def test_step_uses_dynamic_build_version(self):
-        self.assertIn("CATALOG_BUILD_VERSION: ${{ github.sha }}", self.workflow)
+    def test_step_uses_release_build_version(self):
+        self.assertIn("CATALOG_BUILD_VERSION: 0.8.0", self.workflow)
+        self.assertIn("astrasync-cli-0.8.0-all.jar", self.body)
         self.assertIn("--compiler-build $CATALOG_BUILD_VERSION", self.body)
 
     def test_step_falls_back_to_diff_catalog(self):
