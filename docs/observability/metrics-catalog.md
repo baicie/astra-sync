@@ -28,7 +28,9 @@ F11 activates `console_request_total` and
 trusted proxy request; sign-in and session-revoke descriptors remain
 registration-only because those flows are owned by the Console/auth boundary.
 F13 activates the Controller reconcile-duration sample with fixed `_unknown`
-tenant scope and a bounded outcome label.
+tenant scope and a bounded outcome label. Phase 59 (ADR-106) assigns one
+Console BFF request ID and enables OpenMetrics negotiation on the Console
+`/metrics` handler so request and render samples can carry bounded exemplars.
 Phase 10 verifies that the API Server exposes the multi-region promotion,
 event, and recovery samples from one shared registry.
 
@@ -143,10 +145,12 @@ tenant series.
 F7 attaches `request_id` exemplars to the authentication counter and
 histogram and to the audit-query histogram only when the value is a canonical
 lowercase UUID. Phase 57 (ADR-104) extends the same contract to API Server and
-auth-library sign-in and session-revoke counters. Other values still produce
-the bounded metric sample but no exemplar. `request_id` is never a normal
-time-series label. Histogram metrics emit `le` buckets; the dashboard recipes
-compose P50, P95, and P99 from them.
+auth-library sign-in and session-revoke counters. Phase 58 (ADR-105) adds
+per-tick Scheduler exemplars, and Phase 59 (ADR-106) adds Console BFF
+request-boundary exemplars. Other values still produce the bounded metric
+sample but no exemplar. `request_id` is never a normal time-series label.
+Histogram metrics emit `le` buckets; the dashboard recipes compose P50, P95,
+and P99 from them.
 
 ## Job lifecycle metrics
 
@@ -194,8 +198,8 @@ wires the Console BFF request path.
 | Metric | Type | Labels | Description |
 |---|---|---|---|
 | `connection_test_total` | counter | `tenant_id`, `outcome` | Completed Connection Test Executor operations. `outcome` is `success`, `rejected` for an egress-policy denial, or `failure` for timeout, cancellation, credential, transport, or handshake failure. The sample is recorded only after the durable completion succeeds. Phase 19 slice 45.1 (ADR-061) wires a Recorder that routes both labels through `io.astrasync/control-plane/observability/normalize`; the `outcome` allowlist is the documented `success\|rejected\|failure` and the default value is `failure`. |
-| `console_request_total` | counter | `tenant_id`, `outcome`, `handler` | Console request outcomes by stable handler name. F11 records `success` for 2xx/3xx responses, `rejected` for 4xx responses, and `failure` for 5xx responses. The tenant comes from the server-written scope response header and falls back to `_unknown`. |
-| `console_render_duration_seconds` | histogram | `handler` | HTML response duration for the Console's fixed `static` handler. |
+| `console_request_total` | counter | `tenant_id`, `outcome`, `handler` | Console request outcomes by stable handler name. F11 records `success` for 2xx/3xx responses, `rejected` for 4xx responses, and `failure` for 5xx responses. The tenant comes from the server-written scope response header and falls back to `_unknown`. Phase 59 (ADR-106) attaches the request-boundary canonical `request_id` exemplar. |
+| `console_render_duration_seconds` | histogram | `handler` | HTML response duration for the Console's fixed `static` handler. Phase 59 (ADR-106) attaches the request-boundary canonical `request_id` exemplar. |
 
 ## Data plane metrics
 
@@ -297,8 +301,10 @@ OpenMetrics content negotiation is enabled by ADR-095, honors HTTP quality
 values under ADR-096, and resolves media-range precedence under ADR-097.
 Phase 56 (ADR-103) implements the Java data-plane `request_id` exemplar
 contract documented in ADR-047 §126, and Phase 57 (ADR-104) completes the
-API Server and auth-library sign-in/session-revoke counters. Other metric
-owners remain responsible for adding their own exemplars.
+API Server and auth-library sign-in/session-revoke counters. Phase 58
+(ADR-105) adds Scheduler tick exemplars, and Phase 59 (ADR-106) adds Console
+BFF request boundary exemplars. Other metric owners remain responsible for
+adding their own exemplars.
 
 ### Slice 43.0 — umbrella infrastructure
 

@@ -15,7 +15,8 @@ trusted-proxy HSTS, and Controller reconcile families; remaining Go business
 call sites and Controller lifecycle owners remain deferred. Java data-plane
 request-ID exemplars are added by ADR-103, and auth sign-in/session-revoke
 exemplar coverage is completed by ADR-104. Scheduler tick exemplars and
-request-ID failure logs are added by ADR-105.
+request-ID failure logs are added by ADR-105. Console BFF request-boundary
+exemplars are added by ADR-106.
 
 ## Context
 

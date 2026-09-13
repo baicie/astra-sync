@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"io.astrasync/console/internal/authflow"
 )
 
 const (
@@ -16,13 +18,12 @@ const (
 )
 
 func observeRequests(next http.Handler, recorder RequestMetrics, clock func() time.Time) http.Handler {
-	if recorder == nil {
-		return next
-	}
 	if clock == nil {
 		clock = time.Now
 	}
 	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		requestID := ensureRequestID(request)
+		request = request.WithContext(authflow.WithRequestID(request.Context(), requestID))
 		started := clock()
 		observed := &observedResponseWriter{ResponseWriter: response}
 		next.ServeHTTP(observed, request)
@@ -38,8 +39,19 @@ func observeRequests(next http.Handler, recorder RequestMetrics, clock func() ti
 		handler := consoleHandlerName(request)
 		rendered := handler == "static" &&
 			strings.HasPrefix(strings.ToLower(observed.Header().Get("Content-Type")), "text/html")
-		recorder.ObserveRequest(trustedTenantID(observed), outcome, handler, duration, rendered)
+		if recorder != nil {
+			recorder.ObserveRequest(trustedTenantID(observed), outcome, handler, requestID, duration, rendered)
+		}
 	})
+}
+
+func ensureRequestID(request *http.Request) string {
+	requestID := strings.TrimSpace(request.Header.Get("X-Request-ID"))
+	if requestID == "" || len(requestID) > 128 {
+		requestID = uuid.NewString()
+	}
+	request.Header.Set("X-Request-ID", requestID)
+	return requestID
 }
 
 func trustedTenantID(response *observedResponseWriter) string {

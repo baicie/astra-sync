@@ -54,7 +54,7 @@ type SessionManager interface {
 
 // RequestMetrics records bounded Console request observations.
 type RequestMetrics interface {
-	ObserveRequest(tenantID, outcome, handler string, duration time.Duration, rendered bool)
+	ObserveRequest(tenantID, outcome, handler, requestID string, duration time.Duration, rendered bool)
 }
 
 type Config struct {
@@ -564,10 +564,7 @@ func (s *Server) backendContext(request *http.Request, session authflow.Session,
 // the authoritative tenant context to the control plane. ADR-072.
 func (s *Server) backendContextWithTenant(request *http.Request, session authflow.Session, timeout time.Duration, tenantID string) (context.Context, context.CancelFunc) {
 	ctx, cancel := context.WithTimeout(request.Context(), timeout)
-	requestID := strings.TrimSpace(request.Header.Get("X-Request-ID"))
-	if requestID == "" || len(requestID) > 128 {
-		requestID = uuid.NewString()
-	}
+	requestID := ensureRequestID(request)
 	ctx = authflow.WithRequestID(ctx, requestID)
 	if session.Record.Tokens.AccessToken != "" {
 		ctx = metadata.AppendToOutgoingContext(ctx, "authorization", "Bearer "+session.Record.Tokens.AccessToken,
