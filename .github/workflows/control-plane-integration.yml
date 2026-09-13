@@ -1,6 +1,6 @@
 name: control-plane-integration
 
-# Phase 35 (ADR-084) + Phase 36 (ADR-085) + Phase 37 (ADR-087).
+# Phase 35 (ADR-084) + Phase 36 (ADR-085) + Phase 37 (ADR-087) + Phase 39 (ADR-089).
 # Runs integration tests for:
 #   - PostgreSQL (control-plane/job/postgres/) using testcontainers-go
 #   - Controller (control-plane/controller/) using envtest
@@ -125,7 +125,8 @@ jobs:
             control-plane/job/postgres/repository_integration_test.go \
             control-plane/job/postgres/mutation_integration_test.go \
             control-plane/job/postgres/postgres_testcontainer_helper_test.go
-          # Phase 36 integration tests
+          # Phase 36 + Phase 39 integration tests
           grep -q "^//go:build integration$" \
             control-plane/controller/internal/controller/envtest_helper_test.go \
-            control-plane/controller/internal/controller/syncjob_controller_integration_test.go
+            control-plane/controller/internal/controller/syncjob_controller_integration_test.go \
+            control-plane/controller/internal/controller/manager_metrics_integration_test.go

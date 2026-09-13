@@ -184,7 +184,8 @@ the module's source, `go.mod`, and `go.sum`.
 1. **PostgreSQL + envtest:** validate finalizer cleanup across PostgreSQL and
    Kubernetes in one scenario.
 2. **Epoch fencing:** simulate a stale writer and assert ADR-006 behavior.
-3. **Controller metrics:** assert reconcile metrics during a real manager run.
+3. **Controller metrics:** completed in Phase 39 with
+   `manager_metrics_integration_test.go`.
 4. **Version automation:** keep `setup-envtest` and Kubernetes binaries aligned
    with `control-plane/controller/go.mod`.
 5. **Tenant-label admission:** completed in Phase 37 with the

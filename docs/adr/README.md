@@ -98,6 +98,7 @@ This directory contains the Architecture Decision Records (ADRs) for AstraSync.
 | [ADR-086](adr-086-syncjob-tenant-label-admission-correction.md) | SyncJob Tenant-Label Admission Correction (supersedes ADR-071 §2 after envtest proved CRD metadata CEL is not installable) | Accepted — enforcement restored by ADR-087 | 2026-09-13 |
 | [ADR-087](adr-087-syncjob-tenant-label-validating-admission-policy.md) | SyncJob Tenant-Label Validating Admission Policy (Kubernetes-native admission backstop for `metadata.labels`) | Accepted — GitOps lifecycle by ADR-088 | 2026-09-13 |
 | [ADR-088](adr-088-gitops-managed-cluster-prerequisites.md) | GitOps Management of AstraSync Cluster Prerequisites (CRD + admission policy, prune disabled) | Accepted | 2026-09-13 |
+| [ADR-089](adr-089-controller-manager-metrics-integration.md) | Controller Manager Metrics Integration Test (real manager lifecycle via envtest) | Accepted | 2026-09-13 |
 
 ## Template
 
