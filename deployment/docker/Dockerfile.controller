@@ -5,12 +5,14 @@ WORKDIR /app
 
 # Download the controller module and its replaced shared module independently.
 COPY control-plane/go.mod control-plane/go.sum ./control-plane/
+COPY control-plane/observability/go.mod control-plane/observability/go.sum ./control-plane/observability/
 COPY control-plane/controller/go.mod control-plane/controller/go.sum ./control-plane/controller/
 WORKDIR /app/control-plane/controller
 RUN go mod download
 
 # Copy source code
 COPY control-plane/job ../job
+COPY control-plane/observability ../observability
 COPY control-plane/controller ./
 
 # Build

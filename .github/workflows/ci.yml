@@ -423,15 +423,15 @@ jobs:
             --set console.enabled=true \
             --set connectionTestExecutor.enabled=true \
             --set monitoring.prometheus.enabled=false)"
-          if echo "${off_render}" | grep -q 'METRICS_LISTEN_ADDRESS'; then
+          if grep -q 'METRICS_LISTEN_ADDRESS' <<< "${off_render}"; then
             echo "::error::METRICS_LISTEN_ADDRESS leaked when monitoring.prometheus.enabled=false"
             exit 1
           fi
-          if echo "${off_render}" | grep -q 'name: metrics'; then
+          if grep -q 'name: metrics' <<< "${off_render}"; then
             echo "::error::metrics containerPort leaked when monitoring.prometheus.enabled=false"
             exit 1
           fi
-          log_level_count="$(echo "${off_render}" | grep -c 'name: LOG_LEVEL' || true)"
+          log_level_count="$(grep -c 'name: LOG_LEVEL' <<< "${off_render}" || true)"
           if [[ "${log_level_count}" -ne 4 ]]; then
             echo "::error::expected LOG_LEVEL for 4 observability-enabled components, got ${log_level_count}"
             exit 1
@@ -444,7 +444,7 @@ jobs:
             --set connectionTestExecutor.enabled=true \
             --set monitoring.prometheus.enabled=true)"
           for needle in 'containerPort: 9090' 'METRICS_LISTEN_ADDRESS' 'name: metrics'; do
-            if ! echo "${on_render}" | grep -q "${needle}"; then
+            if ! grep -q "${needle}" <<< "${on_render}"; then
               echo "::error::expected '${needle}' in rendered manifest when monitoring.prometheus.enabled=true"
               exit 1
             fi
@@ -456,7 +456,7 @@ jobs:
             --set console.enabled=true \
             --set monitoring.prometheus.enabled=true \
             --set monitoring.prometheus.serviceMonitor.enabled=true)"
-          sm_count="$(echo "${sm_render}" | grep -c '^kind: ServiceMonitor' || true)"
+          sm_count="$(grep -c '^kind: ServiceMonitor' <<< "${sm_render}" || true)"
           if [[ "${sm_count}" -lt 3 ]]; then
             echo "::error::expected at least 3 ServiceMonitor resources, got ${sm_count}"
             exit 1
@@ -487,7 +487,7 @@ jobs:
           #    otherwise values-production.yaml is being silently ignored.
           #    Templates render this as the value of an ENVIRONMENT env var,
           #    e.g. `name: ENVIRONMENT` followed by `value: production`.
-          prod_marker_count="$(echo "${prod_render}" | grep -cE '^[[:space:]]+value:[[:space:]]+"?production"?$' || true)"
+          prod_marker_count="$(grep -cE '^[[:space:]]+value:[[:space:]]+"?production"?$' <<< "${prod_render}" || true)"
           if [[ "${prod_marker_count}" -lt 1 ]]; then
             echo "::error::values-production.yaml did not propagate 'environment: production' to any component"
             exit 1
@@ -499,7 +499,7 @@ jobs:
           #    the cert secret volume on api-server. Missing any of these means
           #    the production profile regressed.
           for needle in 'kind: HorizontalPodAutoscaler' 'kind: PodDisruptionBudget' 'kind: NetworkPolicy' 'astrasync-api-server-mtls'; do
-            if ! echo "${prod_render}" | grep -q "${needle}"; then
+            if ! grep -q "${needle}" <<< "${prod_render}"; then
               echo "::error::expected '${needle}' in production render; values-production.yaml invariants regressed"
               exit 1
             fi
@@ -536,35 +536,35 @@ jobs:
           # 3 PDBs (api-server, controller, scheduler; compiler-validation not
           # expected because PDB.enabled stays on but compiler-validation.minAvailable=1
           # is exposed via values-staging.yaml; we count the 3 control-plane PDBs).
-          pdb_count="$(echo "${staging_render}" | grep -c '^kind: PodDisruptionBudget' || true)"
+          pdb_count="$(grep -c '^kind: PodDisruptionBudget' <<< "${staging_render}" || true)"
           if [[ "${pdb_count}" -ne 3 ]]; then
             echo "::error::expected 3 PDBs from staging values, got ${pdb_count}"
             exit 1
           fi
 
           # Autoscaling off → 0 HPAs.
-          hpa_count="$(echo "${staging_render}" | grep -c '^kind: HorizontalPodAutoscaler' || true)"
+          hpa_count="$(grep -c '^kind: HorizontalPodAutoscaler' <<< "${staging_render}" || true)"
           if [[ "${hpa_count}" -ne 0 ]]; then
             echo "::error::expected 0 HPAs from staging values, got ${hpa_count}"
             exit 1
           fi
 
           # NetworkPolicy off in staging.
-          np_count="$(echo "${staging_render}" | grep -c '^kind: NetworkPolicy' || true)"
+          np_count="$(grep -c '^kind: NetworkPolicy' <<< "${staging_render}" || true)"
           if [[ "${np_count}" -ne 0 ]]; then
             echo "::error::expected 0 NetworkPolicies from staging values, got ${np_count}"
             exit 1
           fi
 
           # environment=staging must reach at least one container env.
-          env_count="$(echo "${staging_render}" | grep -cE '^[[:space:]]+value:[[:space:]]+"?staging"?$' || true)"
+          env_count="$(grep -cE '^[[:space:]]+value:[[:space:]]+"?staging"?$' <<< "${staging_render}" || true)"
           if [[ "${env_count}" -lt 1 ]]; then
             echo "::error::values-staging.yaml did not propagate 'environment: staging' to any component"
             exit 1
           fi
 
           # DEBUG log level must reach at least one container env.
-          debug_count="$(echo "${staging_render}" | grep -cE '^[[:space:]]+value:[[:space:]]+"?DEBUG"?$' || true)"
+          debug_count="$(grep -cE '^[[:space:]]+value:[[:space:]]+"?DEBUG"?$' <<< "${staging_render}" || true)"
           if [[ "${debug_count}" -lt 1 ]]; then
             echo "::error::DEBUG log level did not propagate from values-staging.yaml"
             exit 1
