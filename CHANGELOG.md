@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Phase 51: extend structured log context to Coordinator-side
+  `RemoteBatchWorker` dispatch. Remote task start, completion, failure, and
+  checkpoint events now carry tenant/job identity and bounded outcomes.
+
 - Phase 50 (ADR-100): attach scoped `tenant_id`, `job_id`, `epoch`, `stage`,
   and `outcome` fields to Coordinator and Worker JSON logs. Nested MDC scopes
   are restored on success and failure; `request_id` propagation remains a

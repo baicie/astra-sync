@@ -40,6 +40,8 @@ credentials, connector options, SQL text, or free-form user input.
   tenant/job fields used by metrics.
 - Nested read/write/checkpoint stages restore the outer context when complete.
 - Worker executor threads receive stage-specific context independently.
+- Coordinator-side remote task dispatch uses the same identity context as the
+  Worker task it invokes.
 - Failure paths emit a structured warning before the original exception
   propagates.
 - No metric, protocol, deployment, or dependency change is required.
