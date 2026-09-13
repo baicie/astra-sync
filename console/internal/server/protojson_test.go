@@ -20,19 +20,19 @@ func TestProtoJSONJobSpecParsing(t *testing.T) {
 		wantErr string
 	}{
 		{
-			name: "csv_minimal_at_least_once",
+			name:    "csv_minimal_at_least_once",
 			rawJSON: `{"source":{"connector":"csv","options":{"path":"in.csv"}},"sink":{"connector":"csv","options":{"path":"out.csv"}},"delivery":{"guarantee":"DELIVERY_GUARANTEE_AT_LEAST_ONCE"}}`,
 		},
 		{
-			name: "csv_at_most_once",
+			name:    "csv_at_most_once",
 			rawJSON: `{"source":{"connector":"csv","options":{"path":"in.csv"}},"sink":{"connector":"csv","options":{"path":"out.csv"}},"delivery":{"guarantee":"DELIVERY_GUARANTEE_AT_MOST_ONCE"}}`,
 		},
 		{
-			name: "csv_exactly_once",
+			name:    "csv_exactly_once",
 			rawJSON: `{"source":{"connector":"csv","options":{"path":"in.csv"}},"sink":{"connector":"csv","options":{"path":"out.csv"}},"delivery":{"guarantee":"DELIVERY_GUARANTEE_EXACTLY_ONCE"}}`,
 		},
 		{
-			name: "no_options",
+			name:    "no_options",
 			rawJSON: `{"source":{"connector":"csv"},"sink":{"connector":"csv"},"delivery":{"guarantee":"DELIVERY_GUARANTEE_AT_MOST_ONCE"}}`,
 		},
 		{

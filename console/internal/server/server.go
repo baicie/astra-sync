@@ -25,8 +25,8 @@ import (
 
 	"io.astrasync/console/internal/authflow"
 	"io.astrasync/console/internal/syncjobcr"
-	"io.astrasync/console/pkg/bffbackend"
 	consolemetrics "io.astrasync/console/observability"
+	"io.astrasync/console/pkg/bffbackend"
 	jobv1 "io.astrasync/control-plane/api-server/gen/go/v1"
 	"io.astrasync/control-plane/auth"
 )

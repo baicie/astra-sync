@@ -70,17 +70,17 @@ func IsCanonicalTenantID(value string) bool {
 // control-plane/controller (and its controller-runtime dependency chain).
 // The fields must stay in sync with control-plane/controller/api/v1.SyncJob.
 type SyncJob struct {
-	APIVersion string         `json:"apiVersion,omitempty"`
-	Kind       string         `json:"kind,omitempty"`
+	APIVersion string          `json:"apiVersion,omitempty"`
+	Kind       string          `json:"kind,omitempty"`
 	Metadata   SyncJobMetadata `json:"metadata"`
-	Spec       SyncJobSpec   `json:"spec,omitempty"`
-	Status     *SyncJobStatus `json:"status,omitempty"`
+	Spec       SyncJobSpec     `json:"spec,omitempty"`
+	Status     *SyncJobStatus  `json:"status,omitempty"`
 }
 
 type SyncJobMetadata struct {
 	Name            string            `json:"name,omitempty"`
 	Namespace       string            `json:"namespace,omitempty"`
-	Labels         map[string]string `json:"labels,omitempty"`
+	Labels          map[string]string `json:"labels,omitempty"`
 	ResourceVersion string            `json:"resourceVersion,omitempty"`
 }
 
@@ -95,11 +95,11 @@ type SyncJobSpec struct {
 
 type SyncJobStatus struct {
 	Desired      string     `json:"desiredState,omitempty"`
-	State       string     `json:"state,omitempty"`
-	Epoch       int64      `json:"epoch,omitempty"`
-	RestartCount int32     `json:"restartCount,omitempty"`
-	StartTime   *time.Time `json:"startTime,omitempty"`
-	EndTime     *time.Time `json:"endTime,omitempty"`
+	State        string     `json:"state,omitempty"`
+	Epoch        int64      `json:"epoch,omitempty"`
+	RestartCount int32      `json:"restartCount,omitempty"`
+	StartTime    *time.Time `json:"startTime,omitempty"`
+	EndTime      *time.Time `json:"endTime,omitempty"`
 }
 
 // Scope is the Console scope needed to address a SyncJob CR.
@@ -196,8 +196,8 @@ type inClusterManager struct {
 	client  *http.Client
 }
 
-func (m *inClusterManager) Enabled() bool    { return true }
-func (m *inClusterManager) BaseURL() string  { return m.baseURL }
+func (m *inClusterManager) Enabled() bool            { return true }
+func (m *inClusterManager) BaseURL() string          { return m.baseURL }
 func (m *inClusterManager) HTTPClient() *http.Client { return m.client }
 
 // Token returns the cached in-cluster bearer token.
@@ -209,11 +209,11 @@ func (m *inClusterManager) DisabledReason() string { return "" }
 // disabledManager is the no-op Manager used in local dev and unit tests.
 type disabledManager struct{ reason string }
 
-func (disabledManager) Enabled() bool             { return false }
-func (disabledManager) BaseURL() string         { return "" }
+func (disabledManager) Enabled() bool            { return false }
+func (disabledManager) BaseURL() string          { return "" }
 func (disabledManager) HTTPClient() *http.Client { return nil }
 func (m disabledManager) DisabledReason() string { return m.reason }
-func (disabledManager) Token() string           { return "" }
+func (disabledManager) Token() string            { return "" }
 
 // MutationKind distinguishes Create / Update / Delete.
 type MutationKind string
@@ -230,11 +230,11 @@ const (
 type Outcome string
 
 const (
-	OutcomeSuccess            Outcome = "success"
+	OutcomeSuccess           Outcome = "success"
 	OutcomeAdmissionRejected Outcome = "admission_rejected"
-	OutcomeTimeout          Outcome = "timeout"
-	OutcomeInvalid          Outcome = "invalid"
-	OutcomeDisabled         Outcome = "disabled"
+	OutcomeTimeout           Outcome = "timeout"
+	OutcomeInvalid           Outcome = "invalid"
+	OutcomeDisabled          Outcome = "disabled"
 )
 
 // Recorder is the metric sink for DualWriter outcomes.
@@ -306,14 +306,14 @@ func NewDualWriter(manager Manager, recorder Recorder, retryDelays []time.Durati
 	}
 	return &realDualWriter{
 		manager:     manager,
-		recorder:   recorder,
+		recorder:    recorder,
 		retryDelays: retryDelays,
 	}
 }
 
 type realDualWriter struct {
 	manager     Manager
-	recorder   Recorder
+	recorder    Recorder
 	retryDelays []time.Duration
 }
 
@@ -524,7 +524,7 @@ func (noopRecorder) RecordDualWrite(MutationKind, Outcome) {}
 
 // Recording is an in-memory Recorder for tests.
 type Recording struct {
-	mu          sync.Mutex
+	mu           sync.Mutex
 	Observations []RecordedDualWrite
 }
 

@@ -18,12 +18,12 @@ import (
 
 // fakeStore implements auth.ConsoleSessionStore for sign-in metric tests.
 type fakeStore struct {
-	consumeErr          error
-	consumeTransaction  auth.LoginTransaction
-	createSessionErr    error
-	createSessionCreds  auth.SessionCredentials
-	resolveSessionErr   error
-	resolveSessionRec   auth.ConsoleSession
+	consumeErr         error
+	consumeTransaction auth.LoginTransaction
+	createSessionErr   error
+	createSessionCreds auth.SessionCredentials
+	resolveSessionErr  error
+	resolveSessionRec  auth.ConsoleSession
 }
 
 func (f *fakeStore) ConsumeLoginTransaction(ctx context.Context, state, browserBinding string) (auth.LoginTransaction, error) {

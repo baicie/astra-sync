@@ -180,7 +180,7 @@ func TestRecorderScrapeIsBoundedAcrossDistinctInputs(t *testing.T) {
 	// (uppercase region is valid free-text; empty collapses to _unknown).
 	recorder.ObservePromotion(validRegion, metrics.OutcomeSuccess, time.Millisecond)
 	recorder.ObservePromotion("US-EAST-1", metrics.OutcomeSuccess, time.Millisecond) // distinct from validRegion (case preserved)
-	recorder.ObservePromotion("", metrics.OutcomeSuccess, time.Millisecond)           // -> _unknown/success (distinct from above)
+	recorder.ObservePromotion("", metrics.OutcomeSuccess, time.Millisecond)          // -> _unknown/success (distinct from above)
 	recorder.ObservePromotion(validRegion, metrics.OutcomeFailure, time.Millisecond)
 	recorder.ObservePromotion(validRegion, "OK", time.Millisecond) // -> validRegion/failure (same as above)
 	// Distinct series: validRegion/success, US-EAST-1/success, _unknown/success, validRegion/failure = 4
@@ -195,8 +195,8 @@ func TestRecorderScrapeIsBoundedAcrossDistinctInputs(t *testing.T) {
 
 	// Recovery: distinct inputs collapse to bounded series.
 	recorder.ObserveRecovery(validRegion, metrics.OutcomeSuccess, time.Millisecond)
-	recorder.ObserveRecovery("", metrics.OutcomeFailure, time.Millisecond) // -> _unknown/failure
-	recorder.ObserveRecovery(validRegion, "OK", time.Millisecond)          // -> validRegion/failure (same as below)
+	recorder.ObserveRecovery("", metrics.OutcomeFailure, time.Millisecond)                       // -> _unknown/failure
+	recorder.ObserveRecovery(validRegion, "OK", time.Millisecond)                                // -> validRegion/failure (same as below)
 	recorder.ObserveRecovery(strings.Repeat("z", 200), metrics.OutcomeSuccess, time.Millisecond) // -> _unknown/success (same as 1st)
 	recorder.ObserveRecovery(validRegion, metrics.OutcomeFailure, time.Millisecond)
 	// Distinct series: validRegion/success, _unknown/failure, validRegion/failure, _unknown/success = 4

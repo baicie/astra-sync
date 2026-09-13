@@ -47,14 +47,14 @@ func TestNormalizeTenant_should_return_unknown_when_input_is_not_canonical(t *te
 	// The catalog only accepts the canonical lowercase form; uppercase,
 	// braces, and curly braces around a UUID must drop to _unknown.
 	cases := []string{
-		"0190F7C4-6C8D-7A01-9D2B-1ECABDFF0011",  // uppercase
+		"0190F7C4-6C8D-7A01-9D2B-1ECABDFF0011",   // uppercase
 		"{0190f7c4-6c8d-7a01-9d2b-1ecabdff0011}", // brace form
 		"urn:uuid:0190f7c4-6c8d-7a01-9d2b-1ecabdff0011",
-		"alice@acme.example",                       // OIDC subject
-		"change-me",                                // explicit fixture placeholder
+		"alice@acme.example", // OIDC subject
+		"change-me",          // explicit fixture placeholder
 		"plain text",
 		"123",
-		"0190f7c4-6c8d-7a01-9d2b-1ecabdff0011 ",    // trailing space (TrimSpace covers it; we still expect canonical)
+		"0190f7c4-6c8d-7a01-9d2b-1ecabdff0011 ", // trailing space (TrimSpace covers it; we still expect canonical)
 	}
 	for _, value := range cases {
 		got := normalize.NormalizeTenant(value)

@@ -25,13 +25,13 @@ const mutationTenantMetadata = "x-astra-tenant-id"
 // spinning up a real gRPC server.
 type jobMutationBackend struct {
 	fakeBFFBackend
-	createCalls int
-	updateCalls int
-	deleteCalls int
-	startCalls  int
-	stopCalls   int
-	validateCalls int
-	lastTenantID string
+	createCalls        int
+	updateCalls        int
+	deleteCalls        int
+	startCalls         int
+	stopCalls          int
+	validateCalls      int
+	lastTenantID       string
 	lastIdempotencyKey string
 }
 

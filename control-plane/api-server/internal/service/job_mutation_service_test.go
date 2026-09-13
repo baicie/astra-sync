@@ -215,7 +215,7 @@ func TestTransactionalJobCreatePrefersAttachedTenantID(t *testing.T) {
 	ctx, err := auth.WithPrincipal(context.Background(), auth.Principal{
 		ID: "job-operator", Subject: "job-operator", Active: true, PolicyRevision: "policy-1",
 		Memberships: map[string]auth.Membership{
-			attachedTenantID:      attachedMembership,
+			attachedTenantID:   attachedMembership,
 			membershipTenantID: mustMembership(t, membershipTenantID, true),
 		},
 	})

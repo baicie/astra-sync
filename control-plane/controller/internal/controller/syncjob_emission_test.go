@@ -179,12 +179,12 @@ func TestObserveTransitionNilResourceIsNoop(t *testing.T) {
 // controller-runtime global registry.
 func TestObserveEpochFenceEmitsCorrectOutcome(t *testing.T) {
 	cases := []struct {
-		name           string
-		labels         map[string]string
-		storedEpoch    int64
-		nextEpoch      int64
-		wantTenant     string
-		wantOutcome    string
+		name        string
+		labels      map[string]string
+		storedEpoch int64
+		nextEpoch   int64
+		wantTenant  string
+		wantOutcome string
 	}{
 		{
 			name:        "fenced_when_epoch_increments",

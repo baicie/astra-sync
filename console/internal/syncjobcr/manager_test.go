@@ -82,8 +82,8 @@ func TestRealDualWriterDisabledManager(t *testing.T) {
 
 func TestRealDualWriterCreateSuccess(t *testing.T) {
 	var (
-		gotToken  string
-		gotBody   SyncJob
+		gotToken string
+		gotBody  SyncJob
 	)
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotToken = r.Header.Get("Authorization")
@@ -367,9 +367,9 @@ type fixedManager struct {
 	client  *http.Client
 }
 
-func (m *fixedManager) Enabled() bool    { return true }
-func (m *fixedManager) BaseURL() string  { return m.baseURL }
+func (m *fixedManager) Enabled() bool            { return true }
+func (m *fixedManager) BaseURL() string          { return m.baseURL }
 func (m *fixedManager) HTTPClient() *http.Client { return m.client }
 
-func (m *fixedManager) Token() string { return m.token }
+func (m *fixedManager) Token() string          { return m.token }
 func (m *fixedManager) DisabledReason() string { return "" }

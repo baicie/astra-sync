@@ -407,7 +407,7 @@ func TestAccessServiceRevokeConsoleSessionRequiresPlatformAdmin(t *testing.T) {
 		t.Fatalf("principal context: %v", err)
 	}
 	if _, err := serviceUnderTest.RevokeConsoleSession(ctx, &controlv1.RevokeConsoleSessionRequest{
-		PrincipalId: accessPrincipalID,
+		PrincipalId:    accessPrincipalID,
 		IdempotencyKey: fixtureIdempotencyKey("access-revoke-console-session-denied"),
 	}); status.Code(err) != codes.PermissionDenied {
 		t.Fatalf("expected platform_admin denial, got %v", err)
@@ -445,7 +445,7 @@ func TestAccessServiceRevokeConsoleSessionEmitsPerTenant(t *testing.T) {
 		t.Fatalf("principal context: %v", err)
 	}
 	response, err := serviceUnderTest.RevokeConsoleSession(ctx, &controlv1.RevokeConsoleSessionRequest{
-		PrincipalId: accessPrincipalID,
+		PrincipalId:    accessPrincipalID,
 		IdempotencyKey: fixtureIdempotencyKey("access-revoke-console-session-success"),
 	})
 	if err != nil {
@@ -499,7 +499,7 @@ func TestAccessServiceRevokeConsoleSessionRejectsInvalidIdempotencyKey(t *testin
 		t.Fatalf("principal context: %v", err)
 	}
 	if _, err := serviceUnderTest.RevokeConsoleSession(ctx, &controlv1.RevokeConsoleSessionRequest{
-		PrincipalId: accessPrincipalID,
+		PrincipalId:    accessPrincipalID,
 		IdempotencyKey: "short",
 	}); status.Code(err) != codes.InvalidArgument {
 		t.Fatalf("expected idempotency-key rejection, got %v", err)
@@ -524,7 +524,7 @@ func TestAccessServiceRevokeConsoleSessionRejectsMalformedPrincipal(t *testing.T
 		t.Fatalf("principal context: %v", err)
 	}
 	if _, err := serviceUnderTest.RevokeConsoleSession(ctx, &controlv1.RevokeConsoleSessionRequest{
-		PrincipalId: "bad principal",
+		PrincipalId:    "bad principal",
 		IdempotencyKey: fixtureIdempotencyKey("access-revoke-console-session-bad-principal"),
 	}); status.Code(err) != codes.InvalidArgument {
 		t.Fatalf("expected malformed-principal rejection, got %v", err)
@@ -546,7 +546,7 @@ func TestAccessServiceRevokeConsoleSessionRepositoryErrorIsInternal(t *testing.T
 		t.Fatalf("principal context: %v", err)
 	}
 	if _, err := serviceUnderTest.RevokeConsoleSession(ctx, &controlv1.RevokeConsoleSessionRequest{
-		PrincipalId: accessPrincipalID,
+		PrincipalId:    accessPrincipalID,
 		IdempotencyKey: fixtureIdempotencyKey("access-revoke-console-session-internal"),
 	}); status.Code(err) != codes.Internal {
 		t.Fatalf("expected internal error sanitization, got %v", err)
@@ -568,7 +568,7 @@ func TestAccessServiceRevokeConsoleSessionAuditFailureIsInternal(t *testing.T) {
 		t.Fatalf("principal context: %v", err)
 	}
 	if _, err := serviceUnderTest.RevokeConsoleSession(ctx, &controlv1.RevokeConsoleSessionRequest{
-		PrincipalId: accessPrincipalID,
+		PrincipalId:    accessPrincipalID,
 		IdempotencyKey: fixtureIdempotencyKey("access-revoke-console-session-audit-failure"),
 	}); status.Code(err) != codes.Internal {
 		t.Fatalf("expected audit failure to be internal, got %v", err)
@@ -585,7 +585,7 @@ func TestAccessServiceRevokeConsoleSessionRequiresAuthentication(t *testing.T) {
 		t.Fatalf("new access service: %v", err)
 	}
 	if _, err := serviceUnderTest.RevokeConsoleSession(context.Background(), &controlv1.RevokeConsoleSessionRequest{
-		PrincipalId: accessPrincipalID,
+		PrincipalId:    accessPrincipalID,
 		IdempotencyKey: fixtureIdempotencyKey("access-revoke-console-session-no-auth"),
 	}); status.Code(err) != codes.Unauthenticated {
 		t.Fatalf("expected unauthenticated denial, got %v", err)
@@ -604,17 +604,17 @@ func TestAccessServiceRevokeConsoleSessionRejectsNilRequest(t *testing.T) {
 }
 
 type fakeAccessRepository struct {
-	mu            sync.Mutex
-	members       map[string][]auth.TenantMember
-	auditWrites   []auth.SecurityAuditEvent
-	grantErr      error
-	revokeErr     error
-	auditErr      error
-	platformGrant auth.PlatformRoleGrant
-	platformErr   error
+	mu                     sync.Mutex
+	members                map[string][]auth.TenantMember
+	auditWrites            []auth.SecurityAuditEvent
+	grantErr               error
+	revokeErr              error
+	auditErr               error
+	platformGrant          auth.PlatformRoleGrant
+	platformErr            error
 	consoleSessionsRevoked int64
-	consoleTenants          []string
-	consoleErr              error
+	consoleTenants         []string
+	consoleErr             error
 }
 
 func (r *fakeAccessRepository) ResolvePrincipalByID(_ context.Context, principalID string) (auth.Principal, error) {

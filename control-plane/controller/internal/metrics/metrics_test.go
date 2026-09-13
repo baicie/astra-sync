@@ -130,11 +130,11 @@ func TestRecorderJobStateTransitionsEmitsBoundedSeries(t *testing.T) {
 // fence of an obsolete writer and is exclusive to this metric.
 func TestRecorderEpochFenceEnforcesAllowlist(t *testing.T) {
 	cases := []struct {
-		name         string
-		tenantID     string
-		outcome      string
-		wantTenant   string
-		wantOutcome  string
+		name        string
+		tenantID    string
+		outcome     string
+		wantTenant  string
+		wantOutcome string
 	}{
 		{name: "happy_canonical_success", tenantID: canonicalTenantUUID, outcome: "success",
 			wantTenant: canonicalTenantUUID, wantOutcome: "success"},

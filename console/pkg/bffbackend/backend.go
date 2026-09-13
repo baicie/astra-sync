@@ -12,8 +12,8 @@ package bffbackend
 import (
 	"context"
 
-	jobv1 "io.astrasync/control-plane/api-server/gen/go/v1"
 	"google.golang.org/protobuf/types/known/emptypb"
+	jobv1 "io.astrasync/control-plane/api-server/gen/go/v1"
 )
 
 // Backend is the gRPC client surface the Console BFF delegates to.
